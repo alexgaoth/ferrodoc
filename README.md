@@ -40,7 +40,7 @@ i.e. what a pipeline actually pays in each model:
 | input | ferrodoc (in-process) | pandoc (subprocess) | ratio |
 |---|---|---|---|
 | 15.5 KB (concatenated spec examples) | 1.97 ms | 137.4 ms | ~70× |
-| 0.6 KB README | 45 µs | 25.1 ms | ~554× |
+| 0.6 KB (`corpus/readme-style.md`) | 45 µs | 25.1 ms | ~554× |
 
 The small-document case is dominated by pandoc's process startup — which is
 exactly the cost every per-document subprocess pipeline pays today.

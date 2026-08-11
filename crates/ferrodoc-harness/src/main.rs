@@ -23,7 +23,8 @@ fn main() -> Result<()> {
     let iters = take_option(&mut args, "--iters")?
         .map(|v| v.parse::<u32>().context("--iters expects a number"))
         .transpose()?
-        .unwrap_or(50);
+        .unwrap_or(50)
+        .max(1);
     match args.first().map(String::as_str) {
         Some("diff-ast") => diff_ast(&args[1..], verbose, fail_under),
         Some("diff-spec") => diff_spec(&args[1..], verbose, fail_under),
@@ -224,9 +225,18 @@ fn first_line_divergence(ours: &str, theirs: &str) -> String {
         "line counts differ ({} vs {}); ours ends {:?}, theirs ends {:?}",
         ours.lines().count(),
         theirs.lines().count(),
-        &ours[ours.len().saturating_sub(60)..],
-        &theirs[theirs.len().saturating_sub(60)..],
+        char_safe_tail(ours, 60),
+        char_safe_tail(theirs, 60),
     )
+}
+
+/// The last `n` bytes of `s`, moved forward to a UTF-8 char boundary.
+fn char_safe_tail(s: &str, n: usize) -> &str {
+    let mut start = s.len().saturating_sub(n);
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    &s[start..]
 }
 
 /// Benchmark the in-process pipeline against the pandoc subprocess.

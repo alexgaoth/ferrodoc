@@ -362,7 +362,9 @@ fn write_attr(out: &mut String, attr: &Attr) {
     }
     for (key, value) in &attr.attributes {
         out.push(' ');
-        out.push_str(key);
+        // Keys come from the same untrusted AST as values; drop characters
+        // that could break out of the tag.
+        out.extend(key.chars().filter(|c| !c.is_whitespace() && !"\"'<>=/&".contains(*c)));
         out.push_str("=\"");
         escape_attribute(out, value);
         out.push('"');
@@ -406,21 +408,14 @@ fn escape_text(out: &mut String, text: &str) {
 }
 
 /// Escape code-block content: unlike inline code (`&`, `<`, `>` only),
-/// pandoc also escapes `"` and `'` inside `<pre><code>`.
+/// pandoc also escapes `"` and `'` inside `<pre><code>` — the same set as
+/// attribute values.
 fn escape_code_block(out: &mut String, text: &str) {
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            ch => out.push(ch),
-        }
-    }
+    escape_attribute(out, text);
 }
 
-/// Escape attribute values: `&`, `<`, `>`, `"`.
+/// Escape attribute values: `&`, `<`, `>`, `"`, and `'` as `&#39;`
+/// (pandoc escapes apostrophes in every attribute context).
 fn escape_attribute(out: &mut String, text: &str) {
     for ch in text.chars() {
         match ch {
@@ -428,6 +423,7 @@ fn escape_attribute(out: &mut String, text: &str) {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
             ch => out.push(ch),
         }
     }
