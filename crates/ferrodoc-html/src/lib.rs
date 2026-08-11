@@ -382,8 +382,8 @@ fn collect_plain(out: &mut String, inlines: &[Inline]) {
     for inline in inlines {
         match inline {
             Inline::Str(s) | Inline::Code(_, s) | Inline::Math(_, s) => out.push_str(s),
-            Inline::Space | Inline::SoftBreak => out.push(' '),
-            Inline::LineBreak => out.push('\n'),
+            // Pandoc's alt-text stringify renders every break as a space.
+            Inline::Space | Inline::SoftBreak | Inline::LineBreak => out.push(' '),
             Inline::Emph(i) | Inline::Strong(i) | Inline::Strikeout(i)
             | Inline::Superscript(i) | Inline::Subscript(i) | Inline::SmallCaps(i)
             | Inline::Underline(i) | Inline::Quoted(_, i) | Inline::Cite(_, i)
@@ -459,6 +459,14 @@ mod tests {
         assert_eq!(
             html("```rust\nfn x() {}\n```\n"),
             "<pre class=\"rust\"><code>fn x() {}</code></pre>\n"
+        );
+    }
+
+    #[test]
+    fn hard_break_in_alt_text_becomes_space() {
+        assert_eq!(
+            html("![a hard\\\nbreak](x.png)\n"),
+            "<p><img src=\"x.png\" alt=\"a hard break\" /></p>\n"
         );
     }
 
