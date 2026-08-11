@@ -1,0 +1,16 @@
+[package]
+name = "ferrodoc-html"
+description = "HTML writer for the ferrodoc (pandoc-compatible) AST"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ferrodoc-ast = { workspace = true }
+
+[dev-dependencies]
+ferrodoc-markdown = { workspace = true }
+
+[lints]
+workspace = true

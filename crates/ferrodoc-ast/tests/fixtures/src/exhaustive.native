@@ -1,0 +1,53 @@
+Pandoc
+  (Meta {unMeta = fromList
+    [ ("metastring", MetaString "a plain string")
+    , ("metamap", MetaMap (fromList [("inner", MetaBool False)]))
+    ]})
+  [ Para
+      [ Underline [Str "underlined"]
+      , SmallCaps [Str "small", Space, Str "caps"]
+      , Quoted SingleQuote [Str "squote"]
+      , Quoted DoubleQuote [Str "dquote"]
+      ]
+  , Para
+      [ Cite
+          [ Citation {citationId = "supp", citationPrefix = [Str "see"], citationSuffix = [Str "p.", Space, Str "3"], citationMode = SuppressAuthor, citationNoteNum = 1, citationHash = 0}
+          , Citation {citationId = "intext", citationPrefix = [], citationSuffix = [], citationMode = AuthorInText, citationNoteNum = 2, citationHash = 0}
+          , Citation {citationId = "norm", citationPrefix = [], citationSuffix = [], citationMode = NormalCitation, citationNoteNum = 3, citationHash = 0}
+          ]
+          [Str "[-@supp;", Space, Str "@intext;", Space, Str "@norm]"]
+      ]
+  , OrderedList (3, UpperRoman, DefaultDelim) [[Plain [Str "ur"]]]
+  , OrderedList (1, UpperAlpha, TwoParens) [[Plain [Str "ua"]]]
+  , OrderedList (5, LowerRoman, OneParen) [[Plain [Str "lr"]]]
+  , OrderedList (1, LowerAlpha, Period) [[Plain [Str "la"]]]
+  , OrderedList (1, Example, Period) [[Plain [Str "ex"]]]
+  , OrderedList (1, DefaultStyle, Period) [[Plain [Str "ds"]]]
+  , OrderedList (1, Decimal, Period) [[Plain [Str "dec"]]]
+  , Table
+      ("tblid", ["tblcls"], [("tk", "tv")])
+      (Caption (Just [Str "short", Space, Str "caption"]) [Para [Str "The", Space, Str "full", Space, Str "caption."]])
+      [(AlignLeft, ColWidth 0.25), (AlignRight, ColWidth 0.375), (AlignCenter, ColWidthDefault), (AlignDefault, ColWidthDefault)]
+      (TableHead ("thid", [], [])
+        [ Row ("rowid", [], [])
+            [ Cell ("cellid", ["cellcls"], []) AlignCenter (RowSpan 2) (ColSpan 1) [Plain [Str "hc1"]]
+            , Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 3) [Plain [Str "hc2"]]
+            ]
+        ])
+      [ TableBody ("", [], []) (RowHeadColumns 1)
+          [ Row ("", [], []) [Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 4) [Plain [Str "intermediate", Space, Str "head"]]] ]
+          [ Row ("", [], [])
+              [ Cell ("", [], []) AlignLeft (RowSpan 1) (ColSpan 1) [Plain [Str "b1"]]
+              , Cell ("", [], []) AlignRight (RowSpan 1) (ColSpan 2) [Plain [Str "b2"]]
+              , Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 1) [Para [Str "b3"]]
+              ]
+          ]
+      ]
+      (TableFoot ("tfid", [], [])
+        [Row ("", [], []) [Cell ("", [], []) AlignDefault (RowSpan 1) (ColSpan 4) [Plain [Str "foot"]]]])
+  , Figure ("figid", ["figcls"], [])
+      (Caption Nothing [Para [Str "fig", Space, Str "caption"]])
+      [Para [Image ("", [], []) [Str "alt"] ("fig.png", "")]]
+  , LineBlock [[Str "line", Space, Str "one"], [Str "line", Space, Str "two"]]
+  , RawBlock (Format "tex") "\\newpage"
+  ]

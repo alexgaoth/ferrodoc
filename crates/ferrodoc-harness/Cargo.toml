@@ -1,0 +1,19 @@
+[package]
+name = "ferrodoc-harness"
+description = "Differential test harness: ferrodoc vs pandoc, plus CommonMark spec runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ferrodoc-ast = { workspace = true }
+ferrodoc-markdown = { workspace = true }
+ferrodoc-html = { workspace = true }
+ferrodoc-text = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+[lints]
+workspace = true
