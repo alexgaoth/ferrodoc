@@ -19,13 +19,13 @@
 //!   blank lines that follow it, plus one bonus newline when only blank
 //!   lines separate it from EOF.
 //!
-//! Known divergence (documented, not silently ignored): in pathological
-//! nested-delimiter runs such as `*_*_deep_*_*`, comrak resolves emphasis
-//! the way the cmark reference implementation does, while pandoc's
-//! commonmark-hs builds a structurally different tree. Reproducing that
-//! would require replacing comrak's inline parser and is out of scope for
-//! this reader; ordinary emphasis, including intraword and mismatched
-//! delimiters like `**a* b`, matches pandoc exactly.
+//! Where comrak's tree differs structurally from pandoc's, the mapper
+//! normalizes: carriage returns are removed before parsing (pandoc's
+//! `crFilter`), directly-adjacent same-type `Emph`/`Strong` siblings are
+//! merged (`_a_*b*` is one `Emph` in pandoc, two in comrak), and a
+//! paragraph consisting of link reference definitions plus a dash-run
+//! underline becomes the `HorizontalRule` pandoc produces (comrak emits a
+//! literal `---` paragraph there).
 
 use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue};
 use comrak::{Arena, Options, parse_document};
@@ -63,6 +63,17 @@ impl Src<'_> {
             .skip(after)
             .all(|l| l.trim().is_empty())
     }
+
+    /// 1-based line lookup, as used by comrak's sourcepos.
+    fn line(&self, number: usize) -> &str {
+        self.lines.get(number.wrapping_sub(1)).copied().unwrap_or("")
+    }
+}
+
+/// The first character of a line after skipping blockquote markers and
+/// spaces — the character that decides what block the line starts.
+fn first_nonmarker_char(line: &str) -> Option<char> {
+    line.chars().find(|&c| c != '>' && c != ' ')
 }
 
 /// Number of lines in a newline-terminated literal (its trailing newline
@@ -71,16 +82,18 @@ fn literal_lines(literal: &str) -> usize {
     literal.split('\n').count() - usize::from(literal.ends_with('\n') || literal.is_empty())
 }
 
-/// Expand tabs to 4-column tab stops (counting one column per `char`) and
-/// guarantee a trailing newline, exactly like pandoc's tokenizer.
+/// Expand tabs to 4-column tab stops (counting one column per `char`),
+/// remove carriage returns, and guarantee a trailing newline, exactly like
+/// pandoc's tokenizer (`crFilter` + tab expansion).
 fn preprocess(input: &str) -> Cow<'_, str> {
-    if !input.contains('\t') && input.ends_with('\n') {
+    if !input.contains('\t') && !input.contains('\r') && input.ends_with('\n') {
         return Cow::Borrowed(input);
     }
     let mut out = String::with_capacity(input.len() + 1);
     let mut col = 0usize;
     for ch in input.chars() {
         match ch {
+            '\r' => {}
             '\n' => {
                 out.push('\n');
                 col = 0;
@@ -116,7 +129,23 @@ fn blocks<'a>(
 fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
-        NodeValue::Paragraph => Some(Block::Para(inlines(node.children()))),
+        NodeValue::Paragraph => {
+            let content = inlines(node.children());
+            // Comrak quirk: a paragraph of link reference definitions whose
+            // last line is a dash-run comes out as a literal `---` paragraph;
+            // pandoc consumes the definitions and reads the dashes as a
+            // thematic break. Detect via the paragraph's first source line
+            // (a reference definition starts with `[`), which also excludes
+            // lookalikes such as escaped or entity-encoded dashes.
+            if let [Inline::Str(s)] = content.as_slice()
+                && s.len() >= 3
+                && s.bytes().all(|b| b == b'-')
+                && first_nonmarker_char(src.line(data.sourcepos.start.line)) == Some('[')
+            {
+                return Some(Block::HorizontalRule);
+            }
+            Some(Block::Para(content))
+        }
         NodeValue::Heading(h) => Some(Block::Header(
             i64::from(h.level),
             Attr::default(),
@@ -226,6 +255,21 @@ fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>) -> Vec<Inline> {
     let mut out = Vec::new();
     for node in nodes {
         inline(node, &mut out);
+    }
+    merge_adjacent_emphasis(out)
+}
+
+/// Merge directly-adjacent same-type `Emph`/`Strong` siblings: pandoc's
+/// commonmark reader never emits two in a row (`_a_*b*` is one `Emph`),
+/// while comrak keeps them separate.
+fn merge_adjacent_emphasis(tokens: Vec<Inline>) -> Vec<Inline> {
+    let mut out: Vec<Inline> = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        match (out.last_mut(), token) {
+            (Some(Inline::Emph(prev)), Inline::Emph(next))
+            | (Some(Inline::Strong(prev)), Inline::Strong(next)) => prev.extend(next),
+            (_, token) => out.push(token),
+        }
     }
     out
 }
@@ -382,6 +426,54 @@ mod tests {
             serde_json::json!([{"t": "Para", "c": [
                 {"t": "Str", "c": "a"}, {"t": "Space"}, {"t": "Str", "c": "b"}
             ]}])
+        );
+    }
+
+    #[test]
+    fn adjacent_same_type_emphasis_merges() {
+        assert_eq!(
+            doc("_a_*b*\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Emph", "c": [{"t": "Str", "c": "a"}, {"t": "Str", "c": "b"}]}
+            ]}])
+        );
+        assert_eq!(
+            doc("**a**__b__\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Strong", "c": [{"t": "Str", "c": "a"}, {"t": "Str", "c": "b"}]}
+            ]}])
+        );
+    }
+
+    #[test]
+    fn carriage_returns_are_filtered() {
+        assert_eq!(
+            doc("```\r\ncode\r\n```\r\n"),
+            serde_json::json!([{"t": "CodeBlock", "c": [["", [], []], "code"]}])
+        );
+        assert_eq!(
+            doc("a\rb\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Str", "c": "ab"}]}])
+        );
+    }
+
+    #[test]
+    fn refdef_followed_by_dash_run_is_a_thematic_break() {
+        assert_eq!(doc("[r]: /u\n---\n"), serde_json::json!([{"t": "HorizontalRule"}]));
+        assert_eq!(
+            doc("> [r]: /u\n> ---\n"),
+            serde_json::json!([{"t": "BlockQuote", "c": [{"t": "HorizontalRule"}]}])
+        );
+        // Equals-runs stay a paragraph (pandoc agrees with comrak there).
+        assert_eq!(
+            doc("[r]: /u\n===\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Str", "c": "==="}]}])
+        );
+        // Escaped dashes are not a thematic break on either side: pandoc
+        // agrees with us (`\-` unescapes to `-`, leaving a plain paragraph).
+        assert_eq!(
+            doc("\\---\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Str", "c": "---"}]}])
         );
     }
 

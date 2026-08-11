@@ -149,12 +149,16 @@ fn pandoc_json(markdown: &str) -> Result<Value> {
         .stderr(Stdio::piped())
         .spawn()
         .context("spawning pandoc (is it on PATH?)")?;
-    child
-        .stdin
-        .take()
-        .expect("stdin was piped")
-        .write_all(markdown.as_bytes())?;
+    // Write stdin from a separate thread so a large document cannot
+    // deadlock against an already-full stdout pipe.
+    let mut stdin = child.stdin.take().expect("stdin was piped");
+    let bytes = markdown.as_bytes().to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&bytes));
     let output = child.wait_with_output()?;
+    writer
+        .join()
+        .expect("stdin writer thread does not panic")
+        .context("writing to pandoc stdin")?;
     if !output.status.success() {
         bail!("pandoc exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr));
     }
