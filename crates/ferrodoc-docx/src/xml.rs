@@ -75,6 +75,12 @@ fn local_name(qname: &[u8]) -> String {
     String::from_utf8_lossy(name).into_owned()
 }
 
+/// The deepest element nesting accepted. Real OOXML nests a few dozen
+/// levels at most; a deeper document is malformed or hostile, and the
+/// recursive walks over [`Node`] (including its drop glue) would otherwise
+/// overflow the stack, which aborts the process instead of erroring.
+const MAX_DEPTH: usize = 256;
+
 /// Parse an XML document into a tree rooted at its document element.
 pub fn parse(xml: &str) -> Result<Node, Error> {
     let mut reader = Reader::from_str(xml);
@@ -83,6 +89,11 @@ pub fn parse(xml: &str) -> Result<Node, Error> {
     loop {
         match reader.read_event().map_err(|e| Error::Xml(e.to_string()))? {
             Event::Start(e) => {
+                if stack.len() >= MAX_DEPTH {
+                    return Err(Error::Xml(format!(
+                        "element nesting deeper than {MAX_DEPTH} levels"
+                    )));
+                }
                 stack.push(node_from_start(&e)?);
             }
             Event::Empty(e) => {

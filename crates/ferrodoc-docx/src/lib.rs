@@ -23,13 +23,36 @@
 //!   alignment comes from its first paragraph's justification;
 //! - a paragraph whose style (or an ancestor style) is named "caption",
 //!   "table caption" or "image caption" captions an adjacent table or
-//!   image-only paragraph, on either side.
+//!   image-only paragraph, on either side;
+//! - styles are matched by *name* through `styles.xml` and its `basedOn`
+//!   chain, never by style id, so localized ids work and a document
+//!   without `styles.xml` yields plain paragraphs;
+//! - rows are laid out on a grid as wide as the column specs: spans that
+//!   overshoot are clipped and rows with free columns are padded;
+//! - leading paragraphs styled Title/Subtitle/Author/Date/Abstract become
+//!   document metadata rather than blocks;
+//! - lists are *not* rebuilt inside footnotes, only in the body and in
+//!   table cells;
+//! - bookmarks become empty anchor spans, but an anchor nothing links to
+//!   is dropped again at the end of the conversion.
 //!
 //! Milestone scope (Phase 2, reader core): paragraphs and formatting runs,
-//! headings, hyperlinks, inline code, lists, tables (including
-//! `gridSpan`/`vMerge` spans and header rows), images, figures, footnotes,
-//! and line breaks. Comments, tracked changes, fields, text boxes, and
-//! custom style maps are out of scope and are skipped.
+//! headings, hyperlinks, inline code, lists, definition lists, tables
+//! (including `gridSpan`/`vMerge` spans and header rows), images, figures,
+//! footnotes, metadata, bookmarks, line breaks, and horizontal rules.
+//!
+//! Known gaps, deliberate and unfixed:
+//!
+//! - comments, tracked changes, fields, text boxes and custom style maps
+//!   are skipped entirely;
+//! - `w:sym` yields the raw character, without pandoc's Symbol/Wingdings
+//!   font mapping (so `F0D2` stays a private-use character instead of
+//!   becoming `◊`);
+//! - OMML math is read as its concatenated run text, not translated to
+//!   TeX, so `a^{2}` reads back as `a2`;
+//! - an empty list item followed by deeper items attaches the nested list
+//!   to the empty item instead of pandoc's separate item
+//!   (`corpus/docx/spec-09.docx`, the one corpus document that differs).
 
 mod combine;
 mod xml;
@@ -37,7 +60,7 @@ mod xml;
 use combine::{Modifier, smush_blocks, smush_inlines, stack};
 use ferrodoc_ast::{
     Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Inline, ListAttributes,
-    ListNumberDelim, ListNumberStyle, MathType, Pandoc, Row, Table, TableBody, TableFoot,
+    ListNumberDelim, ListNumberStyle, MathType, MetaValue, Pandoc, Row, Table, TableBody, TableFoot,
     TableHead, Target,
 };
 use std::collections::{HashMap, HashSet};
@@ -110,7 +133,7 @@ pub fn read_docx(bytes: &[u8]) -> Result<Pandoc, Error> {
         text_width: text_width(body),
     };
     let mut state = State::default();
-    Ok(Pandoc::new(ctx.blocks(body, &mut state)))
+    Ok(ctx.document(body, &mut state))
 }
 
 fn parse_rels(rels: &Node) -> HashMap<String, String> {
@@ -194,6 +217,13 @@ impl State {
         unique
     }
 
+    /// Reserve an explicit identifier (a heading's own bookmark) so a later
+    /// auto-generated one cannot collide with it.
+    fn claim_ident(&mut self, id: String) -> String {
+        self.used_idents.insert(id.clone());
+        id
+    }
+
     /// The number this list item takes: a numbering instance picks up
     /// where its previous use left off, and deeper levels' continuation
     /// data expires when a shallower item appears.
@@ -248,6 +278,223 @@ struct ListItem {
     block: Block,
 }
 
+/// Whether an inline is an empty anchor span (a bookmark).
+fn is_anchor_span(inline: &Inline) -> bool {
+    matches!(inline, Inline::Span(attr, content)
+        if content.is_empty() && attr.classes.iter().any(|c| c == "anchor"))
+}
+
+/// Collect the identifiers that internal links point at.
+fn collect_link_targets(blocks: &[Block], out: &mut HashSet<String>) {
+    walk_inlines(blocks, &mut |inline| {
+        if let Inline::Link(_, _, target) = inline
+            && let Some(anchor) = target.url.strip_prefix('#')
+        {
+            out.insert(anchor.to_owned());
+        }
+    });
+}
+
+/// Drop anchor spans nothing links to.
+fn remove_orphan_anchors(blocks: &mut [Block], targets: &HashSet<String>) {
+    map_inline_lists(blocks, &mut |inlines| {
+        inlines.retain(|inline| match inline {
+            Inline::Span(attr, content) if content.is_empty() && attr.classes.iter().any(|c| c == "anchor") => {
+                targets.contains(&attr.identifier)
+            }
+            _ => true,
+        });
+    });
+}
+
+/// Split off a heading's first anchor span: pandoc uses its name as the
+/// heading identifier and drops the span from the heading's content.
+fn take_anchor(inlines: Vec<Inline>) -> (Option<String>, Vec<Inline>) {
+    let anchor = inlines
+        .iter()
+        .find(|i| is_anchor_span(i))
+        .and_then(|i| match i {
+            Inline::Span(attr, _) => Some(attr.identifier.clone()),
+            _ => None,
+        });
+    let rest = inlines.into_iter().filter(|i| !is_anchor_span(i)).collect();
+    (anchor, rest)
+}
+
+/// Visit every inline in a block tree.
+fn walk_inlines(blocks: &[Block], f: &mut impl FnMut(&Inline)) {
+    fn inlines(list: &[Inline], f: &mut impl FnMut(&Inline)) {
+        for inline in list {
+            f(inline);
+            match inline {
+                Inline::Emph(i) | Inline::Strong(i) | Inline::Strikeout(i)
+                | Inline::Superscript(i) | Inline::Subscript(i) | Inline::SmallCaps(i)
+                | Inline::Underline(i) | Inline::Quoted(_, i) | Inline::Cite(_, i)
+                | Inline::Span(_, i) | Inline::Link(_, i, _) | Inline::Image(_, i, _) => {
+                    inlines(i, f);
+                }
+                Inline::Note(b) => walk_inlines(b, f),
+                _ => {}
+            }
+        }
+    }
+    for block in blocks {
+        match block {
+            Block::Plain(i) | Block::Para(i) | Block::Header(_, _, i) => inlines(i, f),
+            Block::LineBlock(lines) => {
+                for line in lines {
+                    inlines(line, f);
+                }
+            }
+            Block::BlockQuote(b) | Block::Div(_, b) => walk_inlines(b, f),
+            Block::Figure(_, caption, b) => {
+                walk_inlines(&caption.blocks, f);
+                walk_inlines(b, f);
+            }
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for b in items {
+                    walk_inlines(b, f);
+                }
+            }
+            Block::DefinitionList(items) => {
+                for (term, defs) in items {
+                    inlines(term, f);
+                    for b in defs {
+                        walk_inlines(b, f);
+                    }
+                }
+            }
+            Block::Table(table) => {
+                walk_inlines(&table.caption.blocks, f);
+                let rows = table
+                    .head
+                    .rows
+                    .iter()
+                    .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+                    .chain(&table.foot.rows);
+                for row in rows {
+                    for c in &row.cells {
+                        walk_inlines(&c.blocks, f);
+                    }
+                }
+            }
+            Block::CodeBlock(..) | Block::RawBlock(..) | Block::HorizontalRule => {}
+        }
+    }
+}
+
+/// Rewrite every inline list in a block tree in place.
+fn map_inline_lists(blocks: &mut [Block], f: &mut impl FnMut(&mut Vec<Inline>)) {
+    fn inlines(list: &mut Vec<Inline>, f: &mut impl FnMut(&mut Vec<Inline>)) {
+        f(list);
+        for inline in list.iter_mut() {
+            match inline {
+                Inline::Emph(i) | Inline::Strong(i) | Inline::Strikeout(i)
+                | Inline::Superscript(i) | Inline::Subscript(i) | Inline::SmallCaps(i)
+                | Inline::Underline(i) | Inline::Quoted(_, i) | Inline::Cite(_, i)
+                | Inline::Span(_, i) | Inline::Link(_, i, _) | Inline::Image(_, i, _) => {
+                    inlines(i, f);
+                }
+                Inline::Note(b) => map_inline_lists(b, f),
+                _ => {}
+            }
+        }
+    }
+    for block in blocks.iter_mut() {
+        match block {
+            Block::Plain(i) | Block::Para(i) | Block::Header(_, _, i) => inlines(i, f),
+            Block::LineBlock(lines) => {
+                for line in lines.iter_mut() {
+                    inlines(line, f);
+                }
+            }
+            Block::BlockQuote(b) | Block::Div(_, b) => map_inline_lists(b, f),
+            Block::Figure(_, caption, b) => {
+                map_inline_lists(&mut caption.blocks, f);
+                map_inline_lists(b, f);
+            }
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for b in items.iter_mut() {
+                    map_inline_lists(b, f);
+                }
+            }
+            Block::DefinitionList(items) => {
+                for (term, defs) in items.iter_mut() {
+                    inlines(term, f);
+                    for b in defs.iter_mut() {
+                        map_inline_lists(b, f);
+                    }
+                }
+            }
+            Block::Table(table) => {
+                map_inline_lists(&mut table.caption.blocks, f);
+                for row in table
+                    .head
+                    .rows
+                    .iter_mut()
+                    .chain(
+                        table
+                            .bodies
+                            .iter_mut()
+                            .flat_map(|b| b.head.iter_mut().chain(b.body.iter_mut())),
+                    )
+                    .chain(table.foot.rows.iter_mut())
+                {
+                    for c in &mut row.cells {
+                        map_inline_lists(&mut c.blocks, f);
+                    }
+                }
+            }
+            Block::CodeBlock(..) | Block::RawBlock(..) | Block::HorizontalRule => {}
+        }
+    }
+}
+
+/// Which half of a definition-list entry a paragraph carries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DefinitionRole {
+    Term,
+    Definition,
+}
+
+/// Emit any accumulated definition-list entries as one block.
+fn flush_definitions(
+    segments: &mut Vec<Vec<Block>>,
+    definitions: &mut Vec<(Vec<Inline>, Vec<Vec<Block>>)>,
+) {
+    if !definitions.is_empty() {
+        segments.push(vec![Block::DefinitionList(std::mem::take(definitions))]);
+    }
+}
+
+/// Assemble document metadata from the styled leading paragraphs, matching
+/// pandoc: title and subtitle keep the last value, repeated fields become
+/// blocks, and repeated authors become a list.
+fn build_meta(fields: Vec<(&'static str, Vec<Inline>)>) -> ferrodoc_ast::Meta {
+    let mut grouped: Vec<(&'static str, Vec<Vec<Inline>>)> = Vec::new();
+    for (field, inlines) in fields {
+        if let Some((_, values)) = grouped.iter_mut().find(|(f, _)| *f == field) {
+            values.push(inlines);
+        } else {
+            grouped.push((field, vec![inlines]));
+        }
+    }
+    let mut meta = ferrodoc_ast::Meta::new();
+    for (field, mut values) in grouped {
+        let value = if field == "title" || field == "subtitle" {
+            MetaValue::MetaInlines(values.pop().unwrap_or_default())
+        } else if values.len() == 1 {
+            MetaValue::MetaInlines(values.pop().expect("length checked"))
+        } else if field == "author" {
+            MetaValue::MetaList(values.into_iter().map(MetaValue::MetaInlines).collect())
+        } else {
+            MetaValue::MetaBlocks(values.into_iter().map(Block::Para).collect())
+        };
+        meta.insert(field.to_owned(), value);
+    }
+    meta
+}
+
 /// The kind of list a numbering level defines.
 #[derive(PartialEq, Clone)]
 enum ListKind {
@@ -271,17 +518,49 @@ struct RawRow {
 }
 
 impl Ctx {
+    /// Convert the document body: leading metadata-styled paragraphs
+    /// become `meta` (pandoc's `sepBodyParts`), the rest become blocks.
+    fn document(&self, body: &Node, state: &mut State) -> Pandoc {
+        let elems: Vec<&Node> = body
+            .elems()
+            .filter(|n| n.name == "p" || n.name == "tbl")
+            .collect();
+        let mut fields: Vec<(&'static str, Vec<Inline>)> = Vec::new();
+        let mut rest = 0;
+        for (i, node) in elems.iter().enumerate() {
+            if let Some(field) = self.meta_field(node) {
+                fields.push((field, self.inlines(node, state)));
+            } else if !(node.name == "p" && self.inlines(node, state).is_empty()) {
+                break;
+            }
+            rest = i + 1;
+        }
+        let meta = build_meta(fields);
+        let mut blocks = self.blocks_of(&elems[rest..], state, true);
+        // Pandoc drops anchors that no internal link points at.
+        let mut targets = HashSet::new();
+        collect_link_targets(&blocks, &mut targets);
+        remove_orphan_anchors(&mut blocks, &targets);
+        Pandoc { api_version: ferrodoc_ast::API_VERSION.to_vec(), meta, blocks }
+    }
+
     /// Convert a container's paragraphs and tables to blocks. Captions are
     /// paired with adjacent tables and image paragraphs first, numbered
     /// paragraphs accumulate into lists, and the resulting segments are
     /// merged by pandoc's block smushing (code blocks and quotes coalesce).
-    fn blocks(&self, parent: &Node, state: &mut State) -> Vec<Block> {
+    fn blocks(&self, parent: &Node, state: &mut State, lists: bool) -> Vec<Block> {
         let elems: Vec<&Node> = parent
             .elems()
             .filter(|n| n.name == "p" || n.name == "tbl")
             .collect();
+        self.blocks_of(&elems, state, lists)
+    }
+
+    /// Convert an already-collected run of body parts.
+    fn blocks_of(&self, elems: &[&Node], state: &mut State, lists: bool) -> Vec<Block> {
         let mut segments: Vec<Vec<Block>> = Vec::new();
         let mut list: Vec<ListItem> = Vec::new();
+        let mut definitions: Vec<(Vec<Inline>, Vec<Vec<Block>>)> = Vec::new();
         let mut i = 0;
         while i < elems.len() {
             let node = elems[i];
@@ -302,6 +581,7 @@ impl Ctx {
             });
             if let Some((caption, body)) = pair {
                 Self::flush_list(&mut segments, &mut list);
+                flush_definitions(&mut segments, &mut definitions);
                 segments.push(self.captioned(caption, body, state));
                 i += 2;
                 continue;
@@ -309,12 +589,18 @@ impl Ctx {
             match node.name.as_str() {
                 "p" if is_horizontal_rule(node) => {
                     Self::flush_list(&mut segments, &mut list);
+                    flush_definitions(&mut segments, &mut definitions);
                     segments.push(vec![Block::HorizontalRule]);
                 }
+                "p" if lists && self.definition_role(node).is_some() => {
+                    Self::flush_list(&mut segments, &mut list);
+                    self.definition_paragraph(node, &mut definitions, state);
+                }
                 "p" => {
-                    if let Some(item) = self.list_item(node, state) {
+                    if let Some(item) = lists.then(|| self.list_item(node, state)).flatten() {
                         list.push(item);
                     } else {
+                        flush_definitions(&mut segments, &mut definitions);
                         Self::flush_list(&mut segments, &mut list);
                         let mut segment: Vec<Block> =
                             self.paragraph(node, state).into_iter().collect();
@@ -329,6 +615,7 @@ impl Ctx {
                 }
                 _ => {
                     Self::flush_list(&mut segments, &mut list);
+                    flush_definitions(&mut segments, &mut definitions);
                     if let Some(table) = self.table(node, state) {
                         segments.push(vec![table]);
                     }
@@ -337,7 +624,34 @@ impl Ctx {
             i += 1;
         }
         Self::flush_list(&mut segments, &mut list);
+        flush_definitions(&mut segments, &mut definitions);
         smush_blocks(segments)
+    }
+
+    /// Accumulate a definition-list term or definition paragraph.
+    fn definition_paragraph(
+        &self,
+        p: &Node,
+        definitions: &mut Vec<(Vec<Inline>, Vec<Vec<Block>>)>,
+        state: &mut State,
+    ) {
+        if self.definition_role(p) == Some(DefinitionRole::Term) {
+            let term = trim_paragraph(self.inlines(p, state));
+            definitions.push((term, Vec::new()));
+            return;
+        }
+        let Some(block) = self.styled_block(p, state) else {
+            return;
+        };
+        let Some((_, items)) = definitions.last_mut() else {
+            return;
+        };
+        // The first definition opens an item; later ones extend it.
+        if let Some(last) = items.last_mut() {
+            last.push(block);
+        } else {
+            items.push(vec![block]);
+        }
     }
 
     fn flush_list(segments: &mut Vec<Vec<Block>>, list: &mut Vec<ListItem>) {
@@ -349,27 +663,75 @@ impl Ctx {
 
     // --- captions ---
 
-    /// Whether a paragraph's style (or one it is based on) is named
-    /// "caption", "table caption" or "image caption", case-insensitively.
-    fn is_caption_para(&self, node: &Node) -> bool {
-        if node.name != "p" {
-            return false;
-        }
-        // Walk the based-on chain, bounded so a cyclic chain cannot hang.
+    /// The style names a paragraph inherits, nearest first: its own style
+    /// name then each `basedOn` ancestor. Bounded so a cyclic chain cannot
+    /// hang.
+    fn style_names(&self, node: &Node) -> Vec<&str> {
+        let mut names = Vec::new();
         let mut style: Option<&str> = Some(para_style(node));
         for _ in 0..16 {
             let Some((name, based_on)) = style.and_then(|id| self.styles.get(id)) else {
-                return false;
+                break;
             };
-            if matches!(
-                name.to_lowercase().as_str(),
-                "caption" | "table caption" | "image caption"
-            ) {
-                return true;
-            }
+            names.push(name.as_str());
             style = based_on.as_deref();
         }
-        false
+        names
+    }
+
+    /// Whether a paragraph's style (or one it is based on) is named
+    /// "caption", "table caption" or "image caption", case-insensitively.
+    fn is_caption_para(&self, node: &Node) -> bool {
+        node.name == "p"
+            && self.style_names(node).iter().any(|name| {
+                matches!(
+                    name.to_lowercase().as_str(),
+                    "caption" | "table caption" | "image caption"
+                )
+            })
+    }
+
+    /// Whether a paragraph inherits any of the given style names
+    /// (case-insensitive).
+    fn has_style_name(&self, node: &Node, names: &[&str]) -> bool {
+        self.style_names(node)
+            .iter()
+            .any(|name| names.iter().any(|n| name.eq_ignore_ascii_case(n)))
+    }
+
+    /// The heading level of a paragraph styled "Heading <n>".
+    fn heading_level(&self, node: &Node) -> Option<i64> {
+        self.style_names(node).iter().find_map(|name| {
+            let rest = name.strip_prefix("Heading").or_else(|| name.strip_prefix("heading"))?;
+            rest.trim().parse::<i64>().ok().filter(|n| (1..=9).contains(n))
+        })
+    }
+
+    /// The metadata field a paragraph's style maps to, if any.
+    fn meta_field(&self, node: &Node) -> Option<&'static str> {
+        if node.name != "p" {
+            return None;
+        }
+        self.style_names(node).iter().find_map(|name| match *name {
+            "Title" => Some("title"),
+            "Subtitle" => Some("subtitle"),
+            "Author" => Some("author"),
+            "Date" => Some("date"),
+            "Abstract" => Some("abstract"),
+            _ => None,
+        })
+    }
+
+    /// Whether a paragraph is a definition-list term or definition.
+    fn definition_role(&self, node: &Node) -> Option<DefinitionRole> {
+        if node.name != "p" {
+            return None;
+        }
+        self.style_names(node).iter().find_map(|name| match *name {
+            "Definition Term" => Some(DefinitionRole::Term),
+            "Definition" => Some(DefinitionRole::Definition),
+            _ => None,
+        })
     }
 
     /// Whether a body part can take a caption: a table, or a paragraph
@@ -422,18 +784,19 @@ impl Ctx {
 
     /// A numbered, non-heading paragraph becomes a pending list item.
     fn list_item(&self, p: &Node, state: &mut State) -> Option<ListItem> {
-        let style = para_style(p);
-        if style.starts_with("Heading") {
+        if self.heading_level(p).is_some() {
             return None;
         }
         let num = p.child("pPr")?.child("numPr")?;
         let level_key = num.child("ilvl")?.attr("w:val")?;
         let level = level_key.parse::<usize>().ok()?;
         let num_id = num.child("numId")?.attr("w:val")?;
-        let info = self.num_level(num_id, level);
-        let level_start = info.as_ref().map_or(1, |i| i.start);
+        // An unresolvable level (missing numbering.xml, unknown numId, or
+        // the `numId="0"` idiom that cancels numbering) is not a list.
+        let info = self.num_level(num_id, level)?;
+        let level_start = info.start;
         let number = state.list_number(num_id, level, level_start);
-        let kind = match info.as_ref() {
+        let kind = match Some(&info) {
             Some(info) if info.format != "bullet" => {
                 let style = match info.format.as_str() {
                     "lowerLetter" => ListNumberStyle::LowerAlpha,
@@ -457,43 +820,50 @@ impl Ctx {
             }
             _ => ListKind::Bullet,
         };
-        let continuation = info.is_some_and(|i| i.text.trim().is_empty());
-        let block = self.styled_block(p, style, state)?;
+        let continuation = info.text.trim().is_empty();
+        let block = self.styled_block(p, state)?;
         Some(ListItem { level, num_id: num_id.to_owned(), kind, continuation, block })
     }
 
     /// Map a non-list paragraph to a block by its style.
     fn paragraph(&self, p: &Node, state: &mut State) -> Option<Block> {
-        let style = para_style(p);
-        if let Some(level) = style
-            .strip_prefix("Heading")
-            .and_then(|d| d.parse::<i64>().ok())
-        {
-            // Headings are not trimmed (unlike paragraphs).
+        if let Some(level) = self.heading_level(p) {
+            // Headings are not trimmed (unlike paragraphs), and pandoc
+            // suppresses their anchor spans, using a bookmark's name as
+            // the heading id when one is present.
             let inlines = self.inlines(p, state);
-            let id = state.ident(&inlines);
+            let (anchor, inlines) = take_anchor(inlines);
+            let id = match anchor {
+                Some(name) => {
+                    state.claim_ident(name)
+                }
+                None => state.ident(&inlines),
+            };
             return Some(Block::Header(
                 level,
                 Attr { identifier: id, ..Attr::default() },
                 inlines,
             ));
         }
-        self.styled_block(p, style, state)
+        self.styled_block(p, state)
     }
 
     /// A paragraph as a block per its style (everything but headings).
-    fn styled_block(&self, p: &Node, style: &str, state: &mut State) -> Option<Block> {
-        if style == "SourceCode" {
+    /// Styles are matched by *name*, resolved through `styles.xml` and its
+    /// `basedOn` chain, so localized style ids work and a document without
+    /// `styles.xml` simply yields paragraphs.
+    fn styled_block(&self, p: &Node, state: &mut State) -> Option<Block> {
+        if self.has_style_name(p, &["Source Code"]) {
             return Some(Block::CodeBlock(Attr::default(), raw_text(p)));
         }
         let inlines = trim_paragraph(self.inlines(p, state));
         if inlines.is_empty() {
             return None;
         }
-        if style == "BlockText" || style == "Quote" || style == "BlockQuote" {
+        if self.has_style_name(p, &["Block Text", "Quote", "Block Quote"]) {
             return Some(Block::BlockQuote(vec![Block::Para(inlines)]));
         }
-        if style == "Compact" {
+        if self.has_style_name(p, &["Compact"]) {
             return Some(Block::Plain(inlines));
         }
         Some(Block::Para(inlines))
@@ -596,19 +966,22 @@ impl Ctx {
                 }
             });
 
+        // Pandoc's table builder normalizes every row to the number of
+        // columns: over-wide rows and spans are clipped, short rows padded.
+        let columns = colspecs.len();
         Some(Block::Table(Box::new(Table {
             attr: Attr::default(),
             caption,
             colspecs,
             head: TableHead {
                 attr: Attr::default(),
-                rows: resolve_rowspans(&rows, &head),
+                rows: normalize_rows(resolve_rowspans(&rows, &head), columns),
             },
             bodies: vec![TableBody {
                 attr: Attr::default(),
                 row_head_columns: 0,
                 head: Vec::new(),
-                body: resolve_rowspans(&rows, &body),
+                body: normalize_rows(resolve_rowspans(&rows, &body), columns),
             }],
             foot: TableFoot::default(),
         })))
@@ -645,20 +1018,7 @@ impl Ctx {
         let header = properties
             .and_then(|p| p.child("tblHeader"))
             .is_some_and(|h| h.attr("w:val") != Some("0"));
-        // `gridBefore` means the row starts with that many empty cells.
-        let grid_before = properties
-            .and_then(|p| p.child("gridBefore"))
-            .and_then(|g| g.attr("w:val"))
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(0);
-        let mut cells: Vec<RawCell> = (0..grid_before)
-            .map(|_| RawCell {
-                alignment: Alignment::AlignDefault,
-                grid_span: 1,
-                merged: false,
-                blocks: Vec::new(),
-            })
-            .collect();
+        let mut cells: Vec<RawCell> = Vec::new();
         for tc in tr.children_named("tc") {
             let properties = tc.child("tcPr");
             let grid_span = properties
@@ -687,7 +1047,7 @@ impl Ctx {
                 alignment,
                 grid_span,
                 merged,
-                blocks: single_para_to_plain(self.blocks(tc, state)),
+                blocks: single_para_to_plain(self.blocks(tc, state, true)),
             });
         }
         RawRow { header, cells }
@@ -707,6 +1067,20 @@ impl Ctx {
     fn inline_sequences(&self, parent: &Node, out: &mut Vec<Vec<Inline>>, state: &mut State) {
         for node in parent.elems() {
             match node.name.as_str() {
+                // A bookmark is an empty anchor span, so internal links
+                // still have a target. Word's own `_GoBack` is noise.
+                "bookmarkStart" => {
+                    if let Some(name) = node.attr("w:name").filter(|n| *n != "_GoBack") {
+                        out.push(vec![Inline::Span(
+                            Attr {
+                                identifier: name.to_owned(),
+                                classes: vec!["anchor".to_owned()],
+                                attributes: Vec::new(),
+                            },
+                            Vec::new(),
+                        )]);
+                    }
+                }
                 "r" => {
                     let seq = self.run(node, state);
                     if !seq.is_empty() {
@@ -758,6 +1132,20 @@ impl Ctx {
             match node.name.as_str() {
                 "t" => text_tokens(&node.text(), &mut tokens),
                 "br" => tokens.push(Inline::LineBreak),
+                // Pandoc renders a tab as a space and maps the hyphen and
+                // symbol elements to their characters.
+                "tab" => tokens.push(Inline::Space),
+                "softHyphen" => text_tokens("\u{ad}", &mut tokens),
+                "noBreakHyphen" => text_tokens("\u{2011}", &mut tokens),
+                "sym" => {
+                    if let Some(ch) = node
+                        .attr("w:char")
+                        .and_then(|c| u32::from_str_radix(c, 16).ok())
+                        .and_then(char::from_u32)
+                    {
+                        text_tokens(&ch.to_string(), &mut tokens);
+                    }
+                }
                 "drawing" => {
                     if let Some(img) = self.image(node) {
                         tokens.push(img);
@@ -838,7 +1226,8 @@ impl Ctx {
         let note = footnotes
             .children_named("footnote")
             .find(|f| f.attr("w:id") == Some(id))?;
-        Some(Inline::Note(self.blocks(note, state)))
+        // Pandoc does not rebuild lists inside notes.
+        Some(Inline::Note(self.blocks(note, state, false)))
     }
 }
 
@@ -894,7 +1283,7 @@ fn build_lists(items: &[ListItem]) -> Vec<Block> {
                 j = sub_end;
             }
         }
-        lists.push(single_item_header(make_list(&first.kind, list_items)));
+        lists.push(make_list(&first.kind, list_items));
         i = end;
     }
     lists
@@ -908,17 +1297,6 @@ fn make_list(kind: &ListKind, items: Vec<Vec<Block>>) -> Block {
             items,
         ),
     }
-}
-
-/// A single-item ordered list whose item is just a header is that header.
-fn single_item_header(block: Block) -> Block {
-    if let Block::OrderedList(_, items) = &block
-        && let [item] = items.as_slice()
-        && let [header @ Block::Header(..)] = item.as_slice()
-    {
-        return header.clone();
-    }
-    block
 }
 
 /// A cell whose content is a single paragraph holds a `Plain` instead.
@@ -1027,6 +1405,51 @@ fn row_spans(cells: &[RawCell], below: Option<&Vec<RawCell>>, below_spans: Optio
         cursor = next;
     }
     out
+}
+
+/// Lay rows out on a `columns`-wide grid the way pandoc's table builder
+/// does: cells are placed into the columns not already covered by a row
+/// span from above, spans that overshoot the grid are clipped, rows that
+/// leave free columns are padded, and cells past the grid are dropped.
+fn normalize_rows(rows: Vec<Row>, columns: usize) -> Vec<Row> {
+    if columns == 0 {
+        return rows;
+    }
+    // How many further rows each column is covered for by a span above.
+    let mut covered = vec![0usize; columns];
+    rows.into_iter()
+        .map(|row| {
+            let mut cells = Vec::with_capacity(row.cells.len());
+            let mut remaining = row.cells.into_iter();
+            let mut col = 0usize;
+            while col < columns {
+                if covered[col] > 0 {
+                    covered[col] -= 1;
+                    col += 1;
+                    continue;
+                }
+                let mut cell = remaining.next().unwrap_or_else(|| Cell {
+                    attr: Attr::default(),
+                    alignment: Alignment::AlignDefault,
+                    row_span: 1,
+                    col_span: 1,
+                    blocks: Vec::new(),
+                });
+                let span = usize::try_from(cell.col_span)
+                    .unwrap_or(1)
+                    .max(1)
+                    .min(columns - col);
+                let rows_spanned = usize::try_from(cell.row_span).unwrap_or(1).max(1);
+                for c in &mut covered[col..col + span] {
+                    *c = rows_spanned - 1;
+                }
+                cell.col_span = i64::try_from(span).unwrap_or(1);
+                cells.push(cell);
+                col += span;
+            }
+            Row { attr: row.attr, cells }
+        })
+        .collect()
 }
 
 /// Skip `n` columns through `cells` starting at `from`, returning how much
@@ -1220,6 +1643,75 @@ mod tests {
         assert_eq!(state.ident(&ils("Heading One")), "heading-one-1");
         assert_eq!(state.ident(&ils("123 start")), "start");
         assert_eq!(state.ident(&ils("!!!")), "section");
+    }
+
+    fn cell(col_span: i64, row_span: i64) -> Cell {
+        Cell {
+            attr: Attr::default(),
+            alignment: Alignment::AlignDefault,
+            row_span,
+            col_span,
+            blocks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rows_are_clipped_and_padded_to_the_grid() {
+        let rows = vec![
+            Row { attr: Attr::default(), cells: vec![cell(9, 1)] },
+            Row { attr: Attr::default(), cells: vec![cell(1, 1)] },
+        ];
+        let out = normalize_rows(rows, 3);
+        // An over-wide span is clipped to the grid.
+        assert_eq!(out[0].cells.len(), 1);
+        assert_eq!(out[0].cells[0].col_span, 3);
+        // A short row is padded to the column count.
+        assert_eq!(out[1].cells.len(), 3);
+    }
+
+    #[test]
+    fn padding_skips_columns_covered_from_above() {
+        let rows = vec![
+            Row { attr: Attr::default(), cells: vec![cell(1, 2), cell(1, 1)] },
+            // The first column is still covered by the row span above, so
+            // this row's single cell fills the grid and needs no padding.
+            Row { attr: Attr::default(), cells: vec![cell(1, 1)] },
+        ];
+        let out = normalize_rows(rows, 2);
+        assert_eq!(out[1].cells.len(), 1);
+    }
+
+    #[test]
+    fn metadata_groups_repeated_fields() {
+        let ils = |s: &str| vec![Inline::Str(s.to_owned())];
+        let meta = build_meta(vec![
+            ("title", ils("T")),
+            ("author", ils("A1")),
+            ("author", ils("A2")),
+        ]);
+        assert_eq!(meta["title"], MetaValue::MetaInlines(ils("T")));
+        assert_eq!(
+            meta["author"],
+            MetaValue::MetaList(vec![
+                MetaValue::MetaInlines(ils("A1")),
+                MetaValue::MetaInlines(ils("A2")),
+            ])
+        );
+    }
+
+    #[test]
+    fn heading_anchor_becomes_the_identifier() {
+        let anchor = Inline::Span(
+            Attr {
+                identifier: "custom".to_owned(),
+                classes: vec!["anchor".to_owned()],
+                attributes: Vec::new(),
+            },
+            Vec::new(),
+        );
+        let (id, rest) = take_anchor(vec![anchor, Inline::Str("Title".to_owned())]);
+        assert_eq!(id.as_deref(), Some("custom"));
+        assert_eq!(rest, vec![Inline::Str("Title".to_owned())]);
     }
 
     #[test]

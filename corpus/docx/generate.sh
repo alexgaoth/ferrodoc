@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Regenerate the DOCX corpus from markdown sources with pandoc.
+# Regenerate the DOCX corpus from its committed sources with pandoc.
 # Requires pandoc 3.8.x on PATH; run from anywhere.
+#
+# The .docx bytes are pandoc's own output (zip timestamps make them
+# non-reproducible byte-for-byte, so conformance is what is checked, not a
+# git diff). Two variants are then rewritten by a scripted transformation
+# to exercise section page sizes and over-wide table grids, which pandoc's
+# writer never emits but Word documents do.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -21,6 +27,10 @@ for f in src/*.md; do
     name=$(basename "$f" .md)
     (cd src && pandoc "$name.md" -o "../$name.docx")
 done
+# Section numbering emits w:tab between the number and the heading text.
+(cd src && pandoc --number-sections meta-and-defs.md -o ../meta-and-defs.docx)
+(cd src && pandoc tables.html -o ../tables.docx)
+
 for f in ../*.md; do
     name=$(basename "$f" .md)
     pandoc "$f" -o "corpus-$name.docx"
@@ -35,4 +45,37 @@ for i in range(0, len(mds), 30):
     md = '\n\n'.join(mds[i:i+30])
     subprocess.run(['pandoc', '-f', 'markdown', '-o', f'spec-{i//30:02d}.docx'],
                    input=md, text=True, check=True)
+PY
+
+# Word-style variants: an explicit page size (so the text width is not the
+# 9360-twip default) and a grid whose columns sum past the text width (so
+# the width fractions must be normalized).
+python3 - <<'PY'
+import re, shutil, zipfile
+
+def rewrite(src, dst, transform):
+    shutil.copy(src, dst)
+    zin = zipfile.ZipFile(src)
+    items = [(i, zin.read(i.filename)) for i in zin.infolist()]
+    zin.close()
+    with zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for info, data in items:
+            if info.filename == 'word/document.xml':
+                data = transform(data.decode()).encode()
+            zout.writestr(info, data)
+
+SECT = ('<w:sectPr><w:pgSz w:w="15840" w:h="12240"/>'
+        '<w:pgMar w:left="720" w:right="720" w:gutter="360"/></w:sectPr>')
+
+def set_page_size(xml):
+    if '<w:sectPr' in xml:
+        return re.sub(r'<w:sectPr.*?</w:sectPr>', SECT, xml, flags=re.S)
+    return xml.replace('</w:body>', SECT + '</w:body>')
+
+def widen_grid(xml):
+    return re.sub(r'(<w:gridCol w:w=")(\d+)(")',
+                  lambda m: m.group(1) + str(int(m.group(2)) * 3) + m.group(3), xml)
+
+rewrite('tables.docx', 'tables-wide-page.docx', set_page_size)
+rewrite('tables.docx', 'tables-overwide-grid.docx', widen_grid)
 PY
