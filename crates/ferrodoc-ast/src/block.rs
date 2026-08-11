@@ -30,7 +30,7 @@ pub enum Block {
     /// A definition list: each item is a term plus one or more definitions.
     DefinitionList(Vec<(Vec<Inline>, Vec<Vec<Block>>)>),
     /// A section heading: level, attributes, text.
-    Header(i32, Attr, Vec<Inline>),
+    Header(i64, Attr, Vec<Inline>),
     /// A horizontal rule.
     HorizontalRule,
     /// A table (boxed to keep the enum small; JSON shape is unchanged).
@@ -49,14 +49,14 @@ pub enum Block {
 #[serde(from = "ListAttributesRepr", into = "ListAttributesRepr")]
 pub struct ListAttributes {
     /// The number of the first list item.
-    pub start: i32,
+    pub start: i64,
     /// The numbering style.
     pub style: ListNumberStyle,
     /// The delimiter after the number.
     pub delim: ListNumberDelim,
 }
 
-type ListAttributesRepr = (i32, ListNumberStyle, ListNumberDelim);
+type ListAttributesRepr = (i64, ListNumberStyle, ListNumberDelim);
 
 impl From<ListAttributesRepr> for ListAttributes {
     fn from((start, style, delim): ListAttributesRepr) -> Self {

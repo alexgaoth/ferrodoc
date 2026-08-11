@@ -39,6 +39,26 @@ fn every_fixture_round_trips_losslessly() {
     }
 }
 
+/// Pandoc's integer fields are Haskell `Int` (64-bit): a list start beyond
+/// `i32::MAX`, produced by real pandoc from `99999999999. item`, must
+/// deserialize (regression test for round-1 BLOCKER).
+#[test]
+fn haskell_int_fields_are_64_bit() {
+    let v: Value = serde_json::json!({
+        "pandoc-api-version": [1, 23, 1],
+        "meta": {},
+        "blocks": [
+            {"t": "OrderedList", "c": [
+                [99_999_999_999_i64, {"t": "Decimal"}, {"t": "Period"}],
+                [[{"t": "Plain", "c": [{"t": "Str", "c": "item"}]}]]
+            ]},
+            {"t": "Header", "c": [6, ["", [], []], [{"t": "Str", "c": "h"}]]}
+        ]
+    });
+    let doc: Pandoc = serde_json::from_value(v.clone()).expect("64-bit ints deserialize");
+    assert_eq!(serde_json::to_value(&doc).unwrap(), v);
+}
+
 /// Every `"t"` tag that must appear somewhere across the fixtures.
 const REQUIRED_TAGS: &[&str] = &[
     // Block (14)

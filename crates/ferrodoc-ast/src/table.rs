@@ -153,14 +153,14 @@ pub struct Cell {
     /// The cell's alignment (overrides the column's).
     pub alignment: Alignment,
     /// The number of rows the cell spans.
-    pub row_span: i32,
+    pub row_span: i64,
     /// The number of columns the cell spans.
-    pub col_span: i32,
+    pub col_span: i64,
     /// The cell's content.
     pub blocks: Vec<Block>,
 }
 
-type CellRepr = (Attr, Alignment, i32, i32, Vec<Block>);
+type CellRepr = (Attr, Alignment, i64, i64, Vec<Block>);
 
 impl From<CellRepr> for Cell {
     fn from((attr, alignment, row_span, col_span, blocks): CellRepr) -> Self {
@@ -210,14 +210,14 @@ pub struct TableBody {
     /// The body's attributes.
     pub attr: Attr,
     /// How many leading columns act as row headers.
-    pub row_head_columns: i32,
+    pub row_head_columns: i64,
     /// The intermediate head rows of this body.
     pub head: Vec<Row>,
     /// The body rows.
     pub body: Vec<Row>,
 }
 
-type TableBodyRepr = (Attr, i32, Vec<Row>, Vec<Row>);
+type TableBodyRepr = (Attr, i64, Vec<Row>, Vec<Row>);
 
 impl From<TableBodyRepr> for TableBody {
     fn from((attr, row_head_columns, head, body): TableBodyRepr) -> Self {

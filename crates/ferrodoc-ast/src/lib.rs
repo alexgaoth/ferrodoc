@@ -10,9 +10,11 @@
 //! named structs here for API ergonomics; their serde form is still the
 //! positional array pandoc emits.
 //!
-//! Known limitation: JSON numbers that are integral floats (a `ColWidth`
+//! Known limitations: JSON numbers that are integral floats (a `ColWidth`
 //! of `1`) re-serialize as `1.0`, which is numerically equal but not
-//! value-equal under `serde_json`.
+//! value-equal under `serde_json`; and documents nested deeper than
+//! `serde_json`'s recursion limit (~128 levels) fail to deserialize —
+//! `serde_json::Value` itself cannot represent such documents either.
 //!
 //! [pandoc-types]: https://hackage.haskell.org/package/pandoc-types
 

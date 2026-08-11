@@ -88,9 +88,9 @@ pub struct Citation {
     /// How the citation is rendered.
     pub citation_mode: CitationMode,
     /// The note number, when rendered as a note.
-    pub citation_note_num: i32,
+    pub citation_note_num: i64,
     /// A hash used internally by citeproc.
-    pub citation_hash: i32,
+    pub citation_hash: i64,
 }
 
 /// How a [`Citation`] is rendered.
