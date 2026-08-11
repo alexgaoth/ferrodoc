@@ -11,6 +11,7 @@ ferrodoc-ast = { workspace = true }
 ferrodoc-markdown = { workspace = true }
 ferrodoc-html = { workspace = true }
 ferrodoc-text = { workspace = true }
+ferrodoc-docx = { path = "../ferrodoc-docx" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

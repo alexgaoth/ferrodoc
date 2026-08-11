@@ -29,6 +29,7 @@ fn main() -> Result<()> {
         Some("diff-ast") => diff_ast(&args[1..], verbose, fail_under),
         Some("diff-spec") => diff_spec(&args[1..], verbose, fail_under),
         Some("diff-html") => diff_html(&args[1..], verbose, fail_under),
+        Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         _ => bail!(
             "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|bench> [--verbose] [--fail-under PCT] [--iters N] <paths>"
@@ -190,6 +191,68 @@ fn collect_mixed(paths: &[String]) -> Result<Vec<Case>> {
         }
     }
     Ok(cases)
+}
+
+/// Compare our DOCX reader against `pandoc -f docx -t json` per file.
+fn diff_docx(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let mut files = Vec::new();
+    for p in paths {
+        collect_files_with_ext(Path::new(p), "docx", &mut files)?;
+    }
+    if files.is_empty() {
+        bail!("no .docx inputs found");
+    }
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    let cases: Vec<Case> = files
+        .iter()
+        .map(|f| Case { name: f.display().to_string(), markdown: String::new() })
+        .collect();
+    for (file, case) in files.iter().zip(&cases) {
+        let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
+        let ours = serde_json::to_value(
+            ferrodoc_docx::read_docx(&bytes)
+                .with_context(|| format!("ferrodoc failed on {}", file.display()))?,
+        )?;
+        let output = Command::new("pandoc")
+            .args(["-f", "docx", "-t", "json"])
+            .arg(file)
+            .output()
+            .context("running pandoc")?;
+        if !output.status.success() {
+            bail!(
+                "pandoc failed on {}: {}",
+                file.display(),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let theirs: Value = serde_json::from_slice(&output.stdout)?;
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Recursively collect files with the given extension.
+fn collect_files_with_ext(path: &Path, ext: &str, out: &mut Vec<PathBuf>) -> Result<()> {
+    if path.is_dir() {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+            .with_context(|| format!("reading {}", path.display()))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<_>>()?;
+        entries.sort();
+        for entry in entries {
+            if entry.is_dir() || entry.extension().is_some_and(|e| e == ext) {
+                collect_files_with_ext(&entry, ext, out)?;
+            }
+        }
+    } else {
+        out.push(path.to_owned());
+    }
+    Ok(())
 }
 
 /// Compare our HTML writer against `pandoc -t html` per case.

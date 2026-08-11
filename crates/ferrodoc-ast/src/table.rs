@@ -177,7 +177,7 @@ impl From<Cell> for CellRepr {
 /// The head of a table: attributes plus header rows.
 ///
 /// Serializes as the array `[attr, rows]`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(from = "TableHeadRepr", into = "TableHeadRepr")]
 pub struct TableHead {
     /// The head's attributes.
@@ -234,7 +234,7 @@ impl From<TableBody> for TableBodyRepr {
 /// The foot of a table: attributes plus footer rows.
 ///
 /// Serializes as the array `[attr, rows]`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(from = "TableFootRepr", into = "TableFootRepr")]
 pub struct TableFoot {
     /// The foot's attributes.

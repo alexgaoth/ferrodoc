@@ -6,6 +6,7 @@ members = [
     "crates/ferrodoc-html",
     "crates/ferrodoc-text",
     "crates/ferrodoc-harness",
+    "crates/ferrodoc-docx",
 ]
 
 [workspace.package]

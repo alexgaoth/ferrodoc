@@ -1,0 +1,18 @@
+[package]
+name = "ferrodoc-docx"
+description = "DOCX reader producing the ferrodoc (pandoc-compatible) AST"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ferrodoc-ast = { workspace = true }
+quick-xml = "0.41"
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
