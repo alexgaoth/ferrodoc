@@ -6,12 +6,26 @@
 //! runs of spaces collapse to a single `Space`, line endings inside a
 //! paragraph become `SoftBreak`.
 //!
-//! Pandoc's commonmark reader (commonmark-hs) has a few observable
-//! tokenizer-level behaviors this reader reproduces deliberately:
-//! tabs are expanded to 4-column tab stops everywhere (even inside code),
-//! a fenced code block keeps its trailing newline only when the fence is
-//! never closed, and an unclosed type-1–5 HTML block that runs to the end
-//! of the document gains one extra trailing newline.
+//! Pandoc's commonmark reader (commonmark-hs) has observable tokenizer-level
+//! behaviors this reader reproduces deliberately:
+//!
+//! - tabs are expanded to 4-column tab stops everywhere (even inside code),
+//!   and input is treated as if it ended with a newline;
+//! - a fenced code block whose closing fence never appears keeps its
+//!   literal untouched when it sits outside any blockquote and only blank
+//!   lines separate it from EOF; every other fence (closed, quote-nested,
+//!   or truncated by later content) loses exactly one trailing newline;
+//! - an unclosed type-1–5 raw HTML block outside blockquotes absorbs the
+//!   blank lines that follow it, plus one bonus newline when only blank
+//!   lines separate it from EOF.
+//!
+//! Known divergence (documented, not silently ignored): in pathological
+//! nested-delimiter runs such as `*_*_deep_*_*`, comrak resolves emphasis
+//! the way the cmark reference implementation does, while pandoc's
+//! commonmark-hs builds a structurally different tree. Reproducing that
+//! would require replacing comrak's inline parser and is out of scope for
+//! this reader; ordinary emphasis, including intraword and mismatched
+//! delimiters like `**a* b`, matches pandoc exactly.
 
 use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue};
 use comrak::{Arena, Options, parse_document};
@@ -24,41 +38,46 @@ use std::borrow::Cow;
 /// Parse a `CommonMark` document into a [`Pandoc`] AST equivalent to
 /// pandoc's commonmark reader output.
 pub fn read_commonmark(input: &str) -> Pandoc {
-    let expanded = expand_tabs(input);
-    let src = Source { lines: expanded.split('\n').collect() };
+    let prepared = preprocess(input);
+    let mut lines: Vec<&str> = prepared.split('\n').collect();
+    if lines.last() == Some(&"") {
+        lines.pop(); // the final newline produces one phantom empty piece
+    }
+    let src = Src { lines };
     let arena = Arena::new();
-    let root = parse_document(&arena, &expanded, &Options::default());
-    Pandoc::new(blocks(root.children(), &src))
+    let root = parse_document(&arena, &prepared, &Options::default());
+    Pandoc::new(blocks(root.children(), &src, false))
 }
 
-/// The tab-expanded source, split into lines for fence/EOF lookups.
-struct Source<'s> {
+/// The preprocessed source lines, for looking at what follows a node.
+struct Src<'s> {
     lines: Vec<&'s str>,
 }
 
-impl Source<'_> {
-    /// 1-based line lookup, as used by comrak's sourcepos.
-    fn line(&self, number: usize) -> &str {
-        self.lines.get(number.wrapping_sub(1)).copied().unwrap_or("")
-    }
-
-    /// Whether the 1-based line number is at (or past) the last source line.
-    fn is_last_line(&self, number: usize) -> bool {
-        let mut count = self.lines.len();
-        if self.lines.last() == Some(&"") {
-            count -= 1; // a trailing newline produces one empty trailing piece
-        }
-        number >= count
+impl Src<'_> {
+    /// Whether every line after the 1-based line number `after` is blank
+    /// (i.e. only blank lines separate it from EOF).
+    fn only_blanks_after(&self, after: usize) -> bool {
+        self.lines
+            .iter()
+            .skip(after)
+            .all(|l| l.trim().is_empty())
     }
 }
 
-/// Expand tabs to 4-column tab stops, counting one column per `char`,
-/// exactly like pandoc's tokenizer.
-fn expand_tabs(input: &str) -> Cow<'_, str> {
-    if !input.contains('\t') {
+/// Number of lines in a newline-terminated literal (its trailing newline
+/// does not start a new line).
+fn literal_lines(literal: &str) -> usize {
+    literal.split('\n').count() - usize::from(literal.ends_with('\n') || literal.is_empty())
+}
+
+/// Expand tabs to 4-column tab stops (counting one column per `char`) and
+/// guarantee a trailing newline, exactly like pandoc's tokenizer.
+fn preprocess(input: &str) -> Cow<'_, str> {
+    if !input.contains('\t') && input.ends_with('\n') {
         return Cow::Borrowed(input);
     }
-    let mut out = String::with_capacity(input.len());
+    let mut out = String::with_capacity(input.len() + 1);
     let mut col = 0usize;
     for ch in input.chars() {
         match ch {
@@ -77,14 +96,24 @@ fn expand_tabs(input: &str) -> Cow<'_, str> {
             }
         }
     }
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
     Cow::Owned(out)
 }
 
-fn blocks<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, src: &Source) -> Vec<Block> {
-    nodes.filter_map(|n| block(n, src)).collect()
+/// Map block-level nodes. `in_quote` is true when any ancestor is a
+/// blockquote — pandoc's trailing-newline rules differ there (see crate
+/// docs).
+fn blocks<'a>(
+    nodes: impl Iterator<Item = &'a AstNode<'a>>,
+    src: &Src,
+    in_quote: bool,
+) -> Vec<Block> {
+    nodes.filter_map(|n| block(n, src, in_quote)).collect()
 }
 
-fn block<'a>(node: &'a AstNode<'a>, src: &Source) -> Option<Block> {
+fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
         NodeValue::Paragraph => Some(Block::Para(inlines(node.children()))),
@@ -93,20 +122,20 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Source) -> Option<Block> {
             Attr::default(),
             inlines(node.children()),
         )),
-        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src))),
+        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src, true))),
         NodeValue::CodeBlock(cb) => {
-            // Pandoc keeps the trailing newline only for a fenced block whose
-            // closing fence never appears AND that runs to the end of the
-            // document; unclosed fences at a container boundary are stripped
-            // like closed ones.
-            let unclosed_at_eof = cb.fenced
-                && !is_closing_fence(
-                    src.line(data.sourcepos.end.line),
-                    char::from(cb.fence_char),
-                    cb.fence_length,
-                )
-                && src.is_last_line(data.sourcepos.end.line);
-            let text = if unclosed_at_eof {
+            // Pandoc keeps the literal untouched only for a fence that is
+            // never closed, sits outside any blockquote, and is followed by
+            // nothing but blank lines; every other fence loses one trailing
+            // newline (which also drops a trailing blank line comrak kept).
+            // Content lines start on the line after the opening fence, so
+            // the block's last line is start.line + the literal line count.
+            // (Sourcepos *end* lines are unreliable for unclosed blocks.)
+            let keep_literal = cb.fenced
+                && !cb.closed
+                && !in_quote
+                && src.only_blanks_after(data.sourcepos.start.line + literal_lines(&cb.literal));
+            let text = if keep_literal {
                 &cb.literal
             } else {
                 cb.literal.strip_suffix('\n').unwrap_or(&cb.literal)
@@ -124,11 +153,16 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Source) -> Option<Block> {
         }
         NodeValue::HtmlBlock(hb) => {
             let mut literal = hb.literal.clone();
-            // An unclosed type-1..5 HTML block that runs to the end of the
-            // document gains one extra newline in pandoc's output.
+            // An unclosed type-1..5 HTML block (outside blockquotes) gains
+            // one bonus newline when only blank lines separate it from EOF.
+            // Comrak's literal already contains the block's trailing blank
+            // lines; its first line is the node's start line.
             if (1..=5).contains(&hb.block_type)
                 && !contains_closer(&literal, hb.block_type)
-                && src.is_last_line(data.sourcepos.end.line)
+                && !in_quote
+                && src.only_blanks_after(
+                    data.sourcepos.start.line + literal_lines(&literal) - 1,
+                )
             {
                 literal.push('\n');
             }
@@ -139,7 +173,7 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Source) -> Option<Block> {
             let items: Vec<Vec<Block>> = node
                 .children()
                 .map(|item| {
-                    let mut bs = blocks(item.children(), src);
+                    let mut bs = blocks(item.children(), src, in_quote);
                     if nl.tight {
                         for b in &mut bs {
                             if let Block::Para(is) = b {
@@ -171,29 +205,6 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Source) -> Option<Block> {
     }
 }
 
-/// Whether `line` is a valid closing fence for a fence of `ch` repeated at
-/// least `min` times: optional blockquote markers, at most 3 spaces of
-/// indent, the fence characters, then only whitespace.
-fn is_closing_fence(line: &str, ch: char, min: usize) -> bool {
-    let mut s = line;
-    loop {
-        let trimmed = s.trim_start_matches(' ');
-        if s.len() - trimmed.len() <= 3
-            && let Some(rest) = trimmed.strip_prefix('>')
-        {
-            s = rest.strip_prefix(' ').unwrap_or(rest);
-        } else {
-            break;
-        }
-    }
-    let trimmed = s.trim_start_matches(' ');
-    if s.len() - trimmed.len() > 3 {
-        return false;
-    }
-    let n = trimmed.chars().take_while(|&c| c == ch).count();
-    n >= min && trimmed.chars().skip(n).all(|c| c == ' ' || c == '\t')
-}
-
 /// Whether a type-1..5 HTML block's literal contains its closing marker.
 fn contains_closer(literal: &str, block_type: u8) -> bool {
     match block_type {
@@ -216,7 +227,7 @@ fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>) -> Vec<Inline> {
     for node in nodes {
         inline(node, &mut out);
     }
-    coalesce(out)
+    out
 }
 
 fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
@@ -246,36 +257,30 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
 
 /// Tokenize literal text the way pandoc does: words become [`Inline::Str`],
 /// runs of ASCII spaces become a single [`Inline::Space`]. Non-breaking
-/// spaces and other Unicode whitespace stay inside `Str`.
+/// spaces and other Unicode whitespace stay inside `Str`. Comrak already
+/// merges adjacent literal text (including across entities), so no further
+/// coalescing is needed — or wanted: pandoc keeps separate `Str` tokens
+/// where its own parse produces them.
 fn text_tokens(text: &str, out: &mut Vec<Inline>) {
     let mut word = String::new();
+    let mut in_spaces = false;
     for ch in text.chars() {
         if ch == ' ' {
             if !word.is_empty() {
                 out.push(Inline::Str(std::mem::take(&mut word)));
             }
-            out.push(Inline::Space);
+            if !in_spaces {
+                out.push(Inline::Space);
+                in_spaces = true;
+            }
         } else {
+            in_spaces = false;
             word.push(ch);
         }
     }
     if !word.is_empty() {
         out.push(Inline::Str(word));
     }
-}
-
-/// Merge adjacent `Str` tokens (comrak may split text at entity boundaries)
-/// and collapse repeated `Space` tokens, matching pandoc's tokenization.
-fn coalesce(tokens: Vec<Inline>) -> Vec<Inline> {
-    let mut out: Vec<Inline> = Vec::with_capacity(tokens.len());
-    for token in tokens {
-        match (out.last_mut(), token) {
-            (Some(Inline::Str(prev)), Inline::Str(next)) => prev.push_str(&next),
-            (Some(Inline::Space), Inline::Space) => {}
-            (_, token) => out.push(token),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -299,7 +304,6 @@ mod tests {
 
     #[test]
     fn tabs_expand_to_four_column_stops() {
-        // "foo\tbaz\t\tbim" as indented code: pandoc expands tabs.
         assert_eq!(
             doc("\tfoo\tbaz\t\tbim\n"),
             serde_json::json!([{"t": "CodeBlock", "c": [["", [], []], "foo baz     bim"]}])
@@ -307,14 +311,67 @@ mod tests {
     }
 
     #[test]
-    fn closed_fence_strips_trailing_newline_unclosed_keeps_it() {
+    fn fence_newline_rules() {
+        // Closed: stripped.
         assert_eq!(
             doc("```\naaa\n```\n"),
             serde_json::json!([{"t": "CodeBlock", "c": [["", [], []], "aaa"]}])
         );
+        // Unclosed at EOF (with or without final newline): kept.
         assert_eq!(
             doc("```\naaa\n"),
             serde_json::json!([{"t": "CodeBlock", "c": [["", [], []], "aaa\n"]}])
+        );
+        assert_eq!(
+            doc("```\naaa"),
+            serde_json::json!([{"t": "CodeBlock", "c": [["", [], []], "aaa\n"]}])
+        );
+        // Unclosed inside a blockquote: stripped.
+        assert_eq!(
+            doc("> ```\n> aaa\n"),
+            serde_json::json!([{"t": "BlockQuote", "c": [
+                {"t": "CodeBlock", "c": [["", [], []], "aaa"]}
+            ]}])
+        );
+        // Unclosed inside a list: kept.
+        assert_eq!(
+            doc("- ```\n  aaa\n"),
+            serde_json::json!([{"t": "BulletList", "c": [[
+                {"t": "CodeBlock", "c": [["", [], []], "aaa\n"]}
+            ]]}])
+        );
+        // Closed fence indented inside a nested list: stripped.
+        assert_eq!(
+            doc("  - ```\n    aaa\n    ```\n"),
+            serde_json::json!([{"t": "BulletList", "c": [[
+                {"t": "CodeBlock", "c": [["", [], []], "aaa"]}
+            ]]}])
+        );
+    }
+
+    #[test]
+    fn html_block_newline_rules() {
+        // Unclosed comment at EOF gains one newline.
+        assert_eq!(
+            doc("<!-- x\n"),
+            serde_json::json!([{"t": "RawBlock", "c": ["html", "<!-- x\n\n"]}])
+        );
+        // Also when blank lines intervene.
+        assert_eq!(
+            doc("<!-- x\n\n"),
+            serde_json::json!([{"t": "RawBlock", "c": ["html", "<!-- x\n\n\n"]}])
+        );
+        // But not inside a blockquote.
+        assert_eq!(
+            doc("> <!-- x\n"),
+            serde_json::json!([{"t": "BlockQuote", "c": [
+                {"t": "RawBlock", "c": ["html", "<!-- x\n"]}
+            ]}])
+        );
+        // Closed blocks are unchanged.
+        assert_eq!(
+            doc("<!-- x -->\n"),
+            serde_json::json!([{"t": "RawBlock", "c": ["html", "<!-- x -->\n"]}])
         );
     }
 
@@ -324,6 +381,25 @@ mod tests {
             doc("a  b\n"),
             serde_json::json!([{"t": "Para", "c": [
                 {"t": "Str", "c": "a"}, {"t": "Space"}, {"t": "Str", "c": "b"}
+            ]}])
+        );
+    }
+
+    #[test]
+    fn failed_delimiters_stay_as_pandoc_tokenizes_them() {
+        assert_eq!(
+            doc("**a* b\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "*"},
+                {"t": "Emph", "c": [{"t": "Str", "c": "a"}]},
+                {"t": "Space"}, {"t": "Str", "c": "b"}
+            ]}])
+        );
+        assert_eq!(
+            doc("a _b c\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "a"}, {"t": "Space"},
+                {"t": "Str", "c": "_b"}, {"t": "Space"}, {"t": "Str", "c": "c"}
             ]}])
         );
     }

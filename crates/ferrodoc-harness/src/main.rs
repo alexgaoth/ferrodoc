@@ -186,7 +186,13 @@ fn first_divergence(ours: &Value, theirs: &Value, path: &str) -> String {
                     return first_divergence(x, y, &format!("{path}/{i}"));
                 }
             }
-            format!("{path} (array lengths {} vs {})", a.len(), b.len())
+            format!(
+                "{path} (array lengths {} vs {}): ours={} theirs={}",
+                a.len(),
+                b.len(),
+                truncate(&Value::Array(a.clone())),
+                truncate(&Value::Array(b.clone())),
+            )
         }
         (a, b) => format!("{path}: ours={} theirs={}", truncate(a), truncate(b)),
     }
