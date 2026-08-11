@@ -25,7 +25,7 @@ serde = { version = "1", features = ["derive"] }
 # so comparing our AST against pandoc's JSON never reports a phantom
 # 1-ULP difference in table column widths.
 serde_json = { version = "1", features = ["float_roundtrip"] }
-comrak = "0.54"
+comrak = { version = "0.54", default-features = false }
 anyhow = "1"
 
 [workspace.lints.rust]
