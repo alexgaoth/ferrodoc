@@ -39,7 +39,7 @@
 //!   one), consecutive bookmarks alias to the first, and internal links
 //!   are rewritten to the identifiers actually emitted;
 //! - style *names* are compared ignoring case but not whitespace, so a
-//!   concept pandoc spells two ways ("Source Code" and "SourceCode") lists
+//!   concept pandoc spells two ways ("Source Code" and `SourceCode`) lists
 //!   both; a heading is exactly "heading <n>" with one space, and a
 //!   heading's own style name — not its ancestors' — becomes a class;
 //! - a caption style must be the paragraph's *own* style; deriving a style
@@ -80,7 +80,7 @@
 //!   to the empty item instead of pandoc's separate item
 //!   (`corpus/docx/spec-09.docx`, the one corpus document that differs);
 //! - paragraphs whose style is a near-miss for a known one ("Definition
-//!   Term" spelled "DefinitionTerm", say) become plain paragraphs, where
+//!   Term" spelled `DefinitionTerm`, say) become plain paragraphs, where
 //!   pandoc emits custom-style divs — the same out-of-scope mechanism;
 //! - XML attribute values are normalized per the XML specification, so a
 //!   style name containing a tab compares equal to the spaced spelling
