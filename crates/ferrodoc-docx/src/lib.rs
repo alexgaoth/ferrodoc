@@ -34,7 +34,20 @@
 //! - lists are *not* rebuilt inside footnotes, only in the body and in
 //!   table cells;
 //! - bookmarks become empty anchor spans, but an anchor nothing links to
-//!   is dropped again at the end of the conversion.
+//!   is dropped again at the end of the conversion; anchors take part in
+//!   identifier uniquing (so a later heading auto-id cannot collide with
+//!   one), consecutive bookmarks alias to the first, and internal links
+//!   are rewritten to the identifiers actually emitted;
+//! - style *names* are compared ignoring case and spaces, but a heading
+//!   style needs the space ("heading 1" is a heading, "Heading1" is not),
+//!   and a heading's own style name — not its ancestors' — becomes a class;
+//! - inline code is the character style whose own name is "Verbatim Char",
+//!   and a code run takes only its vertical alignment, not the rest of its
+//!   run formatting;
+//! - an indented, unnumbered paragraph is a block quote, as are the
+//!   "Block Text", "Quote", "Block Quotation" and "Intense Quote" styles;
+//! - a run's `w:highlight` becomes a "mark" span, `w:tab` a space (a tab
+//!   inside code), and endnotes are read like footnotes.
 //!
 //! Milestone scope (Phase 2, reader core): paragraphs and formatting runs,
 //! headings, hyperlinks, inline code, lists, definition lists, tables
@@ -52,7 +65,13 @@
 //!   TeX, so `a^{2}` reads back as `a2`;
 //! - an empty list item followed by deeper items attaches the nested list
 //!   to the empty item instead of pandoc's separate item
-//!   (`corpus/docx/spec-09.docx`, the one corpus document that differs).
+//!   (`corpus/docx/spec-09.docx`, the one corpus document that differs);
+//! - definition styles are matched case-insensitively, so lowercase
+//!   "definition term" yields a definition list where pandoc, which is
+//!   case-sensitive here, falls back to its custom-style divs;
+//! - conversion is bounded: XML deeper than 256 elements is rejected, and
+//!   container nesting beyond 64 levels (or a self-referential footnote)
+//!   drops the remaining content rather than recursing without limit.
 
 mod combine;
 mod xml;
@@ -109,6 +128,7 @@ pub fn read_docx(bytes: &[u8]) -> Result<Pandoc, Error> {
     let numbering = part("word/numbering.xml");
     let rels = part("word/_rels/document.xml.rels");
     let footnotes = part("word/footnotes.xml");
+    let endnotes = part("word/endnotes.xml");
     let styles = part("word/styles.xml");
 
     let document = xml::parse(&document)?;
@@ -123,6 +143,7 @@ pub fn read_docx(bytes: &[u8]) -> Result<Pandoc, Error> {
             .map(parse_rels)
             .unwrap_or_default(),
         footnotes: footnotes.as_deref().map(xml::parse).transpose()?,
+        endnotes: endnotes.as_deref().map(xml::parse).transpose()?,
         styles: styles
             .as_deref()
             .map(xml::parse)
@@ -184,7 +205,18 @@ struct State {
     used_idents: HashSet<String>,
     /// Last number used per (`w:numId`, level).
     list_numbers: HashMap<(String, usize), i64>,
+    /// Bookmark name to the identifier actually emitted for it.
+    anchors: HashMap<String, String>,
+    /// Container nesting depth, to bound recursion on hostile input.
+    depth: usize,
+    /// Footnote ids currently being expanded, to break reference cycles.
+    open_notes: HashSet<String>,
 }
+
+/// The deepest container nesting converted. Real documents nest a handful
+/// of levels; beyond this the input is hostile and the remaining content
+/// is dropped rather than overflowing the stack.
+const MAX_NESTING: usize = 64;
 
 impl State {
     /// Pandoc's `auto_identifiers`: keep alphanumerics, whitespace and
@@ -222,6 +254,18 @@ impl State {
     fn claim_ident(&mut self, id: String) -> String {
         self.used_idents.insert(id.clone());
         id
+    }
+
+    /// Make `name` unique among the identifiers already used, suffixing
+    /// `-1`, `-2`, … like pandoc.
+    fn ident_from(&mut self, name: &str) -> String {
+        let mut unique = name.to_owned();
+        let mut n = 0;
+        while !self.used_idents.insert(unique.clone()) {
+            n += 1;
+            unique = format!("{name}-{n}");
+        }
+        unique
     }
 
     /// The number this list item takes: a numbering instance picks up
@@ -262,6 +306,7 @@ struct Ctx {
     numbering: Option<Node>,
     rels: HashMap<String, String>,
     footnotes: Option<Node>,
+    endnotes: Option<Node>,
     styles: HashMap<String, (String, Option<String>)>,
     text_width: f64,
 }
@@ -291,6 +336,20 @@ fn collect_link_targets(blocks: &[Block], out: &mut HashSet<String>) {
             && let Some(anchor) = target.url.strip_prefix('#')
         {
             out.insert(anchor.to_owned());
+        }
+    });
+}
+
+/// Point internal links at the identifiers the bookmarks actually got.
+fn rewrite_internal_links(blocks: &mut [Block], anchors: &HashMap<String, String>) {
+    map_inline_lists(blocks, &mut |inlines| {
+        for inline in inlines.iter_mut() {
+            if let Inline::Link(_, _, target) = inline
+                && let Some(name) = target.url.strip_prefix('#')
+                && let Some(id) = anchors.get(name)
+            {
+                target.url = format!("#{id}");
+            }
         }
     });
 }
@@ -530,7 +589,7 @@ impl Ctx {
         for (i, node) in elems.iter().enumerate() {
             if let Some(field) = self.meta_field(node) {
                 fields.push((field, self.inlines(node, state)));
-            } else if !(node.name == "p" && self.inlines(node, state).is_empty()) {
+            } else if !(node.name == "p" && paragraph_is_blank(node)) {
                 break;
             }
             rest = i + 1;
@@ -538,6 +597,7 @@ impl Ctx {
         let meta = build_meta(fields);
         let mut blocks = self.blocks_of(&elems[rest..], state, true);
         // Pandoc drops anchors that no internal link points at.
+        rewrite_internal_links(&mut blocks, &state.anchors);
         let mut targets = HashSet::new();
         collect_link_targets(&blocks, &mut targets);
         remove_orphan_anchors(&mut blocks, &targets);
@@ -558,6 +618,16 @@ impl Ctx {
 
     /// Convert an already-collected run of body parts.
     fn blocks_of(&self, elems: &[&Node], state: &mut State, lists: bool) -> Vec<Block> {
+        if state.depth >= MAX_NESTING {
+            return Vec::new();
+        }
+        state.depth += 1;
+        let blocks = self.blocks_inner(elems, state, lists);
+        state.depth -= 1;
+        blocks
+    }
+
+    fn blocks_inner(&self, elems: &[&Node], state: &mut State, lists: bool) -> Vec<Block> {
         let mut segments: Vec<Vec<Block>> = Vec::new();
         let mut list: Vec<ListItem> = Vec::new();
         let mut definitions: Vec<(Vec<Inline>, Vec<Vec<Block>>)> = Vec::new();
@@ -667,16 +737,7 @@ impl Ctx {
     /// name then each `basedOn` ancestor. Bounded so a cyclic chain cannot
     /// hang.
     fn style_names(&self, node: &Node) -> Vec<&str> {
-        let mut names = Vec::new();
-        let mut style: Option<&str> = Some(para_style(node));
-        for _ in 0..16 {
-            let Some((name, based_on)) = style.and_then(|id| self.styles.get(id)) else {
-                break;
-            };
-            names.push(name.as_str());
-            style = based_on.as_deref();
-        }
-        names
+        self.names_of_style(para_style(node))
     }
 
     /// Whether a paragraph's style (or one it is based on) is named
@@ -691,20 +752,44 @@ impl Ctx {
             })
     }
 
+    /// The names of a style id and the styles it is based on.
+    fn names_of_style(&self, id: &str) -> Vec<&str> {
+        let mut names = Vec::new();
+        let mut style = Some(id);
+        for _ in 0..16 {
+            let Some((name, based_on)) = style.and_then(|id| self.styles.get(id)) else {
+                break;
+            };
+            names.push(name.as_str());
+            style = based_on.as_deref();
+        }
+        names
+    }
+
     /// Whether a paragraph inherits any of the given style names
     /// (case-insensitive).
     fn has_style_name(&self, node: &Node, names: &[&str]) -> bool {
         self.style_names(node)
             .iter()
-            .any(|name| names.iter().any(|n| name.eq_ignore_ascii_case(n)))
+            .any(|name| names.iter().any(|n| same_style_name(name, n)))
     }
 
-    /// The heading level of a paragraph styled "Heading <n>".
+    /// The heading level of a paragraph whose style is named "Heading <n>"
+    /// (any case). The space is required: Word's "Heading1" is a different
+    /// style and pandoc does not treat it as a heading.
     fn heading_level(&self, node: &Node) -> Option<i64> {
-        self.style_names(node).iter().find_map(|name| {
-            let rest = name.strip_prefix("Heading").or_else(|| name.strip_prefix("heading"))?;
-            rest.trim().parse::<i64>().ok().filter(|n| (1..=9).contains(n))
-        })
+        self.style_names(node).iter().find_map(|name| heading_level_of(name))
+    }
+
+    /// A heading's classes: the paragraph's own style name, when that is
+    /// not itself "Heading <n>", with spaces turned into dashes. Ancestor
+    /// styles do not contribute — they only supply the level.
+    fn heading_classes(&self, node: &Node) -> Vec<String> {
+        self.style_names(node)
+            .first()
+            .filter(|name| heading_level_of(name).is_none())
+            .map(|name| vec![name.replace(char::is_whitespace, "-")])
+            .unwrap_or_default()
     }
 
     /// The metadata field a paragraph's style maps to, if any.
@@ -712,13 +797,17 @@ impl Ctx {
         if node.name != "p" {
             return None;
         }
-        self.style_names(node).iter().find_map(|name| match *name {
-            "Title" => Some("title"),
-            "Subtitle" => Some("subtitle"),
-            "Author" => Some("author"),
-            "Date" => Some("date"),
-            "Abstract" => Some("abstract"),
-            _ => None,
+        self.style_names(node).iter().find_map(|name| {
+            [
+                ("Title", "title"),
+                ("Subtitle", "subtitle"),
+                ("Author", "author"),
+                ("Date", "date"),
+                ("Abstract", "abstract"),
+            ]
+            .into_iter()
+            .find(|(style, _)| same_style_name(name, style))
+            .map(|(_, field)| field)
         })
     }
 
@@ -727,10 +816,14 @@ impl Ctx {
         if node.name != "p" {
             return None;
         }
-        self.style_names(node).iter().find_map(|name| match *name {
-            "Definition Term" => Some(DefinitionRole::Term),
-            "Definition" => Some(DefinitionRole::Definition),
-            _ => None,
+        self.style_names(node).iter().find_map(|name| {
+            if same_style_name(name, "Definition Term") {
+                Some(DefinitionRole::Term)
+            } else if same_style_name(name, "Definition") {
+                Some(DefinitionRole::Definition)
+            } else {
+                None
+            }
         })
     }
 
@@ -841,7 +934,11 @@ impl Ctx {
             };
             return Some(Block::Header(
                 level,
-                Attr { identifier: id, ..Attr::default() },
+                Attr {
+                    identifier: id,
+                    classes: self.heading_classes(p),
+                    attributes: Vec::new(),
+                },
                 inlines,
             ));
         }
@@ -860,7 +957,21 @@ impl Ctx {
         if inlines.is_empty() {
             return None;
         }
-        if self.has_style_name(p, &["Block Text", "Quote", "Block Quote"]) {
+        // Indented, unnumbered paragraphs are quotes for pandoc too.
+        let indented = p
+            .child("pPr")
+            .filter(|pr| pr.child("numPr").is_none())
+            .and_then(|pr| pr.child("ind"))
+            .and_then(|ind| ind.attr("w:left"))
+            .and_then(|v| v.parse::<i64>().ok())
+            .is_some_and(|left| left > 0)
+            && !self.has_style_name(p, &["List Paragraph"]);
+        if indented
+            || self.has_style_name(
+                p,
+                &["Block Text", "Quote", "Block Quote", "Block Quotation", "Intense Quote"],
+            )
+        {
             return Some(Block::BlockQuote(vec![Block::Para(inlines)]));
         }
         if self.has_style_name(p, &["Compact"]) {
@@ -944,11 +1055,7 @@ impl Ctx {
             .zip(grid)
             .map(|(alignment, width)| ColSpec {
                 alignment,
-                width: if width == 0.0 {
-                    ColWidth::ColWidthDefault
-                } else {
-                    ColWidth::ColWidth(width)
-                },
+                width: ColWidth::ColWidth(width),
             })
             .collect();
 
@@ -993,14 +1100,14 @@ impl Ctx {
         let Some(grid) = tbl.child("tblGrid") else {
             return Vec::new();
         };
-        let columns: Vec<f64> = grid
+        // A column without a width invalidates the whole grid, as in pandoc.
+        let Some(columns) = grid
             .children_named("gridCol")
-            .map(|c| {
-                c.attr("w:w")
-                    .and_then(|w| w.parse::<f64>().ok())
-                    .unwrap_or(0.0)
-            })
-            .collect();
+            .map(|c| c.attr("w:w").and_then(|w| w.parse::<f64>().ok()))
+            .collect::<Option<Vec<f64>>>()
+        else {
+            return Vec::new();
+        };
         #[allow(clippy::cast_precision_loss)]
         let total = self.text_width - 10.0 * (columns.len().saturating_sub(1)) as f64;
         let mut fractions: Vec<f64> = columns.iter().map(|w| w / total).collect();
@@ -1071,9 +1178,27 @@ impl Ctx {
                 // still have a target. Word's own `_GoBack` is noise.
                 "bookmarkStart" => {
                     if let Some(name) = node.attr("w:name").filter(|n| *n != "_GoBack") {
+                        // Registering the anchor keeps later heading auto
+                        // identifiers from colliding with it, and renames a
+                        // repeated bookmark the way pandoc does.
+                        // Consecutive bookmarks alias to the first one.
+                        if let Some(previous) = out.last().and_then(|seq| match seq.as_slice() {
+                            [Inline::Span(attr, content)]
+                                if content.is_empty()
+                                    && attr.classes.iter().any(|c| c == "anchor") =>
+                            {
+                                Some(attr.identifier.clone())
+                            }
+                            _ => None,
+                        }) {
+                            state.anchors.insert(name.to_owned(), previous);
+                            continue;
+                        }
+                        let id = state.ident_from(name);
+                        state.anchors.insert(name.to_owned(), id.clone());
                         out.push(vec![Inline::Span(
                             Attr {
-                                identifier: name.to_owned(),
+                                identifier: id,
                                 classes: vec!["anchor".to_owned()],
                                 attributes: Vec::new(),
                             },
@@ -1088,11 +1213,18 @@ impl Ctx {
                     }
                 }
                 "hyperlink" => {
-                    let url = node
-                        .attr("r:id")
-                        .and_then(|id| self.rels.get(id).cloned())
-                        .or_else(|| node.attr("w:anchor").map(|a| format!("#{a}")))
-                        .unwrap_or_default();
+                    // An external link may carry a fragment separately.
+                    let url = match (
+                        node.attr("r:id").and_then(|id| self.rels.get(id)),
+                        node.attr("w:anchor"),
+                    ) {
+                        (Some(target), Some(fragment)) => format!("{target}#{fragment}"),
+                        (Some(target), None) => target.clone(),
+                        (None, Some(fragment)) if node.attr("r:id").is_none() => {
+                            format!("#{fragment}")
+                        }
+                        _ => String::new(),
+                    };
                     let mut inner = Vec::new();
                     self.inline_sequences(node, &mut inner, state);
                     out.push(vec![Inline::Link(
@@ -1114,21 +1246,28 @@ impl Ctx {
     /// A single run as a formatted inline sequence.
     fn run(&self, r: &Node, state: &mut State) -> Vec<Inline> {
         let rpr = r.child("rPr");
-        let rstyle = rpr
+        // Inline code is a character style *named* "Verbatim Char".
+        let is_code = rpr
             .and_then(|p| p.child("rStyle"))
             .and_then(|s| s.attr("w:val"))
-            .unwrap_or("");
-        if rstyle == "VerbatimChar" {
-            // Inline code: raw text, spaces preserved, no tokenization.
+            .is_some_and(|id| {
+                // The run style's *own* name, not its ancestors': pandoc's
+                // syntax-token styles are based on Verbatim Char and are
+                // not themselves code.
+                self.styles
+                    .get(id)
+                    .is_some_and(|(name, _)| name.eq_ignore_ascii_case("Verbatim Char"))
+            });
+        let mut tokens = Vec::new();
+        if is_code {
+            // Raw text, spaces and tabs preserved, no tokenization.
             let text = raw_run_text(r);
             if text.is_empty() {
                 return Vec::new();
             }
-            return vec![Inline::Code(Attr::default(), text)];
+            tokens.push(Inline::Code(Attr::default(), text));
         }
-
-        let mut tokens = Vec::new();
-        for node in r.elems() {
+        for node in r.elems().filter(|_| !is_code) {
             match node.name.as_str() {
                 "t" => text_tokens(&node.text(), &mut tokens),
                 "br" => tokens.push(Inline::LineBreak),
@@ -1152,7 +1291,12 @@ impl Ctx {
                     }
                 }
                 "footnoteReference" => {
-                    if let Some(note) = self.footnote(node, state) {
+                    if let Some(note) = self.note(node, self.footnotes.as_ref(), "footnote", state) {
+                        tokens.push(note);
+                    }
+                }
+                "endnoteReference" => {
+                    if let Some(note) = self.note(node, self.endnotes.as_ref(), "endnote", state) {
                         tokens.push(note);
                     }
                 }
@@ -1170,21 +1314,23 @@ impl Ctx {
             .and_then(|p| p.child("vertAlign"))
             .and_then(|v| v.attr("w:val"));
         // Modifier stack, outermost first (a bold+italic run is
-        // Emph[Strong[…]] in pandoc's output).
+        // Emph[Strong[…]] in pandoc's output). A code run takes only its
+        // vertical alignment: pandoc builds inline code directly and skips
+        // the rest of the run's formatting.
         let mut modifiers = Vec::new();
-        if flag("i") {
+        if !is_code && flag("i") {
             modifiers.push(Modifier::Emph);
         }
-        if flag("b") {
+        if !is_code && flag("b") {
             modifiers.push(Modifier::Strong);
         }
-        if flag("smallCaps") {
+        if !is_code && flag("smallCaps") {
             modifiers.push(Modifier::SmallCaps);
         }
-        if flag("strike") {
+        if !is_code && flag("strike") {
             modifiers.push(Modifier::Strikeout);
         }
-        if flag("u") {
+        if !is_code && flag("u") {
             modifiers.push(Modifier::Underline);
         }
         if vert == Some("superscript") {
@@ -1192,6 +1338,18 @@ impl Ctx {
         }
         if vert == Some("subscript") {
             modifiers.push(Modifier::Subscript);
+        }
+        // Highlighted text becomes a "mark" span, like pandoc.
+        if !is_code
+            && rpr
+                .and_then(|p| p.child("highlight"))
+                .is_some_and(|h| h.attr("w:val") != Some("none"))
+        {
+            modifiers.push(Modifier::Span(Attr {
+                identifier: String::new(),
+                classes: vec!["mark".to_owned()],
+                attributes: Vec::new(),
+            }));
         }
         stack(&modifiers, tokens)
     }
@@ -1220,14 +1378,26 @@ impl Ctx {
         ))
     }
 
-    fn footnote(&self, reference: &Node, state: &mut State) -> Option<Inline> {
+    fn note(
+        &self,
+        reference: &Node,
+        part: Option<&Node>,
+        element: &str,
+        state: &mut State,
+    ) -> Option<Inline> {
         let id = reference.attr("w:id")?;
-        let footnotes = self.footnotes.as_ref()?;
+        let footnotes = part?;
         let note = footnotes
-            .children_named("footnote")
+            .children_named(element)
             .find(|f| f.attr("w:id") == Some(id))?;
+        // A note that references itself would recurse forever.
+        if !state.open_notes.insert(format!("{element}{id}")) {
+            return None;
+        }
         // Pandoc does not rebuild lists inside notes.
-        Some(Inline::Note(self.blocks(note, state, false)))
+        let blocks = self.blocks(note, state, false);
+        state.open_notes.remove(&format!("{element}{id}"));
+        Some(Inline::Note(blocks))
     }
 }
 
@@ -1244,6 +1414,13 @@ struct LevelInfo {
 /// continuation items (blank marker text) extend the previous item, and
 /// deeper runs recurse into it.
 fn build_lists(items: &[ListItem]) -> Vec<Block> {
+    build_lists_at(items, 0)
+}
+
+fn build_lists_at(items: &[ListItem], depth: usize) -> Vec<Block> {
+    if depth >= MAX_NESTING {
+        return items.iter().map(|i| i.block.clone()).collect();
+    }
     let mut lists = Vec::new();
     let mut i = 0;
     while i < items.len() {
@@ -1275,7 +1452,7 @@ fn build_lists(items: &[ListItem]) -> Vec<Block> {
                     .iter()
                     .position(|it| it.level == level)
                     .map_or(children.len(), |p| j + p);
-                let sub = build_lists(&children[j..sub_end]);
+                let sub = build_lists_at(&children[j..sub_end], depth + 1);
                 if list_items.is_empty() {
                     list_items.push(Vec::new());
                 }
@@ -1412,9 +1589,6 @@ fn row_spans(cells: &[RawCell], below: Option<&Vec<RawCell>>, below_spans: Optio
 /// span from above, spans that overshoot the grid are clipped, rows that
 /// leave free columns are padded, and cells past the grid are dropped.
 fn normalize_rows(rows: Vec<Row>, columns: usize) -> Vec<Row> {
-    if columns == 0 {
-        return rows;
-    }
     // How many further rows each column is covered for by a span above.
     let mut covered = vec![0usize; columns];
     rows.into_iter()
@@ -1466,6 +1640,42 @@ fn drop_columns(mut n: i64, cells: &[RawCell], from: usize) -> (i64, usize) {
         n -= cell.grid_span;
         i += 1;
     }
+}
+
+/// Whether two style names are the same for pandoc's purposes: case and
+/// spacing are both insignificant.
+fn same_style_name(a: &str, b: &str) -> bool {
+    let strip = |s: &str| {
+        s.chars()
+            .filter(|c| !c.is_whitespace())
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    strip(a) == strip(b)
+}
+
+/// The level of a style named "Heading <n>", any case, space required.
+fn heading_level_of(name: &str) -> Option<i64> {
+    let lower = name.to_lowercase();
+    let rest = lower.strip_prefix("heading")?;
+    if !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    rest.trim().parse::<i64>().ok()
+}
+
+/// Whether a paragraph holds nothing but whitespace, which pandoc allows
+/// between the metadata paragraphs of a title block.
+fn paragraph_is_blank(p: &Node) -> bool {
+    p.elems().all(|n| match n.name.as_str() {
+        "pPr" | "bookmarkStart" | "bookmarkEnd" | "proofErr" => true,
+        "r" => n.elems().all(|c| match c.name.as_str() {
+            "rPr" => true,
+            "t" => c.text().trim().is_empty(),
+            _ => false,
+        }),
+        _ => false,
+    })
 }
 
 /// The paragraph's style id (`w:pPr/w:pStyle/@w:val`), or "".
@@ -1526,6 +1736,7 @@ fn raw_run_text(r: &Node) -> String {
         match node.name.as_str() {
             "t" => out.push_str(&node.text()),
             "br" => out.push('\n'),
+            "tab" => out.push('\t'),
             _ => {}
         }
     }

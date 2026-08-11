@@ -3,12 +3,15 @@ An [anchored span]{#target} that is linked to, and one
 
 Jump to [the target](#target).
 
-A footnote whose body contains a list^[Intro paragraph.
+A footnote whose body contains a list[^withlist] and one with only
+text.[^plain]
 
-- first bullet
-- second bullet
+[^withlist]: Intro paragraph.
 
-Closing note paragraph.] and one with only text.[^plain]
+    - first bullet
+    - second bullet
+
+    Closing note paragraph.
 
 [^plain]: Just a sentence.
 

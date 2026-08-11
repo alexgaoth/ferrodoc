@@ -16,6 +16,15 @@
   <tr><td>c3</td></tr>
 </table>
 
+<p>Header and first body row disagree on alignment (the column alignment
+must come from the body row, not the header):</p>
+
+<table>
+  <tr><th style="text-align: center">H left col</th><th style="text-align: center">H right col</th></tr>
+  <tr><td style="text-align: left">body left</td><td style="text-align: right">body right</td></tr>
+  <tr><td style="text-align: center">c</td><td style="text-align: center">d</td></tr>
+</table>
+
 <p>Alignment-only table, no header:</p>
 
 <table>

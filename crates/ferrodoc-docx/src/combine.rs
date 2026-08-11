@@ -149,15 +149,29 @@ fn difference(a: &[Modifier], b: &[Modifier]) -> Vec<Modifier> {
     rest
 }
 
-/// Append with pandoc `Builder` semantics: adjacent `Str`s merge, and
-/// adjacent spaces/soft breaks collapse.
+/// Append with pandoc `Inlines` builder semantics: at the seam, adjacent
+/// `Str`s and adjacent same-type formatting merge, and whitespace collapses
+/// with a hard break winning over a soft one.
 pub fn append(mut a: Vec<Inline>, b: Vec<Inline>) -> Vec<Inline> {
     for inline in b {
         match (a.last_mut(), inline) {
             (Some(Inline::Str(prev)), Inline::Str(next)) => prev.push_str(&next),
+            (Some(Inline::Emph(prev)), Inline::Emph(next))
+            | (Some(Inline::Strong(prev)), Inline::Strong(next))
+            | (Some(Inline::Strikeout(prev)), Inline::Strikeout(next))
+            | (Some(Inline::Superscript(prev)), Inline::Superscript(next))
+            | (Some(Inline::Subscript(prev)), Inline::Subscript(next)) => {
+                let merged = append(std::mem::take(prev), next);
+                *prev = merged;
+            }
+            // Space collapses into whatever break it meets.
             (Some(Inline::Space), Inline::Space)
-            | (Some(Inline::SoftBreak), Inline::Space | Inline::SoftBreak) => {}
-            (Some(last @ Inline::Space), next @ Inline::SoftBreak) => *last = next,
+            | (
+                Some(Inline::SoftBreak | Inline::LineBreak),
+                Inline::Space | Inline::SoftBreak,
+            ) => {}
+            (Some(last @ Inline::Space), next @ (Inline::SoftBreak | Inline::LineBreak))
+            | (Some(last @ Inline::SoftBreak), next @ Inline::LineBreak) => *last = next,
             (_, inline) => a.push(inline),
         }
     }

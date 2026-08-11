@@ -76,6 +76,28 @@ def widen_grid(xml):
     return re.sub(r'(<w:gridCol w:w=")(\d+)(")',
                   lambda m: m.group(1) + str(int(m.group(2)) * 3) + m.group(3), xml)
 
+def derived_style(xml):
+    # Re-style the block quotes with a custom style that only inherits its
+    # meaning, so the basedOn chain has to be walked to recognize them.
+    return xml.replace('<w:pStyle w:val="BlockText" />',
+                       '<w:pStyle w:val="MyQuote" />')
+
 rewrite('tables.docx', 'tables-wide-page.docx', set_page_size)
 rewrite('tables.docx', 'tables-overwide-grid.docx', widen_grid)
+
+# A custom style that means "block quote" only through its basedOn chain.
+import zipfile as _zip
+shutil.copy('corpus-nested-structures.docx', 'derived-styles.docx')
+zin = _zip.ZipFile('corpus-nested-structures.docx')
+items = [(i, zin.read(i.filename)) for i in zin.infolist()]
+zin.close()
+STYLE = ('<w:style w:type="paragraph" w:styleId="MyQuote">'
+         '<w:name w:val="My Quote"/><w:basedOn w:val="BlockText"/></w:style>')
+with _zip.ZipFile('derived-styles.docx', 'w', _zip.ZIP_DEFLATED) as zout:
+    for info, data in items:
+        if info.filename == 'word/document.xml':
+            data = derived_style(data.decode()).encode()
+        elif info.filename == 'word/styles.xml':
+            data = data.decode().replace('</w:styles>', STYLE + '</w:styles>').encode()
+        zout.writestr(info, data)
 PY
