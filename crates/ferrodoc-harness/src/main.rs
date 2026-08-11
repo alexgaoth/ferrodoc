@@ -1,9 +1,12 @@
-//! Differential test harness: compares ferrodoc's AST against
-//! `pandoc -f commonmark -t json` over a corpus or the `CommonMark` spec.
+//! Differential test harness: compares ferrodoc's AST (and HTML output)
+//! against pandoc over a corpus or the `CommonMark` spec, and benchmarks
+//! the in-process pipeline against the pandoc subprocess.
 //!
 //! Usage:
-//!   ferrodoc-harness diff-ast [--verbose] [--fail-under PCT] <file-or-dir>...
+//!   ferrodoc-harness diff-ast  [--verbose] [--fail-under PCT] <file-or-dir>...
 //!   ferrodoc-harness diff-spec [--verbose] [--fail-under PCT] <spec.json>
+//!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness bench [--iters N] <file>...
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -17,10 +20,18 @@ fn main() -> Result<()> {
     let fail_under = take_option(&mut args, "--fail-under")?
         .map(|v| v.parse::<f64>().context("--fail-under expects a number"))
         .transpose()?;
+    let iters = take_option(&mut args, "--iters")?
+        .map(|v| v.parse::<u32>().context("--iters expects a number"))
+        .transpose()?
+        .unwrap_or(50);
     match args.first().map(String::as_str) {
         Some("diff-ast") => diff_ast(&args[1..], verbose, fail_under),
         Some("diff-spec") => diff_spec(&args[1..], verbose, fail_under),
-        _ => bail!("usage: ferrodoc-harness <diff-ast|diff-spec> [--verbose] [--fail-under PCT] <paths>"),
+        Some("diff-html") => diff_html(&args[1..], verbose, fail_under),
+        Some("bench") => bench(&args[1..], iters),
+        _ => bail!(
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|bench> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+        ),
     }
 }
 
@@ -122,16 +133,28 @@ fn run_cases(cases: &[Case], verbose: bool, fail_under: Option<f64>) -> Result<(
             failures.push((case, path));
         }
     }
+    report(cases, matched, &failures, verbose, fail_under)
+}
+
+/// Print mismatches and the conformance summary; gate the exit code on
+/// `--fail-under`.
+fn report(
+    cases: &[Case],
+    matched: usize,
+    failures: &[(&Case, String)],
+    verbose: bool,
+    fail_under: Option<f64>,
+) -> Result<()> {
     let total = cases.len();
     #[allow(clippy::cast_precision_loss)]
     let pct = 100.0 * matched as f64 / total as f64;
-    for (case, path) in &failures {
-        println!("MISMATCH {} at {path}", case.name);
+    for (case, place) in failures {
+        println!("MISMATCH {} at {place}", case.name);
         if verbose {
             println!("  input: {:?}", case.markdown);
         }
     }
-    println!("{matched}/{total} identical ASTs ({pct:.1}%)");
+    println!("{matched}/{total} identical ({pct:.1}%)");
     if let Some(threshold) = fail_under
         && pct < threshold
     {
@@ -140,10 +163,117 @@ fn run_cases(cases: &[Case], verbose: bool, fail_under: Option<f64>) -> Result<(
     Ok(())
 }
 
+/// Collect cases from paths, treating `.json` files as `CommonMark` spec
+/// files (one case per example) and everything else as markdown.
+fn collect_mixed(paths: &[String]) -> Result<Vec<Case>> {
+    let mut cases = Vec::new();
+    for p in paths {
+        if std::path::Path::new(p).extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
+            let raw = std::fs::read_to_string(p).with_context(|| format!("reading {p}"))?;
+            let examples: Vec<Value> = serde_json::from_str(&raw).context("parsing spec.json")?;
+            for ex in &examples {
+                cases.push(Case {
+                    name: format!(
+                        "example {} ({})",
+                        ex["example"].as_i64().unwrap_or(0),
+                        ex["section"].as_str().unwrap_or("?")
+                    ),
+                    markdown: ex["markdown"]
+                        .as_str()
+                        .context("spec example without markdown")?
+                        .to_owned(),
+                });
+            }
+        } else {
+            collect_markdown_files(Path::new(p), &mut cases)?;
+        }
+    }
+    Ok(cases)
+}
+
+/// Compare our HTML writer against `pandoc -t html` per case.
+fn diff_html(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let cases = collect_mixed(paths)?;
+    if cases.is_empty() {
+        bail!("no inputs found");
+    }
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        let ours = ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&case.markdown));
+        let theirs = run_pandoc(&case.markdown, &["-f", "commonmark", "-t", "html", "--syntax-highlighting=none", "--wrap=none"])
+            .with_context(|| format!("pandoc failed on {}", case.name))?;
+        let theirs = String::from_utf8(theirs).context("pandoc emitted invalid UTF-8")?;
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_line_divergence(&ours, &theirs)));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// First differing line of two texts, with both sides shown.
+fn first_line_divergence(ours: &str, theirs: &str) -> String {
+    for (i, (a, b)) in ours.lines().zip(theirs.lines()).enumerate() {
+        if a != b {
+            return format!("line {}: ours={a:?} theirs={b:?}", i + 1);
+        }
+    }
+    format!(
+        "line counts differ ({} vs {}); ours ends {:?}, theirs ends {:?}",
+        ours.lines().count(),
+        theirs.lines().count(),
+        &ours[ours.len().saturating_sub(60)..],
+        &theirs[theirs.len().saturating_sub(60)..],
+    )
+}
+
+/// Benchmark the in-process pipeline against the pandoc subprocess.
+fn bench(paths: &[String], iters: u32) -> Result<()> {
+    if paths.is_empty() {
+        bail!("bench expects at least one markdown file");
+    }
+    for p in paths {
+        let markdown = std::fs::read_to_string(p).with_context(|| format!("reading {p}"))?;
+        let bytes = markdown.len();
+
+        // Warm up, then time ferrodoc in-process (parse + write HTML).
+        let mut sink = 0usize;
+        sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown)).len();
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown)).len();
+        }
+        let ours = start.elapsed() / iters;
+
+        // Time the pandoc subprocess (what a pipeline shelling out pays).
+        let pandoc_iters = iters.clamp(3, 10);
+        let start = std::time::Instant::now();
+        for _ in 0..pandoc_iters {
+            sink += run_pandoc(&markdown, &["-f", "commonmark", "-t", "html", "--syntax-highlighting=none", "--wrap=none"])?.len();
+        }
+        let theirs = start.elapsed() / pandoc_iters;
+
+        #[allow(clippy::cast_precision_loss)]
+        let speedup = theirs.as_secs_f64() / ours.as_secs_f64();
+        println!(
+            "{p} ({bytes} bytes): ferrodoc {ours:?}/doc vs pandoc subprocess {theirs:?}/doc — {speedup:.1}x (sink {sink})"
+        );
+    }
+    Ok(())
+}
+
 /// Run `pandoc -f commonmark -t json` on the given markdown.
 fn pandoc_json(markdown: &str) -> Result<Value> {
+    let out = run_pandoc(markdown, &["-f", "commonmark", "-t", "json"])?;
+    Ok(serde_json::from_slice(&out)?)
+}
+
+/// Run pandoc with the given arguments, feeding markdown on stdin.
+fn run_pandoc(markdown: &str, args: &[&str]) -> Result<Vec<u8>> {
     let mut child = Command::new("pandoc")
-        .args(["-f", "commonmark", "-t", "json"])
+        .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -162,7 +292,7 @@ fn pandoc_json(markdown: &str) -> Result<Value> {
     if !output.status.success() {
         bail!("pandoc exited with {}: {}", output.status, String::from_utf8_lossy(&output.stderr));
     }
-    Ok(serde_json::from_slice(&output.stdout)?)
+    Ok(output.stdout)
 }
 
 /// Return a JSON-pointer-ish path to the first structural divergence,
