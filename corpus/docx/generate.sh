@@ -100,4 +100,50 @@ with _zip.ZipFile('derived-styles.docx', 'w', _zip.ZIP_DEFLATED) as zout:
         elif info.filename == 'word/styles.xml':
             data = data.decode().replace('</w:styles>', STYLE + '</w:styles>').encode()
         zout.writestr(info, data)
+
+# Word-only run and block features that pandoc's writer never emits:
+# a content control, a highlighted run, an indented quote, a tab inside
+# code, a superscript code run, and an endnote.
+EXTRA = (
+  '<w:sdt><w:sdtContent>'
+  '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+  '<w:r><w:t xml:space="preserve">Inside a content control</w:t></w:r></w:p>'
+  '</w:sdtContent></w:sdt>'
+  '<w:p><w:r><w:rPr><w:highlight w:val="yellow"/></w:rPr>'
+  '<w:t xml:space="preserve">highlighted</w:t></w:r></w:p>'
+  '<w:p><w:pPr><w:ind w:left="720"/></w:pPr>'
+  '<w:r><w:t xml:space="preserve">Indented quote.</w:t></w:r></w:p>'
+  '<w:p><w:pPr><w:pStyle w:val="SourceCode"/></w:pPr>'
+  '<w:r><w:rPr><w:rStyle w:val="VerbatimChar"/></w:rPr>'
+  '<w:t xml:space="preserve">a</w:t></w:r>'
+  '<w:r><w:rPr><w:rStyle w:val="VerbatimChar"/></w:rPr><w:tab/></w:r>'
+  '<w:r><w:rPr><w:rStyle w:val="VerbatimChar"/></w:rPr>'
+  '<w:t xml:space="preserve">b</w:t></w:r></w:p>'
+  '<w:p><w:r><w:rPr><w:rStyle w:val="VerbatimChar"/>'
+  '<w:vertAlign w:val="superscript"/></w:rPr>'
+  '<w:t xml:space="preserve">sup</w:t></w:r></w:p>'
+  '<w:p><w:r><w:t xml:space="preserve">Endnote here</w:t></w:r>'
+  '<w:r><w:endnoteReference w:id="2"/></w:r></w:p>'
+)
+ENDNOTES = (
+  '<?xml version="1.0" encoding="UTF-8"?>'
+  '<w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+  '<w:endnote w:id="2"><w:p><w:r>'
+  '<w:t xml:space="preserve">The endnote body.</w:t></w:r></w:p></w:endnote>'
+  '</w:endnotes>'
+)
+
+zin = _zip.ZipFile('corpus-readme-style.docx')
+items = [(i, zin.read(i.filename)) for i in zin.infolist()]
+zin.close()
+with _zip.ZipFile('word-features.docx', 'w', _zip.ZIP_DEFLATED) as zout:
+    for info, data in items:
+        if info.filename == 'word/document.xml':
+            xml = data.decode()
+            cut = xml.rfind('<w:sectPr')
+            if cut == -1:
+                cut = xml.rfind('</w:body>')
+            data = (xml[:cut] + EXTRA + xml[cut:]).encode()
+        zout.writestr(info, data)
+    zout.writestr('word/endnotes.xml', ENDNOTES)
 PY

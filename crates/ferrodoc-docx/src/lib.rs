@@ -38,9 +38,22 @@
 //!   identifier uniquing (so a later heading auto-id cannot collide with
 //!   one), consecutive bookmarks alias to the first, and internal links
 //!   are rewritten to the identifiers actually emitted;
-//! - style *names* are compared ignoring case and spaces, but a heading
-//!   style needs the space ("heading 1" is a heading, "Heading1" is not),
-//!   and a heading's own style name — not its ancestors' — becomes a class;
+//! - style *names* are compared ignoring case but not whitespace, so a
+//!   concept pandoc spells two ways ("Source Code" and "SourceCode") lists
+//!   both; a heading is exactly "heading <n>" with one space, and a
+//!   heading's own style name — not its ancestors' — becomes a class;
+//! - a caption style must be the paragraph's *own* style; deriving a style
+//!   from Caption does not make it caption;
+//! - an ordered list takes a delimiter only from the exact marker shapes
+//!   `%N.`, `%N)` and `(%N)`, and a numbering format outside the five
+//!   pandoc knows is `DefaultStyle`;
+//! - a numbered paragraph stays a list item even when its style would
+//!   otherwise caption or open a definition entry;
+//! - `w:sdt` content controls (Word's tables of contents, cover pages and
+//!   citation fields) are unwrapped rather than skipped;
+//! - a hyperlink resolves to `target#fragment`, to `target`, to `#fragment`
+//!   or — when its relationship is unresolvable — to the empty string; one
+//!   with no target at all is dropped, text included;
 //! - inline code is the character style whose own name is "Verbatim Char",
 //!   and a code run takes only its vertical alignment, not the rest of its
 //!   run formatting;
@@ -66,9 +79,12 @@
 //! - an empty list item followed by deeper items attaches the nested list
 //!   to the empty item instead of pandoc's separate item
 //!   (`corpus/docx/spec-09.docx`, the one corpus document that differs);
-//! - definition styles are matched case-insensitively, so lowercase
-//!   "definition term" yields a definition list where pandoc, which is
-//!   case-sensitive here, falls back to its custom-style divs;
+//! - paragraphs whose style is a near-miss for a known one ("Definition
+//!   Term" spelled "DefinitionTerm", say) become plain paragraphs, where
+//!   pandoc emits custom-style divs — the same out-of-scope mechanism;
+//! - XML attribute values are normalized per the XML specification, so a
+//!   style name containing a tab compares equal to the spaced spelling
+//!   where pandoc treats them as different styles;
 //! - conversion is bounded: XML deeper than 256 elements is rejected, and
 //!   container nesting beyond 64 levels (or a self-referential footnote)
 //!   drops the remaining content rather than recursing without limit.
@@ -580,10 +596,7 @@ impl Ctx {
     /// Convert the document body: leading metadata-styled paragraphs
     /// become `meta` (pandoc's `sepBodyParts`), the rest become blocks.
     fn document(&self, body: &Node, state: &mut State) -> Pandoc {
-        let elems: Vec<&Node> = body
-            .elems()
-            .filter(|n| n.name == "p" || n.name == "tbl")
-            .collect();
+        let elems = body_parts(body);
         let mut fields: Vec<(&'static str, Vec<Inline>)> = Vec::new();
         let mut rest = 0;
         for (i, node) in elems.iter().enumerate() {
@@ -609,10 +622,7 @@ impl Ctx {
     /// paragraphs accumulate into lists, and the resulting segments are
     /// merged by pandoc's block smushing (code blocks and quotes coalesce).
     fn blocks(&self, parent: &Node, state: &mut State, lists: bool) -> Vec<Block> {
-        let elems: Vec<&Node> = parent
-            .elems()
-            .filter(|n| n.name == "p" || n.name == "tbl")
-            .collect();
+        let elems = body_parts(parent);
         self.blocks_of(&elems, state, lists)
     }
 
@@ -637,8 +647,17 @@ impl Ctx {
             let next = elems.get(i + 1).copied();
             // Caption before body, or body before caption (the latter only
             // when the caption paragraph does not keep with the next one).
-            let pair = next.and_then(|next| {
-                if self.is_caption_para(node) && self.is_captionable(next) {
+            // A numbered paragraph belongs to its list, so it neither
+            // captions nor opens a definition entry.
+            let numbered = |n: &Node| {
+                n.name == "p"
+                    && n.child("pPr").is_some_and(|pr| pr.child("numPr").is_some())
+                    && self.heading_level(n).is_none()
+            };
+            let pair = next.filter(|_| !lists || !numbered(node)).and_then(|next| {
+                if numbered(next) {
+                    None
+                } else if self.is_caption_para(node) && self.is_captionable(next) {
                     Some((node, next))
                 } else if self.is_captionable(node)
                     && self.is_caption_para(next)
@@ -662,9 +681,16 @@ impl Ctx {
                     flush_definitions(&mut segments, &mut definitions);
                     segments.push(vec![Block::HorizontalRule]);
                 }
-                "p" if lists && self.definition_role(node).is_some() => {
+                "p" if lists
+                    && self.definition_role(node).is_some()
+                    && !numbered(node) =>
+                {
                     Self::flush_list(&mut segments, &mut list);
-                    self.definition_paragraph(node, &mut definitions, state);
+                    if let Some(block) = self.definition_paragraph(node, &mut definitions, state)
+                    {
+                        flush_definitions(&mut segments, &mut definitions);
+                        segments.push(vec![block]);
+                    }
                 }
                 "p" => {
                     if let Some(item) = lists.then(|| self.list_item(node, state)).flatten() {
@@ -699,22 +725,23 @@ impl Ctx {
     }
 
     /// Accumulate a definition-list term or definition paragraph.
+    /// Returns the block to emit normally when the paragraph could not
+    /// join a definition entry.
     fn definition_paragraph(
         &self,
         p: &Node,
         definitions: &mut Vec<(Vec<Inline>, Vec<Vec<Block>>)>,
         state: &mut State,
-    ) {
+    ) -> Option<Block> {
         if self.definition_role(p) == Some(DefinitionRole::Term) {
             let term = trim_paragraph(self.inlines(p, state));
             definitions.push((term, Vec::new()));
-            return;
+            return None;
         }
-        let Some(block) = self.styled_block(p, state) else {
-            return;
-        };
+        let block = self.styled_block(p, state)?;
         let Some((_, items)) = definitions.last_mut() else {
-            return;
+            // No term is open, so this is just a paragraph.
+            return Some(block);
         };
         // The first definition opens an item; later ones extend it.
         if let Some(last) = items.last_mut() {
@@ -722,6 +749,7 @@ impl Ctx {
         } else {
             items.push(vec![block]);
         }
+        None
     }
 
     fn flush_list(segments: &mut Vec<Vec<Block>>, list: &mut Vec<ListItem>) {
@@ -740,11 +768,12 @@ impl Ctx {
         self.names_of_style(para_style(node))
     }
 
-    /// Whether a paragraph's style (or one it is based on) is named
-    /// "caption", "table caption" or "image caption", case-insensitively.
+    /// Whether a paragraph's own style is named "caption", "table caption"
+    /// or "image caption", case-insensitively. Styles merely *based on* a
+    /// caption style do not caption, matching pandoc.
     fn is_caption_para(&self, node: &Node) -> bool {
         node.name == "p"
-            && self.style_names(node).iter().any(|name| {
+            && self.style_names(node).first().is_some_and(|name| {
                 matches!(
                     name.to_lowercase().as_str(),
                     "caption" | "table caption" | "image caption"
@@ -892,22 +921,25 @@ impl Ctx {
         let kind = match Some(&info) {
             Some(info) if info.format != "bullet" => {
                 let style = match info.format.as_str() {
+                    "decimal" => ListNumberStyle::Decimal,
                     "lowerLetter" => ListNumberStyle::LowerAlpha,
                     "upperLetter" => ListNumberStyle::UpperAlpha,
                     "lowerRoman" => ListNumberStyle::LowerRoman,
                     "upperRoman" => ListNumberStyle::UpperRoman,
-                    _ => ListNumberStyle::Decimal,
+                    _ => ListNumberStyle::DefaultStyle,
                 };
-                // The delimiter comes from the text around the number
-                // placeholder: "%1." → Period, "%1)" → OneParen,
-                // "(%1)" → TwoParens.
-                let text = &info.text;
-                let delim = if text.starts_with('(') && text.ends_with(')') {
-                    ListNumberDelim::TwoParens
-                } else if text.ends_with(')') {
-                    ListNumberDelim::OneParen
-                } else {
+                // Only the three exact marker shapes name a delimiter;
+                // anything else (a multilevel "%1.%2", say) is default.
+                let placeholder = format!("%{}", level + 1);
+                let text = info.text.as_str();
+                let delim = if text == format!("{placeholder}.") {
                     ListNumberDelim::Period
+                } else if text == format!("{placeholder})") {
+                    ListNumberDelim::OneParen
+                } else if text == format!("({placeholder})") {
+                    ListNumberDelim::TwoParens
+                } else {
+                    ListNumberDelim::DefaultDelim
                 };
                 ListKind::Ordered(number, style, delim)
             }
@@ -950,7 +982,7 @@ impl Ctx {
     /// `basedOn` chain, so localized style ids work and a document without
     /// `styles.xml` simply yields paragraphs.
     fn styled_block(&self, p: &Node, state: &mut State) -> Option<Block> {
-        if self.has_style_name(p, &["Source Code"]) {
+        if self.has_style_name(p, &["Source Code", "SourceCode"]) {
             return Some(Block::CodeBlock(Attr::default(), raw_text(p)));
         }
         let inlines = trim_paragraph(self.inlines(p, state));
@@ -1100,16 +1132,15 @@ impl Ctx {
         let Some(grid) = tbl.child("tblGrid") else {
             return Vec::new();
         };
-        // A column without a width invalidates the whole grid, as in pandoc.
-        let Some(columns) = grid
+        // A column without a usable width is dropped, but it still counts
+        // towards the inter-column gaps, as in pandoc.
+        let declared = grid.children_named("gridCol").count();
+        let columns: Vec<f64> = grid
             .children_named("gridCol")
-            .map(|c| c.attr("w:w").and_then(|w| w.parse::<f64>().ok()))
-            .collect::<Option<Vec<f64>>>()
-        else {
-            return Vec::new();
-        };
+            .filter_map(|c| c.attr("w:w").and_then(|w| w.parse::<f64>().ok()))
+            .collect();
         #[allow(clippy::cast_precision_loss)]
-        let total = self.text_width - 10.0 * (columns.len().saturating_sub(1)) as f64;
+        let total = self.text_width - 10.0 * (declared.saturating_sub(1)) as f64;
         let mut fractions: Vec<f64> = columns.iter().map(|w| w / total).collect();
         let sum: f64 = fractions.iter().sum();
         if sum > 1.0 {
@@ -1213,17 +1244,21 @@ impl Ctx {
                     }
                 }
                 "hyperlink" => {
-                    // An external link may carry a fragment separately.
-                    let url = match (
-                        node.attr("r:id").and_then(|id| self.rels.get(id)),
-                        node.attr("w:anchor"),
-                    ) {
-                        (Some(target), Some(fragment)) => format!("{target}#{fragment}"),
-                        (Some(target), None) => target.clone(),
-                        (None, Some(fragment)) if node.attr("r:id").is_none() => {
-                            format!("#{fragment}")
-                        }
-                        _ => String::new(),
+                    // An external link may carry its fragment separately;
+                    // an unresolvable relationship yields an empty target;
+                    // a link with no target at all is dropped whole.
+                    let relationship = node.attr("r:id");
+                    let fragment = node.attr("w:anchor");
+                    let url = match (relationship, fragment) {
+                        (Some(id), fragment) => match self.rels.get(id) {
+                            Some(target) => match fragment {
+                                Some(fragment) => format!("{target}#{fragment}"),
+                                None => target.clone(),
+                            },
+                            None => String::new(),
+                        },
+                        (None, Some(fragment)) => format!("#{fragment}"),
+                        (None, None) => continue,
                     };
                     let mut inner = Vec::new();
                     self.inline_sequences(node, &mut inner, state);
@@ -1642,33 +1677,24 @@ fn drop_columns(mut n: i64, cells: &[RawCell], from: usize) -> (i64, usize) {
     }
 }
 
-/// Whether two style names are the same for pandoc's purposes: case and
-/// spacing are both insignificant.
+/// Whether two style names are the same for pandoc's purposes: case is
+/// insignificant, whitespace is not ("Block  Text" is a different style).
+/// Concepts that pandoc spells more than one way list every spelling.
 fn same_style_name(a: &str, b: &str) -> bool {
-    let strip = |s: &str| {
-        s.chars()
-            .filter(|c| !c.is_whitespace())
-            .flat_map(char::to_lowercase)
-            .collect::<String>()
-    };
-    strip(a) == strip(b)
+    a.eq_ignore_ascii_case(b)
 }
 
-/// The level of a style named "Heading <n>", any case, space required.
+/// The level of a style named exactly "Heading <n>" (any case, one space).
 fn heading_level_of(name: &str) -> Option<i64> {
     let lower = name.to_lowercase();
-    let rest = lower.strip_prefix("heading")?;
-    if !rest.starts_with(char::is_whitespace) {
-        return None;
-    }
-    rest.trim().parse::<i64>().ok()
+    lower.strip_prefix("heading ")?.parse::<i64>().ok()
 }
 
 /// Whether a paragraph holds nothing but whitespace, which pandoc allows
 /// between the metadata paragraphs of a title block.
 fn paragraph_is_blank(p: &Node) -> bool {
     p.elems().all(|n| match n.name.as_str() {
-        "pPr" | "bookmarkStart" | "bookmarkEnd" | "proofErr" => true,
+        "pPr" | "proofErr" => true,
         "r" => n.elems().all(|c| match c.name.as_str() {
             "rPr" => true,
             "t" => c.text().trim().is_empty(),
@@ -1676,6 +1702,31 @@ fn paragraph_is_blank(p: &Node) -> bool {
         }),
         _ => false,
     })
+}
+
+/// The paragraphs and tables of a container, looking through the content
+/// controls (`w:sdt`) that Word wraps around tables of contents, cover
+/// pages and citation fields.
+fn body_parts(parent: &Node) -> Vec<&Node> {
+    fn collect<'a>(parent: &'a Node, out: &mut Vec<&'a Node>, depth: usize) {
+        if depth >= MAX_NESTING {
+            return;
+        }
+        for node in parent.elems() {
+            match node.name.as_str() {
+                "p" | "tbl" => out.push(node),
+                "sdt" => {
+                    if let Some(content) = node.child("sdtContent") {
+                        collect(content, out, depth + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    collect(parent, &mut out, 0);
+    out
 }
 
 /// The paragraph's style id (`w:pPr/w:pStyle/@w:val`), or "".
