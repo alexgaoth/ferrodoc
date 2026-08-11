@@ -6,6 +6,7 @@
 //!   ferrodoc-harness diff-ast  [--verbose] [--fail-under PCT] <file-or-dir>...
 //!   ferrodoc-harness diff-spec [--verbose] [--fail-under PCT] <spec.json>
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness bench [--iters N] <file>...
 
 use anyhow::{Context, Result, bail};
@@ -30,9 +31,10 @@ fn main() -> Result<()> {
         Some("diff-spec") => diff_spec(&args[1..], verbose, fail_under),
         Some("diff-html") => diff_html(&args[1..], verbose, fail_under),
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
+        Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|bench> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-docx|diff-write|bench> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -191,6 +193,85 @@ fn collect_mixed(paths: &[String]) -> Result<Vec<Case>> {
         }
     }
     Ok(cases)
+}
+
+/// Compare our DOCX *writer* against pandoc's, semantically: both engines
+/// write the same AST to a `.docx`, pandoc reads both back, and the two
+/// resulting documents must be identical. Comparing the zip bytes would be
+/// meaningless; comparing what the format actually preserves is the real
+/// contract.
+fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let cases = collect_mixed(paths)?;
+    if cases.is_empty() {
+        bail!("no inputs found");
+    }
+    let dir = std::env::temp_dir().join("ferrodoc-diff-write");
+    std::fs::create_dir_all(&dir)?;
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        let ast = ferrodoc_markdown::read_commonmark(&case.markdown);
+        let ast_json = serde_json::to_string(&ast)?;
+
+        // Ours: ferrodoc writes the docx, pandoc reads it back.
+        let ours_docx = ferrodoc_docx::write_docx(&ast)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .with_context(|| format!("ferrodoc failed to write {}", case.name))?;
+        let ours_path = dir.join("ours.docx");
+        std::fs::write(&ours_path, &ours_docx)?;
+        let ours = pandoc_file(&ours_path)
+            .with_context(|| format!("pandoc could not read our docx for {}", case.name))?;
+
+        // Theirs: pandoc writes the docx and reads it back.
+        let theirs_path = dir.join("theirs.docx");
+        let status = Command::new("pandoc")
+            .args(["-f", "json", "-t", "docx", "-o"])
+            .arg(&theirs_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                child
+                    .stdin
+                    .take()
+                    .expect("stdin was piped")
+                    .write_all(ast_json.as_bytes())?;
+                child.wait_with_output()
+            })?;
+        if !status.status.success() {
+            bail!(
+                "pandoc failed to write {}: {}",
+                case.name,
+                String::from_utf8_lossy(&status.stderr)
+            );
+        }
+        let theirs = pandoc_file(&theirs_path)?;
+
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Read a file with `pandoc -f docx -t json`.
+fn pandoc_file(path: &Path) -> Result<Value> {
+    let output = Command::new("pandoc")
+        .args(["-f", "docx", "-t", "json"])
+        .arg(path)
+        .output()
+        .context("running pandoc")?;
+    if !output.status.success() {
+        bail!(
+            "pandoc failed on {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(serde_json::from_slice(&output.stdout)?)
 }
 
 /// Compare our DOCX reader against `pandoc -f docx -t json` per file.
