@@ -54,7 +54,9 @@ Still open, and now the DOCX writer's only real losses:
 - The reader has no media bag, so `docx → docx` still loses images: the AST
   records the part path, not the bytes. Exposing them is what would close it.
 
-## 3. HTML reader — completes the triangle
+## 3. HTML reader — done
+
+The triangle closes:
 
 ```
 Markdown ↔ AST ↔ HTML
@@ -62,8 +64,64 @@ Markdown ↔ AST ↔ HTML
             DOCX
 ```
 
-Structural only: headings, lists, tables, links, images, formatting. Not CSS,
-not layout reproduction. `html5ever` does the parsing; the work is the mapping.
+`ferrodoc page.html -t markdown` works. `html5ever` parses; the work was the
+mapping. **631/657 documents produce an AST identical to pandoc's** — the 651
+HTML fragments the `CommonMark` spec ships as expected output, plus five
+hand-written files (and one pre-existing `corpus/docx/src/tables.html`)
+covering tables, column widths and alignment, attributes, the sectioning
+elements, the `<main>` rule, the semantic inline elements and verbatim
+content, none of which the spec's HTML exercises.
+
+Worth knowing when reading real pages: a document with a `<main>` element
+(or `role="main"`) is read as **that element alone** — pandoc does the same,
+and it is what keeps navigation menus and cookie notices out of the output.
+
+Most of the 26 remaining mismatches are one cause: **ferrodoc parses to the
+HTML5 spec and pandoc parses with `tagsoup`, which does not.** On malformed
+markup the two build different trees, and no mapping reconciles them:
+
+- A tag with no closing `>` (`<div id="foo"` at end of input). HTML5 discards
+  it; tagsoup keeps it and invents attributes from the following text.
+- An unclosed `<a>` inside a paragraph. The tree builder closes it and its
+  formatting element is re-opened after the paragraph, so we produce an empty
+  link and a second block; tagsoup produces neither.
+- A `<pre>` or a `<div>` opened inside a `<tr>` or an `<li>` and never
+  closed, which HTML5 foster-parents out of the table.
+
+But **not all of them**, and assuming so hid real bugs for a round: the
+`<![CDATA[…]]>` and `<style>` raw-text boundaries are a tokenizer
+disagreement on input that is merely unusual, and `<a/>` self-closing syntax
+sends the two parsers down different recovery paths.
+
+One judgement call worth recording: dropping links with empty content would
+have scored two examples higher by matching tagsoup on unclosed `<a>` tags,
+but it also deletes `<a href="./target.md"></a>` — a well-formed empty anchor
+that pandoc keeps and that real pages use as jump targets. A reviewer
+suggested keying it on `html5ever`'s parse-error list instead; that was
+measured (+2) and rejected, because the error list is document-scoped, so a
+page whose only flaw is an unclosed `<b>` somewhere else loses its anchors —
+a divergence from pandoc that the simpler rule does not have.
+
+The principle that settled it, and the `<pre>` newline with it: **match
+pandoc wherever pandoc has a describable rule on well-formed input; diverge
+only where matching would mean reproducing a parse failure.**
+
+Still open, and stated so nobody has to rediscover them:
+
+- The reader does not produce `RawBlock`/`RawInline`; unknown elements
+  contribute their children and lose their own tag.
+- A block element reached through an inline one — `<a href="#"><div>…</div>
+  <p>…</p></a>`, the "card link" pattern HTML5 allows — keeps its text
+  intact and separated, but stays one block where pandoc produces several.
+- `RESERVED_ATTRIBUTES` is 260 names derived from the binary, and the reader
+  and writer share it: a name it does not recognize is read without its
+  `data-` prefix and written back with it. That symmetry is what stops a
+  round trip turning `data-onclick` into an event handler that runs, and it
+  is what pandoc's writer does too — an earlier attempt to solve this in the
+  reader alone was wrong, and left the hole open on the way out.
+- `restore_verbatim_newline` scans the source for `<pre>` and does not know
+  whether that `<` is itself inside another tag's attribute value, so
+  `<div title="<pre>` followed by a newline gains one it should not.
 
 ## 4. Make the promise verifiable by strangers
 

@@ -1,0 +1,46 @@
+<p>Semantic inline elements are not interchangeable: <cite>a citation</cite>
+loses its tag, <var>x</var> and <samp>output</samp> become code with a class,
+<dfn>a definition</dfn>, <kbd>Ctrl</kbd> and <mark>a highlight</mark> become
+spans with one, and <code>plain   code</code> keeps neither.</p>
+
+<p>A comment mid-word<!-- like this -->joins the text around it, and one
+between <!-- spaced --> words leaves a single space.</p>
+
+<p>Legacy anchors: <a name="jump">named</a>, <a name="both" href="/u">named and
+linked</a>, <a href="/plain">ordinary</a>, and <a id="empty" href="#empty"></a>
+which is empty but real.</p>
+
+<p>An anchor with no href is <a class="dead">a span</a>, not a link.</p>
+
+<div data-source="finance" data-x-y="2" data-id="reserved" id="d" class="c">
+  <p>A <span data-role="note">span</span> carries its data attributes too.</p>
+</div>
+
+<p>Edit markers around text: <del>removed</del> and <ins>added</ins>.</p>
+
+<del><p>An edit marker around blocks keeps the blocks and loses the mark.</p></del>
+
+<dl>
+  <dt>First term</dt>
+  <dt>Second term, sharing one definition</dt>
+  <dd>The definition.</dd>
+  <dt>A term of its own</dt>
+  <dd>Another definition.</dd>
+</dl>
+
+<ol type="a"><li>lower alpha</li></ol>
+<ol type="I" start="3"><li>upper roman, starting at three</li></ol>
+<ol type="1"><li>decimal</li></ol>
+
+<textarea>
+Form default text is not document content.
+</textarea>
+
+<div>Loose text in a division stays plain<p>even beside a paragraph.</p></div>
+
+<p>A hard break<br>
+followed by a newline is one break, not two.</p>
+
+<main>
+  <p>Main content selects the document, and loose text in it stays plain.</p>
+</main>

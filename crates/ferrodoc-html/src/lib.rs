@@ -1,4 +1,9 @@
-//! HTML writer for the ferrodoc (pandoc-compatible) AST.
+//! HTML reader and writer for the ferrodoc (pandoc-compatible) AST.
+//!
+//! [`read_html`] parses a page into the AST; [`write_html`] renders the AST
+//! back out. The reader is structural — it is not a CSS engine — and is
+//! verified against `pandoc -f html -t json` by `ferrodoc-harness
+//! diff-html-read`.
 //!
 //! [`write_html`] emits the same HTML as
 //! `pandoc -f commonmark -t html --syntax-highlighting=none --wrap=none`
@@ -8,6 +13,27 @@
 //! reasonable pandoc-shaped output but are not differentially verified;
 //! `Note` and non-HTML raw content are dropped, like pandoc's HTML writer
 //! does for raw content it cannot place.
+
+mod read;
+
+pub use read::{MAX_NESTING, read_html};
+
+/// What can go wrong reading HTML.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
+    /// The element tree nests deeper than [`MAX_NESTING`].
+    TooDeep,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooDeep => write!(f, "html nests deeper than {MAX_NESTING} levels"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 use ferrodoc_ast::{
     Alignment, Attr, Block, Caption, Cell, Inline, ListNumberStyle, Pandoc, Row, Table,
@@ -362,6 +388,14 @@ fn write_attr(out: &mut String, attr: &Attr) {
     }
     for (key, value) in &attr.attributes {
         out.push(' ');
+        // An attribute name the AST invented is written back behind
+        // `data-`, exactly as pandoc's writer does. Without this a
+        // document carrying an `onclick` — which any HTML reader will
+        // produce from `data-onclick`, and which a JSON AST can simply
+        // state — would come out of a conversion as a live event handler.
+        if !read::is_reserved(key) {
+            out.push_str("data-");
+        }
         // Keys come from the same untrusted AST as values; drop characters
         // that could break out of the tag.
         out.extend(key.chars().filter(|c| !c.is_whitespace() && !"\"'<>=/&".contains(*c)));

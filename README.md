@@ -15,7 +15,7 @@ Every row measured on this machine in one sitting (Linux x86-64, pandoc
 | **Startup** (one tiny document) | 13 ms | **2 ms** | **6× faster** |
 | **Peak memory**, 0.6 KB document | 65 MB | **3.8 MB** | **17× less** |
 | **Peak memory**, 16 KB document | 207 MB | **4.7 MB** | **44× less** |
-| **Binary on disk** | 153 MB | **3.2 MB** | **48× smaller** |
+| **Binary on disk** | 153 MB | **4.4 MB** | **35× smaller** |
 | **Malformed DOCX** (self-referential footnote) | hangs, killed at 60 s | **handled in 12 ms** | — |
 | **Same document written twice** | different bytes | **identical bytes** | — |
 | **Runs in a browser / edge worker** | no | **yes** (wasm32) | — |
@@ -55,14 +55,16 @@ nothing is trusted because it looks right.
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
+| `ferrodoc-html` reader | **631/657** HTML documents produce identical ASTs |
 
 ```sh
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
-cargo run -p ferrodoc-harness -- diff-write corpus
-cargo run -p ferrodoc-harness -- diff-md    corpus
+cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
+cargo run -p ferrodoc-harness -- diff-md    corpus/commonmark-spec-0.31.2.json --fail-under 100
+cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
 ```
 
 `diff-write` is the DOCX writer's oracle: both engines write the same AST to
@@ -95,7 +97,7 @@ cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
-Inputs: `markdown` (`commonmark`, `md`), `docx`, `json` (the pandoc AST).
+Inputs: `markdown` (`commonmark`, `md`), `html`, `docx`, `json` (the pandoc AST).
 Outputs: `markdown`, `html`, `docx`, `json`, `plain`.
 
 As a library, one call converts — and the AST is right there when you want to
@@ -139,9 +141,15 @@ The table above is not the whole picture, and pretending otherwise would make
 the rest less believable. Pandoc supports ~40 formats to ferrodoc's four, plus
 citations, templates, Lua filters, PDF output and fifteen years of edge cases.
 Our DOCX writer still drops raw blocks, which have no OOXML equivalent, and
-embeds only PNG, JPEG and GIF images. The bet is not that this replaces
-pandoc — it is that the common path, markdown/HTML/DOCX called from a program
-rather than a shell, is worth doing natively.
+embeds only PNG, JPEG and GIF images. The HTML reader parses to the HTML5
+spec, via `html5ever`, where pandoc uses `tagsoup`; on malformed markup — an
+unclosed `<a>`, a tag with no closing `>`, a `<pre>` inside a `<tr>` — the
+two build different trees, and that is what most of the 26 unmatched
+documents are. Not all: `<![CDATA[…]]>` tokenizes differently, and `<a/>`
+self-closing syntax sends the two down different recovery paths. The
+remaining families are listed in `TODO.md`, one by one. The bet is not that
+this replaces pandoc — it is that the common path, markdown/HTML/DOCX
+called from a program rather than a shell, is worth doing natively.
 
 ## License notes
 

@@ -1,5 +1,5 @@
-//! Universal document converter: read markdown, DOCX or the pandoc JSON
-//! AST, write HTML, DOCX, plain text or the pandoc JSON AST.
+//! Universal document converter: read markdown, HTML, DOCX or the pandoc
+//! JSON AST, write markdown, HTML, DOCX, plain text or the pandoc JSON AST.
 //!
 //! Everything goes through one document model — the same AST pandoc uses —
 //! so any supported input can produce any supported output.
@@ -41,7 +41,7 @@ use std::fmt;
 pub enum Format {
     /// `CommonMark`. Readable and writable.
     Markdown,
-    /// HTML. Writable only — there is no HTML reader yet.
+    /// HTML. Readable and writable.
     Html,
     /// Office Open XML word processing documents. Readable and writable.
     Docx,
@@ -76,12 +76,14 @@ impl Format {
 
     /// Whether documents can be read from this format.
     pub fn readable(self) -> bool {
-        matches!(self, Format::Markdown | Format::Docx | Format::Json)
+        !matches!(self, Format::Plain)
     }
 
     /// Whether documents can be written to this format.
     pub fn writable(self) -> bool {
-        !matches!(self, Format::Html)
+        // Every format here has a writer; `Plain` is the only one-way one,
+        // and it is one-way in the other direction.
+        true
     }
 
     /// The name used in messages.
@@ -155,7 +157,11 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
             format: from,
             detail: e.to_string(),
         }),
-        other @ (Format::Html | Format::Plain) => Err(Error::NotReadable(other)),
+        Format::Html => ferrodoc_html::read_html(&text(input)?).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
+        Format::Plain => Err(Error::NotReadable(Format::Plain)),
     }
 }
 
@@ -230,9 +236,16 @@ mod tests {
     #[test]
     fn unsupported_directions_are_errors_not_panics() {
         assert!(matches!(
-            convert(b"x", Format::Html, Format::Json),
-            Err(Error::NotReadable(Format::Html))
+            convert(b"x", Format::Plain, Format::Json),
+            Err(Error::NotReadable(Format::Plain))
         ));
+    }
+
+    #[test]
+    fn html_converts_to_markdown() {
+        let out = convert(b"<h1>T</h1><ul><li>a</li></ul>", Format::Html, Format::Markdown)
+            .expect("html is readable");
+        assert_eq!(String::from_utf8(out).unwrap(), "# T\n\n- a\n");
     }
 
     #[test]

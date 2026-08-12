@@ -1,0 +1,28 @@
+<pre>
+A newline right after the tag is content, not markup.
+	A tab here expands from the column the markup left off at.
+</pre>
+
+<pre class="sourceCode"><code class="language-rust">fn main() {
+    println!("hi");
+}
+</code></pre>
+
+<table>
+  <colgroup><col width="30%"><col width="70%"></colgroup>
+  <tr><td>Declared widths</td><td>survive.</td></tr>
+</table>
+
+<table>
+  <tr><td><pre>a cell richer than a paragraph</pre></td><td>splits every column evenly</td></tr>
+</table>
+
+<table>
+  <colgroup><col style="width: 30%"><col style="width: 70%"></colgroup>
+  <tr><td>Widths written the way pandoc writes them</td><td>survive too.</td></tr>
+</table>
+
+<table>
+  <colgroup><col><col width="50%"></colgroup>
+  <tr><td><pre>a stated column keeps its own width</pre></td><td>even here</td></tr>
+</table>

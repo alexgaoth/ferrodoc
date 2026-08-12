@@ -1,6 +1,6 @@
 [package]
 name = "ferrodoc-html"
-description = "HTML writer for the ferrodoc (pandoc-compatible) AST"
+description = "HTML reader and writer for the ferrodoc (pandoc-compatible) AST"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 ferrodoc-ast = { workspace = true }
+html5ever = "0.39.0"
+markup5ever_rcdom = "0.39.0"
 
 [dev-dependencies]
 ferrodoc-markdown = { workspace = true }

@@ -22,12 +22,13 @@ OPTIONS:
     -V, --version           Print the version
 
 FORMATS:
-    input:   markdown (commonmark, md), docx, json
+    input:   markdown (commonmark, md), html, docx, json
     output:  markdown, html, docx, json, plain (text)
 
 EXAMPLES:
     ferrodoc README.md -o readme.html
     ferrodoc report.docx -t markdown        # DOCX in, markdown out
+    ferrodoc page.html -t markdown          # HTML in, markdown out
     ferrodoc report.docx -t plain
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ";

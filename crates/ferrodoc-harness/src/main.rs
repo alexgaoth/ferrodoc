@@ -8,6 +8,7 @@
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-md [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness diff-html-read [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness bench [--iters N] <file>...
 //!   ferrodoc-harness bench-docx [--iters N] <file>...
 
@@ -35,10 +36,11 @@ fn main() -> Result<()> {
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
+        Some("diff-html-read") => diff_html_read(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-docx|diff-write|diff-md|bench|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|bench|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -253,6 +255,93 @@ fn diff_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<(
         cases.len()
     );
     report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Compare our HTML *reader* against pandoc's: both read the same page,
+/// and the two documents must be identical.
+///
+/// The corpus is HTML, so a `.json` argument contributes the spec's `html`
+/// field rather than its `markdown` — those are 651 real fragments
+/// covering every construct the spec has, which is a far better reader
+/// corpus than anything written by hand.
+fn diff_html_read(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let cases = collect_html(paths)?;
+    if cases.is_empty() {
+        bail!("no html inputs found");
+    }
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        // A refusal is one case's mismatch, not a reason to abandon the
+        // run: a corpus is allowed to contain input the reader rejects.
+        let ours = match ferrodoc_html::read_html(&case.markdown) {
+            Ok(doc) => serde_json::to_value(&doc)?,
+            Err(e) => {
+                failures.push((case, format!("refused: {e}")));
+                continue;
+            }
+        };
+        let theirs = run_pandoc(&case.markdown, &["-f", "html", "-t", "json"])
+            .with_context(|| format!("pandoc failed on {}", case.name))?;
+        let theirs: Value = serde_json::from_slice(&theirs)?;
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Collect HTML cases: `.json` files contribute each spec example's
+/// expected HTML, everything else is read as an HTML file.
+fn collect_html(paths: &[String]) -> Result<Vec<Case>> {
+    let mut cases = Vec::new();
+    for p in paths {
+        let path = Path::new(p);
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
+            let raw = std::fs::read_to_string(p).with_context(|| format!("reading {p}"))?;
+            let examples: Vec<Value> = serde_json::from_str(&raw).context("parsing spec.json")?;
+            for ex in &examples {
+                let Some(html) = ex["html"].as_str().filter(|h| !h.is_empty()) else {
+                    continue;
+                };
+                cases.push(Case {
+                    name: format!(
+                        "example {} ({})",
+                        ex["example"].as_i64().unwrap_or(0),
+                        ex["section"].as_str().unwrap_or("?")
+                    ),
+                    markdown: html.to_owned(),
+                });
+            }
+        } else {
+            collect_html_files(path, &mut cases)?;
+        }
+    }
+    Ok(cases)
+}
+
+fn collect_html_files(path: &Path, cases: &mut Vec<Case>) -> Result<()> {
+    if path.is_dir() {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+            .with_context(|| format!("reading {}", path.display()))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<_>>()?;
+        entries.sort();
+        for entry in entries {
+            if entry.is_dir() || entry.extension().is_some_and(|e| e == "html") {
+                collect_html_files(&entry, cases)?;
+            }
+        }
+    } else {
+        cases.push(Case {
+            name: path.display().to_string(),
+            markdown: std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?,
+        });
+    }
+    Ok(())
 }
 
 /// Run pandoc with the given arguments over stdin text.
