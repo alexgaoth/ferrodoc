@@ -39,9 +39,9 @@ use std::fmt;
 /// A document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    /// `CommonMark`. Readable.
+    /// `CommonMark`. Readable and writable.
     Markdown,
-    /// HTML. Writable.
+    /// HTML. Writable only — there is no HTML reader yet.
     Html,
     /// Office Open XML word processing documents. Readable and writable.
     Docx,
@@ -81,7 +81,7 @@ impl Format {
 
     /// Whether documents can be written to this format.
     pub fn writable(self) -> bool {
-        matches!(self, Format::Html | Format::Docx | Format::Json | Format::Plain)
+        !matches!(self, Format::Html)
     }
 
     /// The name used in messages.
@@ -162,6 +162,7 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
 /// Write a document.
 pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
     match to {
+        Format::Markdown => Ok(ferrodoc_markdown::write_markdown(doc).into_bytes()),
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         Format::Plain => Ok(ferrodoc_text::write_text(doc).into_bytes()),
         Format::Docx => ferrodoc_docx::write_docx(doc).map_err(|e| Error::Invalid {
@@ -176,7 +177,6 @@ pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
             json.push(b'\n');
             Ok(json)
         }
-        other @ Format::Markdown => Err(Error::NotWritable(other)),
     }
 }
 
@@ -217,10 +217,16 @@ mod tests {
             convert(b"x", Format::Html, Format::Json),
             Err(Error::NotReadable(Format::Html))
         ));
-        assert!(matches!(
-            convert(b"x", Format::Markdown, Format::Markdown),
-            Err(Error::NotWritable(Format::Markdown))
-        ));
+    }
+
+    #[test]
+    fn docx_converts_to_markdown() {
+        let docx = convert(b"# Title\n\nBody *text*.\n", Format::Markdown, Format::Docx)
+            .expect("writable");
+        let md = convert(&docx, Format::Docx, Format::Markdown).expect("convertible");
+        let md = String::from_utf8(md).expect("utf8");
+        assert!(md.contains("# Title"), "{md}");
+        assert!(md.contains("*text*"), "{md}");
     }
 
     #[test]

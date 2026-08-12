@@ -7,6 +7,7 @@
 //!   ferrodoc-harness diff-spec [--verbose] [--fail-under PCT] <spec.json>
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness diff-md [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness bench [--iters N] <file>...
 //!   ferrodoc-harness bench-docx [--iters N] <file>...
 
@@ -33,10 +34,11 @@ fn main() -> Result<()> {
         Some("diff-html") => diff_html(&args[1..], verbose, fail_under),
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
+        Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-docx|diff-write|bench|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-docx|diff-write|diff-md|bench|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -195,6 +197,48 @@ fn collect_mixed(paths: &[String]) -> Result<Vec<Case>> {
         }
     }
     Ok(cases)
+}
+
+/// Compare our markdown *writer* against pandoc's, semantically: both
+/// engines write the same AST back to markdown, pandoc reads both results,
+/// and the two documents must match. Byte comparison would fail on
+/// cosmetic differences that mean nothing; what matters is that the
+/// markdown re-reads to the document it came from.
+fn diff_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let cases = collect_mixed(paths)?;
+    if cases.is_empty() {
+        bail!("no inputs found");
+    }
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        let ast = ferrodoc_markdown::read_commonmark(&case.markdown)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let ast_json = serde_json::to_string(&ast)?;
+
+        let ours_md = ferrodoc_markdown::write_markdown(&ast);
+        let ours = pandoc_json(&ours_md)
+            .with_context(|| format!("pandoc could not read our markdown for {}", case.name))?;
+
+        let theirs_md = run_pandoc_input(
+            &ast_json,
+            &["-f", "json", "-t", "commonmark", "--wrap=none"],
+        )?;
+        let theirs_md = String::from_utf8(theirs_md).context("pandoc emitted invalid UTF-8")?;
+        let theirs = pandoc_json(&theirs_md)?;
+
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Run pandoc with the given arguments over stdin text.
+fn run_pandoc_input(input: &str, args: &[&str]) -> Result<Vec<u8>> {
+    run_pandoc(input, args)
 }
 
 /// Compare our DOCX *writer* against pandoc's, semantically: both engines

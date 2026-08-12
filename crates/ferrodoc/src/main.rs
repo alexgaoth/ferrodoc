@@ -23,10 +23,11 @@ OPTIONS:
 
 FORMATS:
     input:   markdown (commonmark, md), docx, json
-    output:  html, docx, json, plain (text)
+    output:  markdown, html, docx, json, plain (text)
 
 EXAMPLES:
     ferrodoc README.md -o readme.html
+    ferrodoc report.docx -t markdown        # DOCX in, markdown out
     ferrodoc report.docx -t plain
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ";

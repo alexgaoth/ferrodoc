@@ -27,6 +27,10 @@
 //! underline becomes the `HorizontalRule` pandoc produces (comrak emits a
 //! literal `---` paragraph there).
 
+mod write;
+
+pub use write::write_markdown;
+
 use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue};
 use comrak::{Arena, Options, parse_document};
 use ferrodoc_ast::{

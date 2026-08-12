@@ -54,6 +54,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically |
+| `ferrodoc-markdown` writer | **600/652** spec examples survive a markdown round trip identically |
 
 ```sh
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
@@ -61,6 +62,7 @@ cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
 cargo run -p ferrodoc-harness -- diff-write corpus
+cargo run -p ferrodoc-harness -- diff-md    corpus
 ```
 
 `diff-write` is the writer's oracle: both engines write the same AST to a
@@ -76,13 +78,14 @@ cargo install --path crates/ferrodoc     # installs the `ferrodoc` binary
 
 ```sh
 ferrodoc README.md -o readme.html        # formats inferred from extensions
+ferrodoc report.docx -t markdown         # DOCX in, markdown out — for RAG and migrations
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
 cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
 Inputs: `markdown` (`commonmark`, `md`), `docx`, `json` (the pandoc AST).
-Outputs: `html`, `docx`, `json`, `plain`.
+Outputs: `markdown`, `html`, `docx`, `json`, `plain`.
 
 As a library, one call converts — and the AST is right there when you want to
 transform rather than convert, with no subprocess and no JSON round trip:
