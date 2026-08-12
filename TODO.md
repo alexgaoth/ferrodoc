@@ -125,7 +125,45 @@ Still open, and stated so nobody has to rediscover them:
 
 ## 4. Make the promise verifiable by strangers
 
-Trust is the product here, and none of this exists yet:
+Trust is the product here.
+
+### Absolute benchmarks — done, and they found something
+
+`ferrodoc-harness bench-sizes` reports latency and throughput per path at any
+size; peak memory is measured from outside with `/usr/bin/time`, because an
+in-process figure would need a custom global allocator and `unsafe` is
+forbidden across this workspace for a better reason than a benchmark.
+
+Release build, this machine, one sitting. Treat as an order of magnitude:
+
+| path | 10 KB | 1 MB | 10 MB |
+|---|---|---|---|
+| markdown → AST | 0.39 ms | 59 ms | 780 ms |
+| AST → HTML | 12 µs | 4.0 ms | 43 ms |
+| AST → markdown | 42 µs | 7.6 ms | 71 ms |
+| AST → docx | 0.52 ms | 56 ms | 645 ms |
+| docx → AST | 2.2 ms | 334 ms | 9.8 s |
+| HTML → AST | 0.64 ms | 93 ms | 2.3 s |
+
+Peak RSS: markdown → HTML is 4 MB / 77 MB / 734 MB; **docx → markdown is
+8 MB / 365 MB / 3.5 GB.**
+
+Two findings, both of which the benchmark existed to surface:
+
+- **A quadratic, now fixed.** Uniquing a heading identifier restarted its
+  search at `-1` every time, so documents whose headings share a name —
+  "Summary" once per section, which is what an ordinary sectioned document
+  looks like — cost O(n²). 1 MB of them took **72 seconds**; it now takes
+  0.34 s, and 10 MB of mixed content went 40 s → 9.8 s. The same bug was in
+  the HTML reader, copied along with the algorithm. Regression test in
+  `crates/ferrodoc-docx/src/write.rs`.
+- **The DOCX reader's full-DOM parse is real and expensive.** 3.5 GB of peak
+  RSS for a 4.3 MB `.docx` — roughly 800× the input — because the whole XML
+  tree and the whole AST are live at once. Fine on a laptop, fatal in a
+  256 MB container. This is the number that makes streaming a priority
+  rather than a maybe; see the last section.
+
+### Still missing
 
 - CI on Linux, macOS and Windows, pinned to the supported pandoc version.
 - A published compatibility matrix, *including the known losses* — the two open
@@ -133,9 +171,6 @@ Trust is the product here, and none of this exists yet:
 - A regression fixture for every mismatch ever found, added when it is found.
 - Fuzzing in CI for markdown, XML, ZIP and pathological nesting. Several of the
   worst bugs in this project were found this way; none of it runs automatically.
-- Benchmarks at 10 KB, 1 MB and 10 MB reporting **latency and peak memory in
-  absolute terms**, not only ratios against pandoc. 10 MB will expose the DOCX
-  reader's full-DOM parse — that is worth knowing before a user finds it.
 
 ## 5. Ship it
 
@@ -181,4 +216,5 @@ Declared, not deferred — so nobody has to re-litigate them:
   document for the web wants `<html>`, a title and optional CSS.
 - The two open markdown-reader divergences (entity-encoded spaces inside `Str`,
   refdef-plus-dash-run) — see `.iterate/20260810-markdown-reader/`.
-- Streaming or bounded-memory DOCX reading, if the 10 MB benchmark says so.
+- **Streaming or bounded-memory DOCX reading.** The 10 MB benchmark said so:
+  3.5 GB peak for a 4.3 MB file. No longer conditional.

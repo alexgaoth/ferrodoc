@@ -1088,6 +1088,31 @@ mod tests {
     }
 
     #[test]
+    fn many_headings_sharing_a_name_stay_linear() {
+        // Uniquing an identifier used to restart its search at `-1` every
+        // time, which is quadratic in the number of headings that share a
+        // name — and "Summary" repeated per section is what an ordinary
+        // document looks like. 20_000 of them took over a minute.
+        let heading = |text: &str| {
+            Block::Header(2, Attr::default(), vec![Inline::Str(text.to_owned())])
+        };
+        let doc = Pandoc {
+            blocks: (0..20_000).map(|_| heading("Summary")).collect(),
+            ..Pandoc::default()
+        };
+        let bytes = write_docx(&doc).expect("writes");
+        let start = std::time::Instant::now();
+        let back = read_docx(&bytes).expect("reads back");
+        assert_eq!(back.blocks.len(), 20_000);
+        // Generous: the linear version is well under a second in debug.
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "reading 20_000 same-named headings took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
     fn metadata_survives_as_styled_leading_paragraphs() {
         let inlines = |text: &str| MetaValue::MetaInlines(vec![Inline::Str(text.to_owned())]);
         let mut meta = Meta::new();

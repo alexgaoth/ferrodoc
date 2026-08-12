@@ -38,9 +38,10 @@ fn main() -> Result<()> {
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
         Some("diff-html-read") => diff_html_read(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
+        Some("bench-sizes") => bench_sizes(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|bench|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|bench|bench-sizes|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -342,6 +343,82 @@ fn collect_html_files(path: &Path, cases: &mut Vec<Case>) -> Result<()> {
         });
     }
     Ok(())
+}
+
+/// Report latency and throughput for each conversion path, in absolute
+/// terms, at every document size given.
+///
+/// Absolute numbers are what a user planning a pipeline needs; the ratios
+/// elsewhere are for comparing builds. They are not interchangeable — this
+/// machine drifts within a session, so treat these as an order of
+/// magnitude, not a benchmark score. Peak memory is measured from outside,
+/// with `/usr/bin/time -v` on the CLI: an in-process figure would need a
+/// custom global allocator, and `unsafe` is forbidden across this
+/// workspace for a better reason than a benchmark.
+fn bench_sizes(paths: &[String], iters: u32) -> Result<()> {
+    if paths.is_empty() {
+        bail!("bench-sizes expects at least one markdown file");
+    }
+    println!("{:>10}  {:<18}  {:>11}  {:>9}", "input", "path", "latency", "MB/s");
+    for p in paths {
+        let markdown = std::fs::read_to_string(p).with_context(|| format!("reading {p}"))?;
+        let bytes = markdown.len();
+        let ast = ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let html = ferrodoc_html::write_html(&ast);
+        let docx = ferrodoc_docx::write_docx(&ast).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Big documents are slow enough that a fixed iteration count would
+        // take minutes; scale it down but never below one.
+        let runs = (iters as usize * 100_000 / bytes.max(1)).clamp(1, iters as usize) as u32;
+        let label = human(bytes);
+        measure(&label, "markdown -> AST", bytes, runs, || {
+            let _ = ferrodoc_markdown::read_commonmark(&markdown);
+        });
+        measure(&label, "AST -> HTML", bytes, runs, || {
+            let _ = ferrodoc_html::write_html(&ast);
+        });
+        measure(&label, "AST -> markdown", bytes, runs, || {
+            let _ = ferrodoc_markdown::write_markdown(&ast);
+        });
+        measure(&label, "AST -> docx", bytes, runs, || {
+            let _ = ferrodoc_docx::write_docx(&ast);
+        });
+        measure(&label, "docx -> AST", bytes, runs, || {
+            let _ = ferrodoc_docx::read_docx(&docx);
+        });
+        measure(&label, "HTML -> AST", bytes, runs, || {
+            let _ = ferrodoc_html::read_html(&html);
+        });
+    }
+    Ok(())
+}
+
+/// Time `body` over `runs` iterations and report the per-run cost.
+fn measure(label: &str, path: &str, bytes: usize, runs: u32, mut body: impl FnMut()) {
+    body(); // warm up
+    let start = std::time::Instant::now();
+    for _ in 0..runs {
+        body();
+    }
+    let each = start.elapsed() / runs;
+    #[expect(clippy::cast_precision_loss, reason = "reporting, not arithmetic")]
+    let throughput = bytes as f64 / each.as_secs_f64() / 1_048_576.0;
+    println!(
+        "{label:>10}  {path:<18}  {:>11}  {throughput:>9.0}",
+        format!("{each:.2?}")
+    );
+}
+
+fn human(bytes: usize) -> String {
+    #[expect(clippy::cast_precision_loss, reason = "reporting, not arithmetic")]
+    let n = bytes as f64;
+    if bytes >= 1 << 20 {
+        format!("{:.1} MB", n / 1_048_576.0)
+    } else if bytes >= 1 << 10 {
+        format!("{:.0} KB", n / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 /// Run pandoc with the given arguments over stdin text.

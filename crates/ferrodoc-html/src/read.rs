@@ -16,7 +16,7 @@ use ferrodoc_ast::{
 };
 use html5ever::tendril::TendrilSink as _;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// How deep an element tree may nest before the reader refuses it.
 ///
@@ -57,6 +57,8 @@ struct Reader {
     depth: usize,
     /// Identifiers already handed out, so generated ones stay unique.
     used_idents: HashSet<String>,
+    /// The next suffix to try for a base identifier already handed out.
+    next_suffix: HashMap<String, u32>,
 }
 
 /// Whether loose text in a container becomes `Para` when something
@@ -598,12 +600,17 @@ impl Reader {
         if id.is_empty() {
             "section".clone_into(&mut id);
         }
-        let mut unique = id.clone();
-        let mut n = 0;
+        // Resumed from the last suffix this base name reached rather
+        // than restarted at zero: restarting is quadratic in the number of
+        // headings that share a name, and identifiers are only ever taken,
+        // so every suffix below the mark is already gone.
+        let mut n = self.next_suffix.get(&id).copied().unwrap_or(0);
+        let mut unique = if n == 0 { id.clone() } else { format!("{id}-{n}") };
         while !self.used_idents.insert(unique.clone()) {
             n += 1;
             unique = format!("{id}-{n}");
         }
+        self.next_suffix.insert(id, n + 1);
         unique
     }
 

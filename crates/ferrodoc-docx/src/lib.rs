@@ -223,6 +223,8 @@ fn text_width(body: &Node) -> f64 {
 #[derive(Default)]
 struct State {
     used_idents: HashSet<String>,
+    /// The next suffix to try for a base identifier already handed out.
+    next_suffix: HashMap<String, u32>,
     /// Last number used per (`w:numId`, level).
     list_numbers: HashMap<(String, usize), i64>,
     /// Bookmark name to the identifier actually emitted for it.
@@ -260,13 +262,7 @@ impl State {
         if id.is_empty() {
             "section".clone_into(&mut id);
         }
-        let mut unique = id.clone();
-        let mut n = 0;
-        while !self.used_idents.insert(unique.clone()) {
-            n += 1;
-            unique = format!("{id}-{n}");
-        }
-        unique
+        self.ident_from(&id)
     }
 
     /// Reserve an explicit identifier (a heading's own bookmark) so a later
@@ -278,13 +274,22 @@ impl State {
 
     /// Make `name` unique among the identifiers already used, suffixing
     /// `-1`, `-2`, … like pandoc.
+    ///
+    /// The search resumes from the last suffix this base name reached
+    /// instead of restarting at zero. Restarting is quadratic in the
+    /// number of headings that share a name — and headings sharing a name
+    /// ("Summary", "Notes") is what an ordinary sectioned document looks
+    /// like, so a 1 MB file of them took 72 seconds. Resuming is correct
+    /// because identifiers are only ever taken, never released, so every
+    /// suffix below the mark is already gone.
     fn ident_from(&mut self, name: &str) -> String {
-        let mut unique = name.to_owned();
-        let mut n = 0;
+        let mut n = self.next_suffix.get(name).copied().unwrap_or(0);
+        let mut unique = if n == 0 { name.to_owned() } else { format!("{name}-{n}") };
         while !self.used_idents.insert(unique.clone()) {
             n += 1;
             unique = format!("{name}-{n}");
         }
+        self.next_suffix.insert(name.to_owned(), n + 1);
         unique
     }
 
