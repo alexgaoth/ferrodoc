@@ -1,19 +1,72 @@
 # ferrodoc
 
-A universal document converter in Rust, pandoc-compatible at the AST level.
+A universal document converter in Rust — markdown, HTML and DOCX — that
+produces the same output as pandoc, and produces it far faster.
 
-| crate | what it does | conformance vs pandoc 3.8.2.1 |
-|---|---|---|
-| `ferrodoc-ast` | the pandoc-types 1.23 AST | any `pandoc -t json` document round-trips to an equal value |
-| `ferrodoc-markdown` | CommonMark reader | **652/652** spec examples produce identical ASTs |
-| `ferrodoc-html` | HTML writer | **652/652** spec examples produce identical HTML |
-| `ferrodoc-docx` | DOCX reader | **36/37** corpus documents produce identical ASTs |
-| `ferrodoc-docx` | DOCX writer | **643/652** spec examples survive a docx round trip identically |
-| `ferrodoc-text` | plain-text extraction | best-effort by design, not pandoc-`plain` parity |
-| `ferrodoc-harness` | the differential oracle | `diff-ast`, `diff-spec`, `diff-html`, `diff-docx`, `diff-write`, `bench` |
+## ferrodoc vs pandoc
 
-Nothing here is trusted because it looks right: every claim above is produced
-by running the real pandoc binary side by side and comparing full documents.
+Every row measured on this machine in one sitting (Linux x86-64, pandoc
+3.8.2.1, release build), reproducible with the commands below.
+
+| | pandoc | ferrodoc | |
+|---|---|---|---|
+| **Convert 16 KB markdown → HTML** | 110 ms | **1.4 ms** | **77× faster** |
+| **Convert 0.6 KB markdown → HTML** | 21 ms | **46 µs** | **462× faster** |
+| **Startup** (one tiny document) | 13 ms | **2 ms** | **6× faster** |
+| **Peak memory**, 0.6 KB document | 65 MB | **3.8 MB** | **17× less** |
+| **Peak memory**, 16 KB document | 207 MB | **4.7 MB** | **44× less** |
+| **Binary on disk** | 153 MB | **3.2 MB** | **48× smaller** |
+| **Malformed DOCX** (self-referential footnote) | hangs, killed at 60 s | **handled in 12 ms** | — |
+| **Same document written twice** | different bytes | **identical bytes** | — |
+| **Runs in a browser / edge worker** | no | **yes** (wasm32) | — |
+
+DOCX, in process: writes the 16 KB document in 1.7 ms and reads it back in
+5.0 ms (0.22 ms / 0.34 ms for the small one) — a path pandoc can only offer
+through a subprocess.
+
+The throughput rows compare an in-process library call against a `pandoc`
+subprocess, because that is the choice a real pipeline makes: pandoc is a
+binary, so calling it from a program *means* spawning a process per document.
+The small-document ratio is dominated by that startup — precisely the cost
+document pipelines pay on every file today.
+
+```sh
+python3 -c "import json; print('\n\n'.join(e['markdown'] for e in json.load(open('corpus/commonmark-spec-0.31.2.json'))))" > /tmp/bigdoc.md
+cargo build --release
+./target/release/ferrodoc-harness bench      /tmp/bigdoc.md corpus/readme-style.md --iters 300
+./target/release/ferrodoc-harness bench-docx /tmp/bigdoc.md corpus/readme-style.md --iters 200
+cargo run -p ferrodoc-harness --example determinism corpus/readme-style.md
+```
+
+Absolute timings move with CPU state; the ratios hold. Compare interleaved
+runs, never numbers from different sittings.
+
+## And the output is the same
+
+Speed is worthless if the document changes. Every claim here comes from
+running the real pandoc binary side by side and comparing whole documents —
+nothing is trusted because it looks right.
+
+| crate | conformance vs pandoc 3.8.2.1 |
+|---|---|
+| `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
+| `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
+| `ferrodoc-html` | **652/652** spec examples produce identical HTML |
+| `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
+| `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically |
+
+```sh
+cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
+cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
+cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
+cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
+cargo run -p ferrodoc-harness -- diff-write corpus
+```
+
+`diff-write` is the writer's oracle: both engines write the same AST to a
+`.docx`, pandoc reads both back, and the two documents must match. Comparing
+zip bytes would be meaningless; comparing what the format preserves is the
+real contract.
 
 ## Install and use
 
@@ -31,8 +84,8 @@ ferrodoc --help                          # every option and format
 Inputs: `markdown` (`commonmark`, `md`), `docx`, `json` (the pandoc AST).
 Outputs: `html`, `docx`, `json`, `plain`.
 
-As a library, one call converts, and the AST is there when you want to
-transform rather than convert:
+As a library, one call converts — and the AST is right there when you want to
+transform rather than convert, with no subprocess and no JSON round trip:
 
 ```rust
 use ferrodoc::{Format, ast::Block, convert, parse, render};
@@ -44,134 +97,37 @@ doc.blocks.retain(|block| !matches!(block, Block::Header(..)));
 let without_headings = render(&doc, Format::Html)?;
 ```
 
-## Differential testing
+## Why the differences are structural, not incidental
 
-```sh
-cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
-cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
-cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
-cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
-cargo run -p ferrodoc-harness -- diff-write corpus
-```
-
-`diff-write` is the writer's oracle: both engines write the same AST to a
-`.docx`, pandoc reads both back, and the two documents must match. Comparing
-zip bytes would be meaningless; comparing what the format preserves is the
-real contract.
-
-## What the Rust rewrite actually buys
-
-Measured on this machine (Linux x86-64, pandoc 3.8.2.1, release build). Every
-number below is reproducible with the commands in this repo — none is an
-estimate.
-
-### 1. Throughput: 90×–500× faster in the shape pipelines actually use
-
-| input | ferrodoc (in-process) | pandoc (subprocess) | ratio |
-|---|---|---|---|
-| 16 KB (concatenated spec examples) | 0.77 ms | 86 ms | **~110×** |
-| 0.6 KB README | 37 µs | 19 ms | **~500×** |
-
-Writing and reading DOCX, in process (`bench-docx`): the 16 KB document takes
-~1.4 ms to write and ~5 ms to read on this machine; the 0.6 KB one, ~0.2 ms
-and ~0.3 ms. (Absolute figures move with CPU state — compare interleaved runs,
-not numbers from different sittings.)
-
-The comparison is in-process library call vs `pandoc` subprocess, because that
-is the choice a real pipeline makes: pandoc is a binary, so using it from
-another program *means* spawning a process and serializing through it. The
-small-document ratio is dominated by that startup, which is exactly the cost
-document pipelines pay per file today.
-
-Reproduce with:
-
-```sh
-python3 -c "import json; print('\n\n'.join(e['markdown'] for e in json.load(open('corpus/commonmark-spec-0.31.2.json'))))" > /tmp/bigdoc.md
-cargo build --release
-./target/release/ferrodoc-harness bench      /tmp/bigdoc.md corpus/readme-style.md --iters 300
-./target/release/ferrodoc-harness bench-docx /tmp/bigdoc.md corpus/readme-style.md --iters 200
-```
-
-### 2. Startup: 13 ms → 2 ms per invocation
-
-Even as a plain CLI, converting a one-line document takes pandoc ~13 ms and
-ferrodoc ~2 ms — a Haskell runtime plus a 153 MB binary has to be paged in
-before any work happens.
-
-### 3. Memory: 17× to 40× less
-
-Peak resident set of the `ferrodoc` binary against `pandoc`, converting to
-HTML (`/usr/bin/time`), same machine, same command shape:
-
-| input | ferrodoc | pandoc |
-|---|---|---|
-| 0.6 KB README | 3.8 MB | 65 MB |
-| 16 KB spec examples | 5.1 MB | 206 MB |
-
-No GC and no runtime: memory tracks the document, not the interpreter. Note
-the 16 KB file is the CommonMark spec's examples concatenated, so it contains
-deliberately pathological markdown — but the small, ordinary document shows
-the same shape.
-
-### 4. Distribution: 153 MB → 3.1 MB
-
-`pandoc` is 152.9 MB on disk. The entire ferrodoc harness — every reader,
-every writer and the test tooling — is 3.1 MB, and a library user links only
-what they call. This is the difference between a container image you notice
-and one you don't.
-
-### 5. It runs where pandoc cannot: the browser
-
-All five crates, including the DOCX reader and writer, compile to
-`wasm32-unknown-unknown`:
+- **No runtime.** Memory tracks the document, not an interpreter; there is no
+  GC pause and nothing to page in before work starts.
+- **A library, not a binary.** Callers get typed values — `Pandoc`, `Block`,
+  `Inline` — to inspect and transform in memory.
+- **Bounded and memory-safe.** Every recursive path is depth-limited and
+  readers return `Err` rather than aborting; `unsafe` is forbidden crate-wide,
+  so a malformed document cannot become a memory-safety bug. Two fuzz-found
+  DOCX files that hang pandoc for 60 s are handled here in 12 ms and 3.5 s.
+- **Deterministic output.** The same AST always produces the same `.docx`
+  bytes, which makes content-addressed caching and "did this change?" work.
+  Pandoc embeds timestamps, so its output differs run to run.
+- **Portable.** All five library crates, including the DOCX reader and writer,
+  compile to `wasm32-unknown-unknown` — conversion in a browser tab or an edge
+  worker, with no document leaving the client.
 
 ```sh
 cargo build --release --target wasm32-unknown-unknown \
   -p ferrodoc-ast -p ferrodoc-markdown -p ferrodoc-html -p ferrodoc-text -p ferrodoc-docx
 ```
 
-Document conversion in a browser tab or an edge worker, with no server round
-trip and no document leaving the client, is not something a GHC-compiled
-pandoc offers today.
+## Where pandoc is still ahead
 
-### 6. It survives hostile input that hangs pandoc
-
-Documents are attacker-controlled in any upload pipeline. Two of them, found
-by fuzzing during review:
-
-| malformed `.docx` | pandoc | ferrodoc |
-|---|---|---|
-| footnote that references itself | **hung** (killed at 60 s) | error in 14 ms |
-| 20,000 increasingly-nested list items | **hung** (killed at 60 s) | handled in 3.5 s |
-
-Every recursive path is depth-bounded and the reader returns `Err` instead of
-aborting; `unsafe` is forbidden crate-wide, so a malformed document cannot
-become a memory-safety bug.
-
-### 7. Reproducible output
-
-Writing the same document twice produces byte-identical `.docx` files.
-Pandoc's differ (embedded timestamps), which defeats content-addressed caching
-and makes "did this document change?" un-answerable without parsing.
-
-```sh
-cargo run -p ferrodoc-harness --example determinism corpus/readme-style.md
-```
-
-### 8. A library, not a subprocess
-
-Callers get typed values — `Pandoc`, `Block`, `Inline` with named fields —
-that they can inspect and transform in memory. Using pandoc programmatically
-means shelling out, or serializing to JSON and back, per document.
-
-### Where pandoc is still ahead
-
-Honesty matters more than the table above. Pandoc supports ~40 formats to
-ferrodoc's four; it has citations, templates, Lua filters, PDF output and
-fifteen years of edge cases. It also *preserves* things this writer does not
-yet: images need media parts, raw blocks have nowhere to go in OOXML. The bet
-is not that this replaces pandoc, but that the common path — markdown, HTML
-and DOCX, called from a program rather than a shell — is worth doing natively.
+The table above is not the whole picture, and pretending otherwise would make
+the rest less believable. Pandoc supports ~40 formats to ferrodoc's four, plus
+citations, templates, Lua filters, PDF output and fifteen years of edge cases.
+Our DOCX writer also drops things it has nowhere to put: images need media
+parts, raw blocks have no OOXML equivalent. The bet is not that this replaces
+pandoc — it is that the common path, markdown/HTML/DOCX called from a program
+rather than a shell, is worth doing natively.
 
 ## License notes
 
