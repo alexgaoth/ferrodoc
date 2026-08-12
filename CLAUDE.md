@@ -1,7 +1,9 @@
 # CLAUDE.md
 
-Pandoc-compatible document converter. The contract everywhere: output must be
-value-identical to pandoc's, proven differentially — never assumed.
+Pandoc-compatible document converter, built to be adopted outside this repo.
+Two contracts follow: output must be value-identical to pandoc's, proven
+differentially and never assumed; and every advantage claimed to a reader must
+be a number someone else can reproduce.
 
 ## Commands
 
@@ -41,12 +43,14 @@ value-identical to pandoc's, proven differentially — never assumed.
 - Never judge performance by absolute timings: this machine drifts ~2× within
   a session, and adding code to `bench` moves the number it reports. Compare
   interleaved against a baseline build (`git worktree add /tmp/base <commit>`,
-  alternate runs) and report the ratio; any figure published together must
-  come from one sitting.
+  alternate runs) and report the ratio.
 - Regenerate `/tmp/bigdoc.md` before measuring — `/tmp` is cleaned between
   sessions, and a missing input fails quietly: `bench` prints nothing and
   `/usr/bin/time` reports pandoc's error-path RSS (~12 MB) as if it were a
   conversion. Check the run produced output before believing a number.
+- A README claim needs the command that reproduces it, figures from a single
+  sitting, and what pandoc still does better beside it — selling the wins
+  without the limits is what makes a reader stop trusting the wins.
 - Measure every optimization against the code it replaces; here the intuitive
   ones lost. Slice-scanning escapers are slower than a plain per-character loop
   (the strings are short words), and `String::with_capacity` on writer output
@@ -85,4 +89,6 @@ value-identical to pandoc's, proven differentially — never assumed.
   several times that unoptimized against a 2 MiB thread stack, so a limit of
   500 overflows the test suite it exists to protect.
 - Known gaps live in each crate's docs; `.iterate/*/` holds the critic verdicts
-  behind them, including fixes made after a run hit its round cap.
+  behind them, including fixes made after a run hit its round cap. The largest:
+  the DOCX writer drops images to alt text and discards raw blocks, and nothing
+  ships yet — no crates.io release, no Python or Node bindings.
