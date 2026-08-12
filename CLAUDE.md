@@ -89,6 +89,6 @@ be a number someone else can reproduce.
   several times that unoptimized against a 2 MiB thread stack, so a limit of
   500 overflows the test suite it exists to protect.
 - Known gaps live in each crate's docs; `.iterate/*/` holds the critic verdicts
-  behind them, including fixes made after a run hit its round cap. The largest:
-  the DOCX writer drops images to alt text and discards raw blocks, and nothing
-  ships yet — no crates.io release, no Python or Node bindings.
+  behind them, including fixes made after a run hit its round cap. `TODO.md`
+  has the roadmap and the deliberate non-goals — read it before adding a
+  format: embedded images and a markdown writer come before breadth.
