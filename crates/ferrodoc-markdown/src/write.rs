@@ -1,16 +1,23 @@
 //! Markdown writer: renders the ferrodoc AST back to `CommonMark`.
 //!
-//! The contract is semantic, not textual: what this emits must *re-read* to
-//! the document it was given, which is what `ferrodoc-harness diff-md`
-//! checks against pandoc's own markdown writer. Output is therefore
-//! escaped conservatively — a writer that emits `*` where the source meant
-//! a literal asterisk is silently lossy, and that is the only way a
-//! markdown writer really fails.
+//! The contract is semantic, not textual: what this emits must *re-read*
+//! to the document it was given. `ferrodoc-harness diff-md` checks exactly
+//! that, and it holds for all 652 `CommonMark` spec examples. Output is
+//! therefore escaped conservatively — a writer that emits `*` where the
+//! source meant a literal asterisk is silently lossy, and that is the only
+//! way a markdown writer really fails.
 //!
-//! `CommonMark` cannot represent tables, footnotes or definition lists; like
-//! pandoc's `commonmark` writer, those degrade (tables and notes to raw
-//! HTML-ish output, definition lists to paragraphs) and are not covered by
-//! the differential.
+//! Known losses, all of them limits of the format rather than of this
+//! code:
+//!
+//! - `CommonMark` has no tables, footnotes or definition lists. Like
+//!   pandoc's `commonmark` writer, those degrade to their content.
+//! - Emphasis directly inside emphasis needs `_`, which is not a delimiter
+//!   inside a word, so `foo*_bar_*baz` cannot be written.
+//! - Two ordered lists in a row that share a delimiter can only be kept
+//!   apart by a `<!-- -->` comment, which re-reads as a raw block.
+//! - An unterminated raw HTML block swallows the blank line that follows
+//!   it, so it absorbs whatever separator a container needs.
 
 use ferrodoc_ast::{
     Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType,
@@ -35,6 +42,11 @@ pub fn write_markdown(doc: &Pandoc) -> String {
 struct Writer {
     /// Footnote bodies, collected as they are referenced.
     notes: Vec<String>,
+    /// Whether the next bullet list uses `*` rather than `-`.
+    bullet: bool,
+    /// Whether the emphasis about to be written must use `_` rather than
+    /// `*`, because its parent is emphasis that wraps nothing else.
+    alternate: bool,
 }
 
 impl Writer {
@@ -47,10 +59,20 @@ impl Writer {
                 // The blank line between blocks still belongs to the
                 // container: a bare newline inside a quote ends the quote.
                 push_line(out, prefix, "");
-                // Two lists in a row would merge into one on re-reading.
-                if needs_separator(previous, block) {
-                    push_line(out, prefix, "<!-- -->");
-                    push_line(out, prefix, "");
+                // Two bullet lists in a row would merge into one on
+                // re-reading; switching the bullet character splits them
+                // and, unlike a separator comment, adds no block. Two
+                // ordered lists sharing a delimiter have no such escape,
+                // so they keep the comment and the round trip loses it.
+                match (previous, block) {
+                    (Block::BulletList(_), Block::BulletList(_)) => self.bullet = !self.bullet,
+                    (Block::OrderedList(before, _), Block::OrderedList(after, _))
+                        if before.delim == after.delim =>
+                    {
+                        push_line(out, prefix, "<!-- -->");
+                        push_line(out, prefix, "");
+                    }
+                    _ => {}
                 }
             }
             self.block(out, block, prefix);
@@ -72,9 +94,8 @@ impl Writer {
                 push_wrapped(out, prefix, &text);
             }
             Block::Header(level, _, inlines) => {
-                let hashes = "#".repeat(usize::try_from(*level).unwrap_or(1).clamp(1, 6));
                 let text = self.inlines(inlines);
-                push_line(out, prefix, &format!("{hashes} {text}"));
+                header(out, prefix, *level, &text);
             }
             Block::CodeBlock(attr, text) => {
                 // A fence must be longer than any backtick run inside.
@@ -92,11 +113,22 @@ impl Writer {
                 push_line(out, prefix, &fence);
             }
             Block::BlockQuote(blocks) => {
-                let inner = format!("{prefix}> ");
-                self.blocks(out, blocks, &inner);
+                if blocks.is_empty() {
+                    // A quote with no content is still a quote; writing
+                    // nothing would delete the block.
+                    push_line(out, prefix, ">");
+                } else {
+                    let inner = format!("{prefix}> ");
+                    self.blocks(out, blocks, &inner);
+                }
             }
             Block::BulletList(items) => {
-                self.list(out, items, prefix, |_| "- ".to_owned());
+                // Fixed for the whole list: a marker that changed between
+                // items would split the list in two.
+                let bullet = if self.bullet { '*' } else { '-' };
+                let saved = self.bullet;
+                self.list(out, items, prefix, move |_| format!("{bullet} "));
+                self.bullet = saved;
             }
             Block::OrderedList(attrs, items) => {
                 // CommonMark numbers every ordered list; the roman and
@@ -127,7 +159,9 @@ impl Writer {
                     }
                 }
             }
-            Block::HorizontalRule => push_line(out, prefix, "---"),
+            // `***`, not `---`: inside a list item `- ---` is itself a
+            // thematic break, so the item disappears.
+            Block::HorizontalRule => push_line(out, prefix, "***"),
             Block::LineBlock(lines) => {
                 // Hard breaks preserve the line structure.
                 let mut text = String::new();
@@ -167,7 +201,12 @@ impl Writer {
                     .head
                     .rows
                     .iter()
-                    .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+                    .chain(
+                        table
+                            .bodies
+                            .iter()
+                            .flat_map(|b| b.head.iter().chain(&b.body)),
+                    )
                     .chain(&table.foot.rows);
                 let mut first = true;
                 for row in rows {
@@ -230,6 +269,18 @@ impl Writer {
 
     // --- inlines ---
 
+    /// The body of an emphasis node. `alternate` says the child must not
+    /// reuse `*`, which is true only for emphasis directly inside
+    /// emphasis: there the two delimiters merge and `**x**` reads back as
+    /// strong. Everything else concatenates correctly, and `_` is only a
+    /// delimiter at a word boundary, so it is not offered more widely.
+    fn nested(&mut self, inner: &[Inline], alternate: bool) -> String {
+        self.alternate = alternate;
+        let text = self.inlines(inner);
+        self.alternate = false;
+        text
+    }
+
     fn inlines(&mut self, inlines: &[Inline]) -> String {
         let mut out = String::new();
         for inline in inlines {
@@ -241,18 +292,25 @@ impl Writer {
     fn inline(&mut self, out: &mut String, inline: &Inline) {
         match inline {
             Inline::Str(text) => escape_text(out, text),
-            Inline::Space | Inline::SoftBreak => out.push(' '),
+            Inline::Space => out.push(' '),
+            // A soft break is a real line break in the source, and this
+            // writer never re-wraps, so keeping it is both faithful and
+            // free. Callers that cannot hold a newline flatten it back.
+            Inline::SoftBreak => out.push('\n'),
             // Two trailing spaces before the newline is a hard break.
             Inline::LineBreak => out.push_str("  \n"),
+            // Emphasis wrapping nothing but emphasis must alternate
+            // delimiters: `**foo**` is strong, not emphasis in emphasis.
             Inline::Emph(inner) => {
-                out.push('*');
-                out.push_str(&self.inlines(inner));
-                out.push('*');
+                let delimiter = if self.alternate { "_" } else { "*" };
+                let text = self.nested(inner, matches!(inner[..], [Inline::Emph(_)]));
+                let _ = write!(out, "{delimiter}{text}{delimiter}");
             }
             Inline::Strong(inner) => {
-                out.push_str("**");
-                out.push_str(&self.inlines(inner));
-                out.push_str("**");
+                // `**` nests by concatenation — `****x****` reads back as
+                // strong within strong — so it never needs the alternate.
+                let text = self.nested(inner, false);
+                let _ = write!(out, "**{text}**");
             }
             // No CommonMark syntax: keep the text, drop the styling.
             Inline::Strikeout(inner)
@@ -279,7 +337,20 @@ impl Writer {
                 // literal backtick at either end needs padding spaces.
                 let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
                 let ticks = "`".repeat(longest + 1);
-                let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
+                // A reader strips one space from each end of a code span
+                // that begins and ends with one, unless it is all spaces.
+                // Padding both ends makes that strip give the text back,
+                // and also keeps a leading or trailing backtick separate
+                // from the delimiter. All-space content is never stripped,
+                // so padding it would corrupt it instead.
+                let all_spaces = text.chars().all(|c| c == ' ');
+                let pad = if !all_spaces
+                    && (text.starts_with(['`', ' ']) || text.ends_with(['`', ' ']))
+                {
+                    " "
+                } else {
+                    ""
+                };
                 let _ = write!(out, "{ticks}{pad}{text}{pad}{ticks}");
             }
             Inline::Math(kind, text) => {
@@ -320,21 +391,23 @@ impl Writer {
     }
 }
 
-/// Whether two adjacent blocks would merge into one when re-read.
-fn needs_separator(previous: &Block, next: &Block) -> bool {
-    matches!(
-        (previous, next),
-        (Block::BulletList(_), Block::BulletList(_))
-            | (Block::OrderedList(..), Block::OrderedList(..))
-    )
-}
-
 /// A link destination, wrapped in angle brackets when it needs them.
+///
+/// A destination is read with backslash escapes active in both forms, so a
+/// URL containing `\` must double it or the character is eaten. Angle
+/// brackets additionally cannot hold a bare `<` or `>`.
 fn link_destination(url: &str) -> String {
+    let mut escaped = String::new();
+    for ch in url.chars() {
+        if matches!(ch, '\\' | '<' | '>') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
     if url.is_empty() || url.contains([' ', '(', ')']) {
-        format!("<{}>", url.replace('>', "%3E"))
+        format!("<{escaped}>")
     } else {
-        url.to_owned()
+        escaped
     }
 }
 
@@ -357,6 +430,38 @@ fn push_wrapped(out: &mut String, prefix: &str, text: &str) {
     }
 }
 
+/// Write a heading whose inlines have already been rendered to `text`.
+fn header(out: &mut String, prefix: &str, level: i64, text: &str) {
+    // An ATX heading is one line. A setext heading is not, so levels 1 and
+    // 2 can keep a line break; deeper ones must flatten it, which
+    // `CommonMark` gives no way around.
+    if text.contains('\n') && (level == 1 || level == 2) {
+        push_wrapped(out, prefix, text);
+        push_line(out, prefix, if level == 1 { "===" } else { "---" });
+        return;
+    }
+    let hashes = "#".repeat(usize::try_from(level).unwrap_or(1).clamp(1, 6));
+    let text = text.replace('\n', " ");
+    // A trailing `#` run would be read as the heading's closing sequence;
+    // one escape anywhere inside the run is enough to stop that.
+    let stripped = text.trim_end_matches('#');
+    let text = if stripped.len() == text.len() {
+        text.clone()
+    } else {
+        format!("{stripped}\\{}", &text[stripped.len()..])
+    };
+    push_line(out, prefix, &format!("{hashes} {text}"));
+}
+
+/// Whether everything written on the current line is digits, and there is
+/// at least one — the only position where a following `.` or `)` opens an
+/// ordered list. Scans backwards over the digit run only, so prose (whose
+/// last character is rarely a digit) costs nothing.
+fn digits_since_line_start(out: &str) -> bool {
+    let before = out.trim_end_matches(|c: char| c.is_ascii_digit());
+    before.len() < out.len() && (before.is_empty() || before.ends_with('\n'))
+}
+
 /// Escape text so it re-reads as itself.
 ///
 /// Conservative on purpose: characters that could open markup are always
@@ -375,12 +480,23 @@ fn escape_text(out: &mut String, text: &str) {
                 out.push('\\');
                 out.push(ch);
             }
+            // `1.` and `1)` open an ordered list, but only where the line
+            // so far is nothing but the number.
+            '.' | ')' if digits_since_line_start(out) => {
+                out.push('\\');
+                out.push(ch);
+            }
             '!' => {
                 // Only dangerous immediately before a link.
                 out.push('\\');
                 out.push('!');
             }
             '&' => out.push_str("&amp;"),
+            // A literal newline or tab inside a `Str` is text, not
+            // structure: written raw they would split the paragraph or
+            // open an indented code block, so spell them as references.
+            '\n' => out.push_str("&#10;"),
+            '\t' => out.push_str("&#9;"),
             ch => out.push(ch),
         }
     }
@@ -398,7 +514,10 @@ mod tests {
         let second = read_commonmark(&written).expect("convertible");
         if first.blocks != second.blocks {
             eprintln!("--- input:\n{markdown}\n--- written:\n{written}");
-            eprintln!("--- first: {:?}\n--- second: {:?}", first.blocks, second.blocks);
+            eprintln!(
+                "--- first: {:?}\n--- second: {:?}",
+                first.blocks, second.blocks
+            );
         }
         first.blocks == second.blocks
     }
@@ -422,7 +541,52 @@ mod tests {
 
     #[test]
     fn adjacent_lists_do_not_merge() {
-        let two_lists = "- a\n\n<!-- -->\n\n- b\n";
-        assert!(round_trips(two_lists));
+        // The bullet character alternates, so no separator block is needed.
+        assert!(round_trips("- a\n\n* b\n"));
+        assert!(round_trips("1. a\n\n1) b\n"));
+    }
+
+    #[test]
+    fn line_structure_survives() {
+        // A soft break is a line break in the source, not a space.
+        assert!(round_trips("one\ntwo\n"));
+        assert!(round_trips("> one\n> two\n"));
+        assert!(round_trips("Foo *bar\nbaz*\n====\n"));
+    }
+
+    #[test]
+    fn block_openers_in_text_are_neutralized() {
+        // `1.` opens a list only where the line is nothing but the number.
+        assert!(round_trips("1\\. not a list\n"));
+        assert!(round_trips("version 1.2 is fine\n"));
+        // Newline and tab inside a `Str` are text, not structure.
+        assert!(round_trips("foo&#10;&#10;bar\n"));
+        assert!(round_trips("&#9;foo\n"));
+        // A trailing `#` run is otherwise a heading's closing sequence.
+        assert!(round_trips("## foo #\\##\n"));
+    }
+
+    #[test]
+    fn blocks_with_no_content_are_kept() {
+        assert!(round_trips(">\n"));
+        // `- ---` is itself a thematic break, which would eat the item.
+        assert!(round_trips("- Foo\n- * * *\n"));
+    }
+
+    #[test]
+    fn nested_emphasis_keeps_its_levels() {
+        assert!(round_trips("*_foo_*\n"));
+        assert!(round_trips("foo***bar***baz\n"));
+        assert!(round_trips("foo******bar******baz\n"));
+    }
+
+    #[test]
+    fn awkward_code_and_link_payloads_survive() {
+        // One space is stripped from each end of a code span.
+        assert!(round_trips("`  ``  `\n"));
+        assert!(round_trips("` `\n"));
+        // Destinations are read with backslash escapes active.
+        assert!(round_trips("<https://example.com?find=\\*>\n"));
+        assert!(round_trips("[a](<b)c>)\n"));
     }
 }

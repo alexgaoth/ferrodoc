@@ -199,40 +199,59 @@ fn collect_mixed(paths: &[String]) -> Result<Vec<Case>> {
     Ok(cases)
 }
 
-/// Compare our markdown *writer* against pandoc's, semantically: both
-/// engines write the same AST back to markdown, pandoc reads both results,
-/// and the two documents must match. Byte comparison would fail on
-/// cosmetic differences that mean nothing; what matters is that the
-/// markdown re-reads to the document it came from.
+/// Measure the markdown *writer* by fidelity: write the AST back to
+/// markdown, have pandoc read the result, and require the document that
+/// comes back to be the one we started from.
+///
+/// This deliberately does **not** compare against pandoc's own markdown
+/// output. `CommonMark` is a lossy target and pandoc's writer loses
+/// documents ferrodoc keeps (escaped punctuation, autolinks containing
+/// backslashes); demanding sameness would mean reproducing those losses.
+/// Round-tripping is the property a user actually depends on, so it is
+/// the gate — and pandoc's score on the identical corpus is printed
+/// beside it so the comparison stays honest in both directions.
 fn diff_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
     let cases = collect_mixed(paths)?;
     if cases.is_empty() {
         bail!("no inputs found");
     }
     let mut matched = 0usize;
+    let mut pandoc_matched = 0usize;
     let mut failures = Vec::new();
     for case in &cases {
         let ast = ferrodoc_markdown::read_commonmark(&case.markdown)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let original = serde_json::to_value(&ast)?;
         let ast_json = serde_json::to_string(&ast)?;
 
         let ours_md = ferrodoc_markdown::write_markdown(&ast);
         let ours = pandoc_json(&ours_md)
             .with_context(|| format!("pandoc could not read our markdown for {}", case.name))?;
 
+        // `--wrap=preserve`, not `--wrap=none`: `none` collapses every
+        // soft break into a space, and scoring pandoc on a setting that
+        // throws away line structure would flatter ferrodoc for free.
         let theirs_md = run_pandoc_input(
             &ast_json,
-            &["-f", "json", "-t", "commonmark", "--wrap=none"],
+            &["-f", "json", "-t", "commonmark", "--wrap=preserve"],
         )?;
         let theirs_md = String::from_utf8(theirs_md).context("pandoc emitted invalid UTF-8")?;
-        let theirs = pandoc_json(&theirs_md)?;
+        if pandoc_json(&theirs_md)? == original {
+            pandoc_matched += 1;
+        }
 
-        if ours == theirs {
+        if ours == original {
             matched += 1;
         } else {
-            failures.push((case, first_divergence(&ours, &theirs, "")));
+            failures.push((case, first_divergence(&ours, &original, "")));
         }
     }
+    #[allow(clippy::cast_precision_loss)]
+    let pandoc_pct = 100.0 * pandoc_matched as f64 / cases.len() as f64;
+    println!(
+        "pandoc round-trips {pandoc_matched}/{} of the same corpus ({pandoc_pct:.1}%)",
+        cases.len()
+    );
     report(&cases, matched, &failures, verbose, fail_under)
 }
 

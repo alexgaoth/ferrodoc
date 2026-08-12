@@ -19,22 +19,21 @@ workflow that already works.
 
 ---
 
-## 1. Markdown writer — first draft landed, needs finishing
+## 1. Markdown writer — done
 
-`docx → markdown` and `html → markdown` were impossible; the writer now exists
-and `ferrodoc report.docx -t markdown` works. Verified by `diff-md` the same way
-the DOCX writer is: both engines write the AST back to markdown, pandoc reads
-both results, and the documents must match. **600/652 spec examples (92%).**
+`docx → markdown` and `html → markdown` were impossible; `ferrodoc report.docx
+-t markdown` now works. Measured by `diff-md` as fidelity — write the document
+out, read it back, require what returns to be what went in: **652/652 spec
+examples, against pandoc's 593/652 at its best setting.** This is the first
+place ferrodoc is ahead of pandoc on output quality rather than level with it.
 
-Remaining, in rough order of how often they will bite:
+What is left is an opt-in **GFM mode** (tables, task lists, strikethrough),
+which is what makes the tables currently flattened to paragraphs survive. It
+is a new capability, not a repair, so it ranks against the items below rather
+than inside this one.
 
-- Raw HTML blocks containing blank lines (`<style>`, `<script>`, `<pre>`,
-  `<?php`, `<textarea>`) split on re-read.
-- Escaping edge cases: backslash runs, `\*not emphasized*`, non-ASCII
-  punctuation after a backslash.
-- Tabs used as list markers or inside block quotes.
-- Then: an opt-in GFM mode (tables, task lists, strikethrough), which is what
-  makes the tables currently flattened to paragraphs survive.
+The four documented losses in `write.rs` are limits of CommonMark, not bugs;
+GFM removes none of them.
 
 ## 2. Embedded images in the DOCX writer
 

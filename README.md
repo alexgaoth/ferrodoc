@@ -54,7 +54,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically |
-| `ferrodoc-markdown` writer | **600/652** spec examples survive a markdown round trip identically |
+| `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 
 ```sh
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
@@ -65,10 +65,21 @@ cargo run -p ferrodoc-harness -- diff-write corpus
 cargo run -p ferrodoc-harness -- diff-md    corpus
 ```
 
-`diff-write` is the writer's oracle: both engines write the same AST to a
-`.docx`, pandoc reads both back, and the two documents must match. Comparing
-zip bytes would be meaningless; comparing what the format preserves is the
-real contract.
+`diff-write` is the DOCX writer's oracle: both engines write the same AST to
+a `.docx`, pandoc reads both back, and the two documents must match.
+Comparing zip bytes would be meaningless; comparing what the format
+preserves is the real contract.
+
+`diff-md` measures the markdown writer by fidelity — write the document out,
+read it back, require what returns to be what went in — and prints pandoc's
+score on the same corpus beside ours. This is the one place ferrodoc is
+measurably ahead rather than equal: **652/652 against pandoc's 593/652**,
+with pandoc given its best setting (`--wrap=preserve`; `--wrap=none` would
+cost it another 58 by flattening soft breaks). Pandoc loses escaped
+punctuation, autolinks containing backslashes and code spans with edge
+spaces; converting a DOCX to markdown and back changes those documents.
+The remaining gaps are limits of CommonMark itself and are listed in
+`crates/ferrodoc-markdown/src/write.rs`.
 
 ## Install and use
 
