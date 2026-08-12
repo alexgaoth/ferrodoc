@@ -41,7 +41,12 @@ value-identical to pandoc's, proven differentially — never assumed.
 - Never judge performance by absolute timings: this machine drifts ~2× within
   a session, and adding code to `bench` moves the number it reports. Compare
   interleaved against a baseline build (`git worktree add /tmp/base <commit>`,
-  alternate runs) and report the ratio.
+  alternate runs) and report the ratio; any figure published together must
+  come from one sitting.
+- Regenerate `/tmp/bigdoc.md` before measuring — `/tmp` is cleaned between
+  sessions, and a missing input fails quietly: `bench` prints nothing and
+  `/usr/bin/time` reports pandoc's error-path RSS (~12 MB) as if it were a
+  conversion. Check the run produced output before believing a number.
 - Measure every optimization against the code it replaces; here the intuitive
   ones lost. Slice-scanning escapers are slower than a plain per-character loop
   (the strings are short words), and `String::with_capacity` on writer output
