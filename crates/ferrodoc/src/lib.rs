@@ -143,7 +143,10 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
         })
     };
     match from {
-        Format::Markdown => Ok(ferrodoc_markdown::read_commonmark(&text(input)?)),
+        Format::Markdown => ferrodoc_markdown::read_commonmark(&text(input)?).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
         Format::Docx => ferrodoc_docx::read_docx(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),

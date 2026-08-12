@@ -96,14 +96,15 @@ Even as a plain CLI, converting a one-line document takes pandoc ~13 ms and
 ferrodoc ~2 ms — a Haskell runtime plus a 153 MB binary has to be paged in
 before any work happens.
 
-### 3. Memory: 24× to 48× less
+### 3. Memory: 17× to 40× less
 
-Peak resident set converting to HTML (`/usr/bin/time`), same machine:
+Peak resident set of the `ferrodoc` binary against `pandoc`, converting to
+HTML (`/usr/bin/time`), same machine, same command shape:
 
 | input | ferrodoc | pandoc |
 |---|---|---|
-| 0.6 KB README | 2.7 MB | 65 MB |
-| 16 KB spec examples | 4.3 MB | 206 MB |
+| 0.6 KB README | 3.8 MB | 65 MB |
+| 16 KB spec examples | 5.1 MB | 206 MB |
 
 No GC and no runtime: memory tracks the document, not the interpreter. Note
 the 16 KB file is the CommonMark spec's examples concatenated, so it contains

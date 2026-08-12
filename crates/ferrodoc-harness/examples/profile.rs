@@ -29,9 +29,9 @@ fn main() {
     }));
     let md1 = md.clone();
     sink += time("parse markdown", Box::new(move || {
-        ferrodoc_markdown::read_commonmark(&md1).blocks.len()
+        ferrodoc_markdown::read_commonmark(&md1).unwrap().blocks.len()
     }));
-    let ast = ferrodoc_markdown::read_commonmark(&md);
+    let ast = ferrodoc_markdown::read_commonmark(&md).unwrap();
     let a1 = ast.clone();
     sink += time("write html", Box::new(move || ferrodoc_html::write_html(&a1).len()));
     let a2 = ast.clone();

@@ -440,7 +440,7 @@ mod tests {
     use super::*;
 
     fn html(md: &str) -> String {
-        write_html(&ferrodoc_markdown::read_commonmark(md))
+        write_html(&ferrodoc_markdown::read_commonmark(md).expect("convertible"))
     }
 
     #[test]

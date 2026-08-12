@@ -657,14 +657,16 @@ impl Ctx {
                     && n.child("pPr").is_some_and(|pr| pr.child("numPr").is_some())
                     && self.heading_level(n).is_none()
             };
+            // The style test is a hash lookup and the captionable test
+            // converts a paragraph, so the cheap one always goes first.
             let pair = next.filter(|_| !lists || !numbered(node)).and_then(|next| {
                 if numbered(next) {
                     None
-                } else if self.is_caption_para(node) && Self::is_captionable(next) {
+                } else if self.is_caption_para(node) && self.is_captionable(next) {
                     Some((node, next))
-                } else if Self::is_captionable(node)
-                    && self.is_caption_para(next)
+                } else if self.is_caption_para(next)
                     && !keep_next(next)
+                    && self.is_captionable(node)
                 {
                     Some((next, node))
                 } else {
@@ -859,14 +861,24 @@ impl Ctx {
 
     /// Whether a body part can take a caption: a table, or a paragraph
     /// whose only content is an image.
-    fn is_captionable(node: &Node) -> bool {
+    /// Whether a body part can take a caption: a table, or a paragraph
+    /// whose content converts to exactly one image.
+    ///
+    /// This asks the same question the conversion will answer, by doing the
+    /// conversion — a cheaper syntactic approximation gets it wrong on
+    /// paragraphs carrying bookmarks or stray space runs, and a caption
+    /// paired with a body that then converts differently loses content.
+    /// The cost is bounded by only calling this next to a caption-styled
+    /// paragraph.
+    fn is_captionable(&self, node: &Node) -> bool {
         if node.name == "tbl" {
             return true;
         }
-        // Decided from the XML rather than by converting the paragraph:
-        // this runs for every body part, and building its inlines just to
-        // throw them away doubled the reader's inline work.
-        node.name == "p" && paragraph_is_only_image(node)
+        node.name == "p"
+            && matches!(
+                self.inlines(node, &mut State::default()).as_slice(),
+                [Inline::Image(..)]
+            )
     }
 
     /// Attach a caption paragraph's content to a table or image paragraph.
@@ -896,7 +908,13 @@ impl Ctx {
                     vec![Block::Plain(inlines.clone())],
                 )]
             }
-            _ => caption_blocks,
+            // Anything else keeps both: dropping the body here would
+            // delete content silently.
+            _ => {
+                let mut out = body_blocks;
+                out.extend(caption_blocks);
+                out
+            }
         }
     }
 
@@ -1686,28 +1704,6 @@ fn same_style_name(a: &str, b: &str) -> bool {
 fn heading_level_of(name: &str) -> Option<i64> {
     let lower = name.to_lowercase();
     lower.strip_prefix("heading ")?.parse::<i64>().ok()
-}
-
-/// Whether a paragraph's entire content is a single drawing.
-fn paragraph_is_only_image(p: &Node) -> bool {
-    let mut images = 0;
-    for node in p.elems() {
-        match node.name.as_str() {
-            "pPr" | "bookmarkStart" | "bookmarkEnd" | "proofErr" => {}
-            "r" => {
-                for child in node.elems() {
-                    match child.name.as_str() {
-                        "rPr" => {}
-                        "drawing" => images += 1,
-                        "t" if child.text().trim().is_empty() => {}
-                        _ => return false,
-                    }
-                }
-            }
-            _ => return false,
-        }
-    }
-    images == 1
 }
 
 /// Whether a paragraph holds nothing but whitespace, which pandoc allows

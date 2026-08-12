@@ -35,21 +35,56 @@ use ferrodoc_ast::{
 };
 use std::borrow::Cow;
 
+/// A document this reader will not convert.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// Containers nested deeper than [`MAX_NESTING`]. Converting such a
+    /// document would recurse until the stack overflows, which aborts the
+    /// process, so it is refused instead — and refused loudly, rather than
+    /// returned truncated.
+    TooDeeplyNested,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::TooDeeplyNested => write!(
+                f,
+                "document nests containers more than {MAX_NESTING} levels deep"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
+
 /// Parse a `CommonMark` document into a [`Pandoc`] AST equivalent to
 /// pandoc's commonmark reader output.
-pub fn read_commonmark(input: &str) -> Pandoc {
+///
+/// # Errors
+///
+/// Returns [`Error::TooDeeplyNested`] for pathologically nested input.
+pub fn read_commonmark(input: &str) -> Result<Pandoc, Error> {
     let prepared = preprocess(input);
     let src = Src::new(&prepared);
     let arena = Arena::new();
     let root = parse_document(&arena, &prepared, &Options::default());
-    Pandoc::new(blocks(root.children(), &src, false, 0))
+    let mut too_deep = false;
+    let body = blocks(root.children(), &src, false, 0, &mut too_deep);
+    if too_deep {
+        return Err(Error::TooDeeplyNested);
+    }
+    Ok(Pandoc::new(body))
 }
 
-/// The deepest container nesting converted. Documents nest a handful of
-/// levels; past this the input is hostile, and the remaining content is
-/// dropped rather than overflowing the stack, which aborts the process
-/// uncatchably. The DOCX reader is bounded the same way.
-const MAX_NESTING: usize = 200;
+/// The deepest container nesting converted. Real documents nest a handful
+/// of levels, so this is hundreds of times more than anything genuine —
+/// but it must also stay safe on the smallest stack the reader might run
+/// on. A conversion frame costs roughly a kilobyte, and threads commonly
+/// get 2 MiB (Rust's test threads do) — and an unoptimized build's
+/// frames are several times larger again, so the bound is set well inside
+/// that. Exceeding it is reported, never silently truncated.
+pub const MAX_NESTING: usize = 200;
 
 /// The preprocessed source, indexed by line. Both lookups below are used
 /// once per block, so both must be O(1): scanning the document for either
@@ -140,12 +175,14 @@ fn blocks<'a>(
     src: &Src,
     in_quote: bool,
     depth: usize,
+    too_deep: &mut bool,
 ) -> Vec<Block> {
     if depth >= MAX_NESTING {
+        *too_deep = true;
         return Vec::new();
     }
     nodes
-        .filter_map(|n| block(n, src, in_quote, depth + 1))
+        .filter_map(|n| block(n, src, in_quote, depth + 1, too_deep))
         .collect()
 }
 
@@ -154,6 +191,7 @@ fn block<'a>(
     src: &Src,
     in_quote: bool,
     depth: usize,
+    too_deep: &mut bool,
 ) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
@@ -179,9 +217,13 @@ fn block<'a>(
             Attr::default(),
             inlines(node.children()),
         )),
-        NodeValue::BlockQuote => {
-            Some(Block::BlockQuote(blocks(node.children(), src, true, depth)))
-        }
+        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(
+            node.children(),
+            src,
+            true,
+            depth,
+            too_deep,
+        ))),
         NodeValue::CodeBlock(cb) => {
             // Pandoc keeps the literal untouched only for a fence that is
             // never closed, sits outside any blockquote, and is followed by
@@ -232,7 +274,7 @@ fn block<'a>(
             let items: Vec<Vec<Block>> = node
                 .children()
                 .map(|item| {
-                    let mut bs = blocks(item.children(), src, in_quote, depth);
+                    let mut bs = blocks(item.children(), src, in_quote, depth, too_deep);
                     if nl.tight {
                         for b in &mut bs {
                             if let Block::Para(is) = b {
@@ -378,7 +420,16 @@ mod tests {
     use super::*;
 
     fn doc(md: &str) -> serde_json::Value {
-        serde_json::to_value(read_commonmark(md)).unwrap()["blocks"].clone()
+        serde_json::to_value(read_commonmark(md).expect("convertible")).unwrap()["blocks"].clone()
+    }
+
+    #[test]
+    fn pathological_nesting_is_refused_not_truncated() {
+        let deep = ">".repeat(MAX_NESTING + 1);
+        assert_eq!(read_commonmark(&deep), Err(Error::TooDeeplyNested));
+        // A document at the limit still converts.
+        let shallow = ">".repeat(10);
+        assert!(read_commonmark(&shallow).is_ok());
     }
 
     #[test]

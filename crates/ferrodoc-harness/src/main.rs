@@ -129,7 +129,7 @@ fn run_cases(cases: &[Case], verbose: bool, fail_under: Option<f64>) -> Result<(
     let mut matched = 0usize;
     let mut failures: Vec<(&Case, String)> = Vec::new();
     for case in cases {
-        let ours = serde_json::to_value(ferrodoc_markdown::read_commonmark(&case.markdown))?;
+        let ours = serde_json::to_value(ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?)?;
         let theirs = pandoc_json(&case.markdown)
             .with_context(|| format!("pandoc failed on {}", case.name))?;
         if ours == theirs {
@@ -212,7 +212,7 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
     let mut matched = 0usize;
     let mut failures = Vec::new();
     for case in &cases {
-        let ast = ferrodoc_markdown::read_commonmark(&case.markdown);
+        let ast = ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?;
         let ast_json = serde_json::to_string(&ast)?;
 
         // Ours: ferrodoc writes the docx, pandoc reads it back.
@@ -347,7 +347,7 @@ fn diff_html(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result
     let mut matched = 0usize;
     let mut failures = Vec::new();
     for case in &cases {
-        let ours = ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&case.markdown));
+        let ours = ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?);
         let theirs = run_pandoc(&case.markdown, &["-f", "commonmark", "-t", "html", "--syntax-highlighting=none", "--wrap=none"])
             .with_context(|| format!("pandoc failed on {}", case.name))?;
         let theirs = String::from_utf8(theirs).context("pandoc emitted invalid UTF-8")?;
@@ -396,10 +396,10 @@ fn bench(paths: &[String], iters: u32) -> Result<()> {
 
         // Warm up, then time ferrodoc in-process (parse + write HTML).
         let mut sink = 0usize;
-        sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown)).len();
+        sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?).len();
         let start = std::time::Instant::now();
         for _ in 0..iters {
-            sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown)).len();
+            sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?).len();
         }
         let ours = start.elapsed() / iters;
 
@@ -432,7 +432,7 @@ fn bench_docx(paths: &[String], iters: u32) -> Result<()> {
     for path in paths {
         let markdown =
             std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
-        let ast = ferrodoc_markdown::read_commonmark(&markdown);
+        let ast = ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?;
         let docx = ferrodoc_docx::write_docx(&ast).map_err(|e| anyhow::anyhow!("{e}"))?;
         let mut sink = docx.len();
 

@@ -120,17 +120,16 @@ impl Writer {
                 self.with_style("BlockText", |w| w.blocks(blocks))
             }
             Block::CodeBlock(_, text) => {
-                let lines: Vec<String> = code_block_lines(text)
-                    .map(|line| {
-                        format!(
-                            "<w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\"/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>",
-                            escape(line)
-                        )
-                    })
-                    .collect();
                 let mut out = String::new();
-                for runs in &lines {
-                    out.push_str(&self.emit_paragraph(Some("SourceCode"), "", runs));
+                let mut runs = String::new();
+                for line in code_block_lines(text) {
+                    runs.clear();
+                    runs.push_str(
+                        "<w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\"/></w:rPr><w:t xml:space=\"preserve\">",
+                    );
+                    escape_into(&mut runs, line);
+                    runs.push_str("</w:t></w:r>");
+                    out.push_str(&self.emit_paragraph(Some("SourceCode"), "", &runs));
                 }
                 out
             }
@@ -662,17 +661,25 @@ fn run(style: &RunStyle, text: &str) -> String {
 /// Escape XML text content. Ordinary characters — nearly all of them —
 /// are copied in slices rather than one at a time.
 fn escape(text: &str) -> String {
+    let mut out = String::new();
+    escape_into(&mut out, text);
+    out
+}
+
+/// Escape XML text content into an existing buffer.
+fn escape_into(out: &mut String, text: &str) {
     let ordinary = |c: char| !matches!(c, '&' | '<' | '>') && (c >= ' ' || c == '\t');
     let Some(first) = text.find(|c| !ordinary(c)) else {
-        return text.to_owned();
+        out.push_str(text);
+        return;
     };
-    let mut out = String::with_capacity(text.len() + 16);
+    out.reserve(text.len());
     out.push_str(&text[..first]);
     let mut rest = &text[first..];
     loop {
         let mut chars = rest.chars();
         match chars.next() {
-            None => return out,
+            None => return,
             Some(ch) => {
                 match ch {
                     '&' => out.push_str("&amp;"),
@@ -686,7 +693,7 @@ fn escape(text: &str) -> String {
         }
         let Some(next) = rest.find(|c| !ordinary(c)) else {
             out.push_str(rest);
-            return out;
+            return;
         };
         out.push_str(&rest[..next]);
         rest = &rest[next..];
