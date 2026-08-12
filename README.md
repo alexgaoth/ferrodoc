@@ -135,6 +135,11 @@ cargo build --release --target wasm32-unknown-unknown \
   -p ferrodoc-ast -p ferrodoc-markdown -p ferrodoc-html -p ferrodoc-text -p ferrodoc-docx
 ```
 
+Every gate, every known loss and every deliberate divergence is listed one
+by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
+produces it. CI runs all seven on Linux, macOS and Windows against a pinned
+pandoc, plus a wasm32 build and a 500,000-mutation fuzz campaign.
+
 ## Where pandoc is still ahead
 
 The table above is not the whole picture, and pretending otherwise would make

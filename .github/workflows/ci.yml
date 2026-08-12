@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Conformance is pinned: a different pandoc produces spurious diffs, so a
+  # green run here means "identical to this version", not "identical to
+  # whatever pandoc the runner happened to have".
+  PANDOC_VERSION: 3.8.2.1
+
+jobs:
+  # Everything that does not need pandoc, on every platform we claim.
+  build:
+    name: build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # The browser and edge-worker story is a claim in the README; check it.
+  wasm:
+    name: wasm32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --target wasm32-unknown-unknown --exclude ferrodoc-harness
+
+  # The differential gates, which need the pinned pandoc binary. These are
+  # the numbers the README quotes; if one drops, the README is wrong.
+  conformance:
+    name: conformance vs pinned pandoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install pandoc ${{ env.PANDOC_VERSION }}
+        run: |
+          curl -fsSL -o pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i pandoc.deb
+          pandoc --version | head -1
+      - run: cargo build --release -p ferrodoc-harness
+      - name: markdown reader
+        run: ./target/release/ferrodoc-harness diff-spec corpus/commonmark-spec-0.31.2.json --fail-under 100
+      - name: AST round trip
+        run: ./target/release/ferrodoc-harness diff-ast corpus --fail-under 100
+      - name: HTML writer
+        run: ./target/release/ferrodoc-harness diff-html corpus/commonmark-spec-0.31.2.json --fail-under 100
+      - name: DOCX reader
+        run: ./target/release/ferrodoc-harness diff-docx corpus/docx --fail-under 96
+      - name: DOCX writer
+        run: ./target/release/ferrodoc-harness diff-write corpus --fail-under 90
+      - name: markdown writer
+        run: ./target/release/ferrodoc-harness diff-md corpus/commonmark-spec-0.31.2.json --fail-under 100
+      - name: HTML reader
+        run: ./target/release/ferrodoc-harness diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
+
+  # Readers promise to refuse hostile input rather than panic. `cargo test`
+  # runs a short fixed-seed loop; this runs a long one with a fresh seed, so
+  # the search keeps moving instead of re-checking the same inputs forever.
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p ferrodoc-harness
+      - name: mutate the corpus
+        env:
+          FERRODOC_FUZZ_SEED: ${{ github.run_id }}
+        run: ./target/release/ferrodoc-harness fuzz corpus --iters 500000

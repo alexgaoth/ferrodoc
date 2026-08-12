@@ -163,14 +163,29 @@ Two findings, both of which the benchmark existed to surface:
   256 MB container. This is the number that makes streaming a priority
   rather than a maybe; see the last section.
 
-### Still missing
+### CI, fuzzing and the compatibility matrix — done
 
-- CI on Linux, macOS and Windows, pinned to the supported pandoc version.
-- A published compatibility matrix, *including the known losses* — the two open
-  markdown-reader divergences, `spec-09`, the DOCX writer's dropped images.
-- A regression fixture for every mismatch ever found, added when it is found.
-- Fuzzing in CI for markdown, XML, ZIP and pathological nesting. Several of the
-  worst bugs in this project were found this way; none of it runs automatically.
+- `.github/workflows/ci.yml`: build, test and clippy on Linux, macOS and
+  Windows; a wasm32 build, because the browser story is a README claim; the
+  seven conformance gates against a **pinned** pandoc 3.8.2.1, installed from
+  its release asset rather than whatever the runner has; and a fuzz campaign.
+- `COMPATIBILITY.md`: every gate with the command that produces it, and every
+  known loss named one by one — the two markdown-reader divergences,
+  `spec-09`, `nested-structures.md`, the DOCX writer's raw blocks and image
+  formats, the four CommonMark limits, the HTML reader's 26, the two
+  deliberate divergences, and the 3.5 GB memory ceiling.
+- `ferrodoc-harness fuzz` mutates the corpus — byte flips, truncation,
+  repeated regions, spliced structural tokens, deletions — and requires every
+  reader to refuse rather than panic. Not coverage-guided, because that needs
+  nightly and a contributor may not have it; this is the part that pays.
+  **1.1 million mutations across five seeds found nothing**, which is the
+  first time that has been true rather than assumed. A short fixed-seed run
+  is a `cargo test`, so it runs on every change; CI runs 500,000 with a fresh
+  seed each time so the search keeps moving.
+
+Still missing: a regression fixture for *every* mismatch ever found. The
+recent ones have them; the older ones are described in `.iterate/` verdicts
+rather than pinned in the corpus.
 
 ## 5. Ship it
 

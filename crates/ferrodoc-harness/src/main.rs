@@ -9,6 +9,7 @@
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-md [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-html-read [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness fuzz [--iters N] [--seed N] <file-or-dir>...
 //!   ferrodoc-harness bench [--iters N] <file>...
 //!   ferrodoc-harness bench-docx [--iters N] <file>...
 
@@ -39,9 +40,10 @@ fn main() -> Result<()> {
         Some("diff-html-read") => diff_html_read(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         Some("bench-sizes") => bench_sizes(&args[1..], iters),
+        Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|bench|bench-sizes|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|bench|bench-sizes|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -345,6 +347,169 @@ fn collect_html_files(path: &Path, cases: &mut Vec<Case>) -> Result<()> {
     Ok(())
 }
 
+/// Mutate real documents and require every reader to survive.
+///
+/// Not a coverage-guided fuzzer — that needs nightly and a toolchain a
+/// contributor may not have. This is the part that pays: take inputs that
+/// are already interesting, corrupt them, and insist the readers return
+/// `Err` rather than panic, overflow or hang. Several of the worst bugs in
+/// this project were found exactly this way, by hand; this runs it in CI.
+fn fuzz(paths: &[String], iters: u32) -> Result<()> {
+    let seeds = fuzz_seeds(paths)?;
+    if seeds.is_empty() {
+        bail!("no seed documents found");
+    }
+    let seed = std::env::var("FERRODOC_FUZZ_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0x5eed_1234_9876_abcd);
+    let start = std::time::Instant::now();
+    let outcomes = fuzz_run(&seeds, iters, seed);
+    println!(
+        "{iters} mutations of {} seeds in {:.1?}: {} read, {} refused — no panics, no hangs",
+        seeds.len(),
+        start.elapsed(),
+        outcomes.0,
+        outcomes.1
+    );
+    Ok(())
+}
+
+/// Every corpus document, as bytes, whatever its format.
+fn fuzz_seeds(paths: &[String]) -> Result<Vec<Vec<u8>>> {
+    let mut seeds = Vec::new();
+    for p in paths {
+        collect_bytes(Path::new(p), &mut seeds)?;
+    }
+    Ok(seeds)
+}
+
+fn collect_bytes(path: &Path, out: &mut Vec<Vec<u8>>) -> Result<()> {
+    if path.is_dir() {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+            .with_context(|| format!("reading {}", path.display()))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<_>>()?;
+        entries.sort();
+        for entry in entries {
+            collect_bytes(&entry, out)?;
+        }
+    } else if path
+        .extension()
+        .is_some_and(|e| matches!(e.to_str(), Some("md" | "html" | "docx")))
+    {
+        out.push(std::fs::read(path).with_context(|| format!("reading {}", path.display()))?);
+    }
+    Ok(())
+}
+
+/// Run the mutation loop, returning (documents read, documents refused).
+///
+/// A panic or an abort ends the process, which is the whole signal: every
+/// reader here promises to return `Err` on input it cannot handle.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "indices are taken modulo a length that is already a usize"
+)]
+fn fuzz_run(seeds: &[Vec<u8>], iters: u32, seed: u64) -> (u32, u32) {
+    let mut rng = seed | 1;
+    let mut next = move || {
+        // xorshift64*: no dependency, and reproducible from the seed.
+        rng ^= rng >> 12;
+        rng ^= rng << 25;
+        rng ^= rng >> 27;
+        rng.wrapping_mul(0x2545_f491_4f6c_dd1d)
+    };
+    let (mut ok, mut refused) = (0, 0);
+    let mut input = Vec::new();
+    for _ in 0..iters {
+        input.clear();
+        input.extend_from_slice(&seeds[(next() % seeds.len() as u64) as usize]);
+        mutate(&mut input, &mut next);
+
+        // Bytes first: the DOCX reader takes a zip, and a corrupted zip is
+        // its own family of hostile input.
+        if ferrodoc_docx::read_docx(&input).is_ok() {
+            ok += 1;
+        } else {
+            refused += 1;
+        }
+        // Then as text, for the readers that take one.
+        if let Ok(text) = std::str::from_utf8(&input) {
+            if ferrodoc_markdown::read_commonmark(text).is_ok() {
+                ok += 1;
+            } else {
+                refused += 1;
+            }
+            if ferrodoc_html::read_html(text).is_ok() {
+                ok += 1;
+            } else {
+                refused += 1;
+            }
+        }
+    }
+    (ok, refused)
+}
+
+/// Corrupt a document in one of the ways that has actually found a bug
+/// here: flip bytes, truncate, repeat a region, or splice in nesting.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "offsets are taken modulo the input length, itself a usize"
+)]
+fn mutate(input: &mut Vec<u8>, next: &mut impl FnMut() -> u64) {
+    let rounds = 1 + next() % 8;
+    for _ in 0..rounds {
+        if input.is_empty() {
+            input.push(b'x');
+        }
+        let len = input.len() as u64;
+        match next() % 6 {
+            // Flip a byte.
+            0 => {
+                let at = (next() % len) as usize;
+                input[at] ^= 1 << (next() % 8);
+            }
+            // Truncate: unterminated everything.
+            1 => input.truncate((next() % len) as usize),
+            // Repeat a slice, which is how nesting gets deep.
+            2 => {
+                let at = (next() % len) as usize;
+                let take = ((next() % 64) as usize).min(input.len() - at);
+                let piece = input[at..at + take].to_vec();
+                let times = 1 + next() % 200;
+                for _ in 0..times {
+                    input.extend_from_slice(&piece);
+                }
+            }
+            // Splice in a structural token.
+            3 => {
+                let tokens: [&[u8]; 8] = [
+                    b"<div>", b"<pre>", b"<table><tr><td>", b"</p>", b"- ", b"> ", b"```",
+                    b"<w:p>",
+                ];
+                let at = (next() % len) as usize;
+                let token = tokens[(next() % tokens.len() as u64) as usize];
+                input.splice(at..at, token.iter().copied());
+            }
+            // Delete a run.
+            4 => {
+                let at = (next() % len) as usize;
+                let take = ((next() % 128) as usize).min(input.len() - at);
+                input.drain(at..at + take);
+            }
+            // Insert a byte that often ends a token.
+            _ => {
+                let at = (next() % len) as usize;
+                let byte = [b'<', b'>', b'&', b'"', 0, 0xff, b'\n', b'\t'][(next() % 8) as usize];
+                input.insert(at, byte);
+            }
+        }
+        // Keep the loop quick; a mutation that runs away helps nobody.
+        input.truncate(4 << 20);
+    }
+}
+
 /// Report latency and throughput for each conversion path, in absolute
 /// terms, at every document size given.
 ///
@@ -369,7 +534,8 @@ fn bench_sizes(paths: &[String], iters: u32) -> Result<()> {
 
         // Big documents are slow enough that a fixed iteration count would
         // take minutes; scale it down but never below one.
-        let runs = (iters as usize * 100_000 / bytes.max(1)).clamp(1, iters as usize) as u32;
+        let scaled = (iters as usize).saturating_mul(100_000) / bytes.max(1);
+        let runs = u32::try_from(scaled.clamp(1, iters as usize)).unwrap_or(1);
         let label = human(bytes);
         measure(&label, "markdown -> AST", bytes, runs, || {
             let _ = ferrodoc_markdown::read_commonmark(&markdown);
@@ -808,5 +974,28 @@ fn truncate(v: &Value) -> String {
         format!("{}…", s.chars().take(120).collect::<String>())
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A short, fixed-seed fuzz run, so the readers' promise — refuse, do
+    /// not panic — is checked on every `cargo test` rather than only when
+    /// somebody remembers. The long campaigns run from the CLI.
+    #[test]
+    fn readers_refuse_mutated_documents_without_panicking() {
+        // `cargo test` runs with the crate as the working directory.
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../corpus")
+            .display()
+            .to_string();
+        let seeds = fuzz_seeds(&[corpus]).expect("corpus is readable");
+        assert!(!seeds.is_empty(), "no seed documents found");
+        for seed in [0x5eed_1234_9876_abcd, 1, 0xdead_beef] {
+            let (read, refused) = fuzz_run(&seeds, 400, seed);
+            assert!(read + refused > 0, "the loop did nothing");
+        }
     }
 }
