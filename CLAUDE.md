@@ -21,6 +21,9 @@ value-identical to pandoc's, proven differentially — never assumed.
   not reproducible, so check conformance, never `git diff`.
 - AST fixtures are genuine pandoc output: after touching them, `bash
   crates/ferrodoc-ast/tests/fixtures/generate.sh && git diff` must be clean.
+- `crates/ferrodoc` is the entry point (facade + `ferrodoc` binary): a new
+  reader or writer is unreachable by users until added to its `Format` enum
+  and `parse`/`render`.
 
 ## Rules
 
@@ -35,6 +38,14 @@ value-identical to pandoc's, proven differentially — never assumed.
   `isRestart`). Read them for algorithm shape only; the binary decides.
 - A behavior with no corpus document that fails without it is not covered.
   Mutation-test a new rule by breaking it and confirming the corpus drops.
+- Never judge performance by absolute timings: this machine drifts ~2× within
+  a session, and adding code to `bench` moves the number it reports. Compare
+  interleaved against a baseline build (`git worktree add /tmp/base <commit>`,
+  alternate runs) and report the ratio.
+- Measure every optimization against the code it replaces; here the intuitive
+  ones lost. Slice-scanning escapers are slower than a plain per-character loop
+  (the strings are short words), and `String::with_capacity` on writer output
+  cost more than growing. Revert what does not measure.
 
 ## Gotchas
 
@@ -44,13 +55,14 @@ value-identical to pandoc's, proven differentially — never assumed.
 - comrak already merges adjacent Text nodes — do not add Str coalescing to the
   reader. The one normalization pandoc needs on top: merge directly-adjacent
   same-type Emph/Strong siblings.
+- comrak is ~78% of markdown→HTML (our mapping ~20%), so tuning our side barely
+  moves that benchmark; the DOCX paths are where reader/writer work pays.
 - HTML escaping differs by context: text `&<>` only; attributes AND code
   blocks additionally `"`→`&quot;`, `'`→`&#39;`; inline code escapes like
   text (no quote escaping). Verified against pandoc; don't "unify" them.
-- Two known markdown-reader divergence families are OPEN (don't rediscover):
-  entity-encoded spaces (`&#32;`) should stay inside `Str`, and
-  refdef+dash-run→HorizontalRule corner cases. Repros and analysis:
-  `.iterate/20260810-markdown-reader/round-3-verdict.md`.
+- Two markdown-reader divergences are OPEN (don't rediscover): entity-encoded
+  spaces (`&#32;`) should stay inside `Str`, and refdef+dash-run corner cases.
+  Repros: `.iterate/20260810-markdown-reader/round-3-verdict.md`.
 - DOCX: style matching is by *name* through `styles.xml` (case-insensitive,
   whitespace-exact), never by style id — a style id is localized and may be
   absent. Captions and heading classes use the paragraph's OWN name; block
@@ -62,8 +74,10 @@ value-identical to pandoc's, proven differentially — never assumed.
 - `comrak` is used with `default-features = false`; its default `syntect`
   feature drags in the C library `onig_sys`, which breaks the wasm32 build.
   All crates must keep compiling for `wasm32-unknown-unknown`.
-- DOCX: everything recursive is bounded (XML depth, container nesting, list
-  depth, footnote cycles). A reader must return `Err`, never abort — hostile
-  input reaches this code. Open DOCX gaps are listed in the crate docs, and
-  `.iterate/20260810-docx-reader/` holds three critic verdicts plus a
-  post-cap note describing what was fixed without review.
+- Both readers bound their recursion (XML depth, container nesting, list depth,
+  footnote cycles) and must return `Err`, never abort or truncate — hostile
+  input reaches this code. Keep bounds low: frames are ~1 KB optimized and
+  several times that unoptimized against a 2 MiB thread stack, so a limit of
+  500 overflows the test suite it exists to protect.
+- Known gaps live in each crate's docs; `.iterate/*/` holds the critic verdicts
+  behind them, including fixes made after a run hit its round cap.
