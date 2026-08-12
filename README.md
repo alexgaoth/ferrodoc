@@ -15,6 +15,36 @@ A universal document converter in Rust, pandoc-compatible at the AST level.
 Nothing here is trusted because it looks right: every claim above is produced
 by running the real pandoc binary side by side and comparing full documents.
 
+## Install and use
+
+```sh
+cargo install --path crates/ferrodoc     # installs the `ferrodoc` binary
+```
+
+```sh
+ferrodoc README.md -o readme.html        # formats inferred from extensions
+ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
+cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
+ferrodoc --help                          # every option and format
+```
+
+Inputs: `markdown` (`commonmark`, `md`), `docx`, `json` (the pandoc AST).
+Outputs: `html`, `docx`, `json`, `plain`.
+
+As a library, one call converts, and the AST is there when you want to
+transform rather than convert:
+
+```rust
+use ferrodoc::{Format, ast::Block, convert, parse, render};
+
+let html = convert(b"# Title\n\nHello.\n", Format::Markdown, Format::Html)?;
+
+let mut doc = parse(b"# Title\n\ntext\n", Format::Markdown)?;
+doc.blocks.retain(|block| !matches!(block, Block::Header(..)));
+let without_headings = render(&doc, Format::Html)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 ## Differential testing
 
 ```sh

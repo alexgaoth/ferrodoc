@@ -68,6 +68,15 @@ struct Writer {
     lists: Vec<ListDefinition>,
     /// Footnote bodies, in reference order.
     footnotes: Vec<String>,
+    /// Paragraph style to use instead of a block's own (inside quotes,
+    /// definitions and notes).
+    style_override: Option<&'static str>,
+    /// Numbering for the next paragraph emitted, and the level it sits at.
+    /// After one paragraph takes it, it becomes the blank continuation
+    /// marker, so later paragraphs of the same item stay in that item.
+    numbering: Option<(usize, usize)>,
+    /// Justification forced on paragraphs (table cells carry the column's).
+    justification: Option<&'static str>,
 }
 
 struct ListDefinition {
@@ -99,29 +108,29 @@ impl Writer {
 
     fn block(&mut self, block: &Block) -> String {
         match block {
-            Block::Plain(inlines) => self.paragraph("Compact", None, inlines),
-            Block::Para(inlines) => self.paragraph("BodyText", None, inlines),
+            Block::Plain(inlines) => self.paragraph("Compact", inlines),
+            Block::Para(inlines) => self.paragraph("BodyText", inlines),
             Block::Header(level, _, inlines) => {
                 let style = format!("Heading{}", (*level).clamp(1, 9));
-                self.paragraph(&style, None, inlines)
+                self.paragraph(&style, inlines)
             }
+            // Every paragraph inside a quote takes the quote style, which
+            // is how the reader recognizes and re-merges them.
             Block::BlockQuote(blocks) => {
-                // Every paragraph inside takes the quote style, which is
-                // how the reader recognizes and re-merges them.
-                let inner = self.blocks(blocks);
-                inner.replace(
-                    "<w:pStyle w:val=\"BodyText\"/>",
-                    "<w:pStyle w:val=\"BlockText\"/>",
-                )
+                self.with_style("BlockText", |w| w.blocks(blocks))
             }
             Block::CodeBlock(_, text) => {
+                let lines: Vec<String> = code_block_lines(text)
+                    .map(|line| {
+                        format!(
+                            "<w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\"/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r>",
+                            escape(line)
+                        )
+                    })
+                    .collect();
                 let mut out = String::new();
-                for line in code_block_lines(text) {
-                    let _ = write!(
-                        out,
-                        "<w:p><w:pPr><w:pStyle w:val=\"SourceCode\"/></w:pPr><w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\"/></w:rPr><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>",
-                        escape(line)
-                    );
+                for runs in &lines {
+                    out.push_str(&self.emit_paragraph(Some("SourceCode"), "", runs));
                 }
                 out
             }
@@ -130,21 +139,20 @@ impl Writer {
             Block::DefinitionList(items) => {
                 let mut out = String::new();
                 for (term, definitions) in items {
-                    out.push_str(&self.paragraph("DefinitionTerm", None, term));
+                    out.push_str(&self.paragraph("DefinitionTerm", term));
                     for definition in definitions {
-                        let inner = self.blocks(definition);
-                        out.push_str(&inner.replace(
-                            "<w:pStyle w:val=\"BodyText\"/>",
-                            "<w:pStyle w:val=\"Definition\"/>",
-                        ));
+                        let rendered = self.with_style("Definition", |w| w.blocks(definition));
+                        out.push_str(&rendered);
                     }
                 }
                 out
             }
-            Block::HorizontalRule => {
-                "<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr></w:p>".to_owned()
-            }
-            Block::Table(table) => self.table(table),
+            Block::HorizontalRule => self.emit_paragraph(
+                None,
+                "<w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr>",
+                "",
+            ),
+            Block::Table(table) => self.without_numbering(|w| w.table(table)),
             Block::Figure(_, caption, blocks) => {
                 let mut out = self.blocks(blocks);
                 out.push_str(&self.caption_paragraphs(caption, "ImageCaption"));
@@ -161,20 +169,68 @@ impl Writer {
                         out
                     })
                     .collect();
-                self.paragraph("BodyText", None, &joined)
+                self.paragraph("BodyText", &joined)
             }
             // Raw blocks are not OOXML and have nowhere to go.
             Block::RawBlock(..) => String::new(),
         }
     }
 
-    /// A paragraph with a style and optional extra paragraph properties.
-    fn paragraph(&mut self, style: &str, extra: Option<&str>, inlines: &[Inline]) -> String {
-        format!(
-            "<w:p><w:pPr><w:pStyle w:val=\"{style}\"/>{}</w:pPr>{}</w:p>",
-            extra.unwrap_or(""),
-            self.inlines(inlines)
-        )
+    /// Emit a paragraph, applying the style override, pending numbering and
+    /// justification that the surrounding context established. Every `<w:p>`
+    /// in the document is produced here, so the properties are built once,
+    /// in order, instead of being patched into finished XML.
+    fn paragraph(&mut self, default_style: &str, inlines: &[Inline]) -> String {
+        let runs = self.inlines(inlines);
+        self.emit_paragraph(Some(default_style), "", &runs)
+    }
+
+    /// The one place a `<w:p>` is produced. `extra` carries properties that
+    /// belong after the numbering (a paragraph border, say); passing no
+    /// style omits `w:pStyle` entirely.
+    fn emit_paragraph(&mut self, default_style: Option<&str>, extra: &str, runs: &str) -> String {
+        let mut properties = String::new();
+        if let Some(default_style) = default_style {
+            // Only ordinary paragraphs take the surrounding context's style:
+            // a code block inside a quote is still code, and a heading is
+            // still a heading.
+            let style = match (default_style, self.style_override) {
+                ("BodyText", Some(override_style)) => override_style,
+                _ => default_style,
+            };
+            let _ = write!(properties, "<w:pStyle w:val=\"{style}\"/>");
+        }
+        if let Some((num_id, level)) = self.numbering {
+            let _ = write!(
+                properties,
+                "<w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"{num_id}\"/></w:numPr>"
+            );
+            // Anything further in this item continues it rather than
+            // starting a new one.
+            self.numbering = Some((CONTINUATION_NUM, level));
+        }
+        properties.push_str(extra);
+        if let Some(justification) = self.justification {
+            let _ = write!(properties, "<w:jc w:val=\"{justification}\"/>");
+        }
+        format!("<w:p><w:pPr>{properties}</w:pPr>{runs}</w:p>")
+    }
+
+    /// Run `body` with a paragraph style forced, restoring the previous one.
+    fn with_style(&mut self, style: &'static str, body: impl FnOnce(&mut Self) -> String) -> String {
+        let previous = self.style_override.replace(style);
+        let out = body(self);
+        self.style_override = previous;
+        out
+    }
+
+    /// Run `body` with numbering suspended (table cells and nested content
+    /// must not inherit the enclosing list item's marker).
+    fn without_numbering(&mut self, body: impl FnOnce(&mut Self) -> String) -> String {
+        let previous = self.numbering.take();
+        let out = body(self);
+        self.numbering = previous;
+        out
     }
 
     fn caption_paragraphs(&mut self, caption: &Caption, style: &str) -> String {
@@ -183,7 +239,7 @@ impl Writer {
             .iter()
             .map(|block| match block {
                 Block::Plain(inlines) | Block::Para(inlines) => {
-                    self.paragraph(style, None, inlines)
+                    self.paragraph(style, inlines)
                 }
                 other => self.block(other),
             })
@@ -224,32 +280,28 @@ impl Writer {
             },
         };
         let num_id = self.list(definition);
+        let outer = self.numbering;
         let mut out = String::new();
         for item in items {
-            let mut first_block = true;
+            // The item's first paragraph takes the marker; `paragraph`
+            // switches to the blank continuation marker after that.
+            self.numbering = Some((num_id, level));
             for block in item {
-                // A nested list carries its own numbering one level deeper.
-                match block {
+                // A nested list numbers itself one level deeper, and must
+                // not consume this item's marker.
+                let rendered = match block {
                     Block::BulletList(inner) => {
-                        out.push_str(&self.list_blocks(inner, None, level + 1));
-                        continue;
+                        self.without_numbering(|w| w.list_blocks(inner, None, level + 1))
                     }
-                    Block::OrderedList(inner_attrs, inner) => {
-                        out.push_str(&self.list_blocks(inner, Some(inner_attrs), level + 1));
-                        continue;
-                    }
-                    _ => {}
-                }
-                let rendered = self.block(block);
-                // Only the item's very first paragraph carries the list
-                // marker; every later paragraph — including the rest of a
-                // multi-paragraph block such as a code block — carries the
-                // blank marker that means "same item".
-                let opener = if first_block { num_id } else { CONTINUATION_NUM };
-                first_block = false;
-                out.push_str(&add_numbering(&rendered, opener, CONTINUATION_NUM, level));
+                    Block::OrderedList(inner_attrs, inner) => self.without_numbering(|w| {
+                        w.list_blocks(inner, Some(inner_attrs), level + 1)
+                    }),
+                    _ => self.block(block),
+                };
+                out.push_str(&rendered);
             }
         }
+        self.numbering = outer;
         out
     }
 
@@ -336,15 +388,15 @@ impl Writer {
             Alignment::AlignCenter => Some("center"),
             Alignment::AlignDefault => None,
         };
-        let mut content = if cell.blocks.is_empty() {
-            "<w:p/>".to_owned()
-        } else {
-            self.blocks(&cell.blocks)
-        };
-        if let Some(justification) = justification {
-            let property = format!("<w:jc w:val=\"{justification}\"/>");
-            content = insert_paragraph_property(&content, &property);
-        }
+        let previous = std::mem::replace(&mut self.justification, justification);
+        let content = self.without_numbering(|w| {
+            if cell.blocks.is_empty() {
+                w.paragraph("BodyText", &[])
+            } else {
+                w.blocks(&cell.blocks)
+            }
+        });
+        self.justification = previous;
         let mut out = String::new();
         out.push_str("<w:tc>");
         if !properties.is_empty() {
@@ -423,11 +475,8 @@ impl Writer {
             // Without media parts an image can only survive as its alt text.
             Inline::Image(_, alt, _) => nested(self, alt, style),
             Inline::Note(blocks) => {
-                let body = self.blocks(blocks);
-                let body = body.replace(
-                    "<w:pStyle w:val=\"BodyText\"/>",
-                    "<w:pStyle w:val=\"FootnoteText\"/>",
-                );
+                let body = self
+                    .without_numbering(|w| w.with_style("FootnoteText", |w| w.blocks(blocks)));
                 self.footnotes.push(body);
                 let id = FOOTNOTE_BASE + self.footnotes.len() - 1;
                 format!(
@@ -610,72 +659,38 @@ fn run(style: &RunStyle, text: &str) -> String {
     )
 }
 
-/// Number the paragraphs of a rendered fragment: the first with `opener`,
-/// the rest with `rest` (the blank marker that continues an item).
-fn add_numbering(paragraphs: &str, opener: usize, rest: usize, level: usize) -> String {
-    let property = |id: usize| {
-        format!("<w:numPr><w:ilvl w:val=\"{level}\"/><w:numId w:val=\"{id}\"/></w:numPr>")
-    };
-    let numbered = insert_paragraph_property(paragraphs, &property(opener));
-    // Re-point every paragraph after the first at the continuation list.
-    match numbered.find("</w:p>") {
-        Some(end) => {
-            let (head, tail) = numbered.split_at(end);
-            format!("{head}{}", tail.replace(&property(opener), &property(rest)))
-        }
-        None => numbered,
-    }
-}
-
-/// Insert a paragraph property into every `w:pPr` of a fragment, adding
-/// the properties element to paragraphs that lack one.
-fn insert_paragraph_property(paragraphs: &str, property: &str) -> String {
-    let mut out = String::with_capacity(paragraphs.len() + property.len());
-    let mut rest = paragraphs;
-    while let Some(start) = rest.find("<w:p>").or_else(|| rest.find("<w:p/>")) {
-        let (before, tail) = rest.split_at(start);
-        out.push_str(before);
-        if let Some(after) = tail.strip_prefix("<w:p/>") {
-            let _ = write!(out, "<w:p><w:pPr>{property}</w:pPr></w:p>");
-            rest = after;
-            continue;
-        }
-        out.push_str("<w:p>");
-        let body = tail.strip_prefix("<w:p>").unwrap_or(tail);
-        if let Some(properties) = body.strip_prefix("<w:pPr>") {
-            let _ = write!(out, "<w:pPr>");
-            // Keep pStyle first, then the new property.
-            if let Some(end) = properties.find("</w:pPr>") {
-                out.push_str(&properties[..end]);
-                out.push_str(property);
-                out.push_str("</w:pPr>");
-                rest = &properties[end + "</w:pPr>".len()..];
-                continue;
-            }
-            rest = properties;
-        } else {
-            let _ = write!(out, "<w:pPr>{property}</w:pPr>");
-            rest = body;
-        }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// Escape XML text content.
+/// Escape XML text content. Ordinary characters — nearly all of them —
+/// are copied in slices rather than one at a time.
 fn escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            // Control characters are not representable in XML.
-            c if (c as u32) < 0x20 && c != '\t' => {}
-            c => out.push(c),
+    let ordinary = |c: char| !matches!(c, '&' | '<' | '>') && (c >= ' ' || c == '\t');
+    let Some(first) = text.find(|c| !ordinary(c)) else {
+        return text.to_owned();
+    };
+    let mut out = String::with_capacity(text.len() + 16);
+    out.push_str(&text[..first]);
+    let mut rest = &text[first..];
+    loop {
+        let mut chars = rest.chars();
+        match chars.next() {
+            None => return out,
+            Some(ch) => {
+                match ch {
+                    '&' => out.push_str("&amp;"),
+                    '<' => out.push_str("&lt;"),
+                    '>' => out.push_str("&gt;"),
+                    // Control characters are not representable in XML.
+                    _ => {}
+                }
+                rest = chars.as_str();
+            }
         }
+        let Some(next) = rest.find(|c| !ordinary(c)) else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..next]);
+        rest = &rest[next..];
     }
-    out
 }
 
 /// Escape an XML attribute value.

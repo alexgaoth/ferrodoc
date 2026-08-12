@@ -17,7 +17,8 @@ use std::fmt::Write as _;
 /// Render a document as HTML, matching pandoc's HTML writer with
 /// `--wrap=none` and no syntax highlighting.
 pub fn write_html(doc: &Pandoc) -> String {
-    let mut out = String::new();
+    // Most documents land within a small multiple of their block count.
+    let mut out = String::with_capacity(doc.blocks.len() * 64 + 64);
     write_blocks(&mut out, &doc.blocks);
     if out.is_empty() {
         out.push('\n'); // pandoc's output always ends with a newline
@@ -397,14 +398,29 @@ fn collect_plain(out: &mut String, inlines: &[Inline]) {
 
 /// Escape text content: `&`, `<`, `>` (pandoc leaves `"` alone in text).
 fn escape_text(out: &mut String, text: &str) {
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            ch => out.push(ch),
+    escape_into(out, text, |c| matches!(c, '&' | '<' | '>'));
+}
+
+/// Copy `text` into `out`, replacing the characters `special` selects with
+/// their entities. Ordinary runs — nearly all of the input — are copied as
+/// slices rather than character by character.
+fn escape_into(out: &mut String, text: &str, special: fn(char) -> bool) {
+    let mut rest = text;
+    while let Some(index) = rest.find(special) {
+        out.push_str(&rest[..index]);
+        let mut chars = rest[index..].chars();
+        match chars.next() {
+            Some('&') => out.push_str("&amp;"),
+            Some('<') => out.push_str("&lt;"),
+            Some('>') => out.push_str("&gt;"),
+            Some('"') => out.push_str("&quot;"),
+            Some('\'') => out.push_str("&#39;"),
+            Some(other) => out.push(other),
+            None => break,
         }
+        rest = chars.as_str();
     }
+    out.push_str(rest);
 }
 
 /// Escape code-block content: unlike inline code (`&`, `<`, `>` only),
@@ -417,16 +433,7 @@ fn escape_code_block(out: &mut String, text: &str) {
 /// Escape attribute values: `&`, `<`, `>`, `"`, and `'` as `&#39;`
 /// (pandoc escapes apostrophes in every attribute context).
 fn escape_attribute(out: &mut String, text: &str) {
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            ch => out.push(ch),
-        }
-    }
+    escape_into(out, text, |c| matches!(c, '&' | '<' | '>' | '"' | '\''));
 }
 
 #[cfg(test)]

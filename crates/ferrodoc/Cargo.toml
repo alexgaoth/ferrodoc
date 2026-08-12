@@ -1,22 +1,26 @@
 [package]
-name = "ferrodoc-harness"
-description = "Differential test harness: ferrodoc vs pandoc, plus CommonMark spec runner"
+name = "ferrodoc"
+description = "Universal document converter: markdown, HTML, DOCX and the pandoc AST"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+name = "ferrodoc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ferrodoc"
+path = "src/main.rs"
+
 [dependencies]
-comrak = { workspace = true }
-zip = { version = "8", default-features = false, features = ["deflate"] }
 ferrodoc-ast = { workspace = true }
 ferrodoc-markdown = { workspace = true }
 ferrodoc-html = { workspace = true }
 ferrodoc-text = { workspace = true }
-ferrodoc-docx = { path = "../ferrodoc-docx" }
-serde = { workspace = true }
+ferrodoc-docx = { workspace = true }
 serde_json = { workspace = true }
-anyhow = { workspace = true }
 
 [lints]
 workspace = true

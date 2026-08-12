@@ -660,9 +660,9 @@ impl Ctx {
             let pair = next.filter(|_| !lists || !numbered(node)).and_then(|next| {
                 if numbered(next) {
                     None
-                } else if self.is_caption_para(node) && self.is_captionable(next) {
+                } else if self.is_caption_para(node) && Self::is_captionable(next) {
                     Some((node, next))
-                } else if self.is_captionable(node)
+                } else if Self::is_captionable(node)
                     && self.is_caption_para(next)
                     && !keep_next(next)
                 {
@@ -767,7 +767,7 @@ impl Ctx {
     /// The style names a paragraph inherits, nearest first: its own style
     /// name then each `basedOn` ancestor. Bounded so a cyclic chain cannot
     /// hang.
-    fn style_names(&self, node: &Node) -> Vec<&str> {
+    fn style_names<'a>(&'a self, node: &'a Node) -> impl Iterator<Item = &'a str> {
         self.names_of_style(para_style(node))
     }
 
@@ -776,7 +776,7 @@ impl Ctx {
     /// caption style do not caption, matching pandoc.
     fn is_caption_para(&self, node: &Node) -> bool {
         node.name == "p"
-            && self.style_names(node).first().is_some_and(|name| {
+            && self.style_names(node).next().is_some_and(|name| {
                 matches!(
                     name.to_lowercase().as_str(),
                     "caption" | "table caption" | "image caption"
@@ -784,25 +784,23 @@ impl Ctx {
             })
     }
 
-    /// The names of a style id and the styles it is based on.
-    fn names_of_style(&self, id: &str) -> Vec<&str> {
-        let mut names = Vec::new();
+    /// The names of a style id and the styles it is based on, walked
+    /// lazily: these predicates run several times per paragraph, so
+    /// collecting a vector each time was pure allocation.
+    fn names_of_style<'a>(&'a self, id: &'a str) -> impl Iterator<Item = &'a str> {
         let mut style = Some(id);
-        for _ in 0..16 {
-            let Some((name, based_on)) = style.and_then(|id| self.styles.get(id)) else {
-                break;
-            };
-            names.push(name.as_str());
+        // Bounded so a cyclic `basedOn` chain cannot loop forever.
+        (0..16).map_while(move |_| {
+            let (name, based_on) = self.styles.get(style?)?;
             style = based_on.as_deref();
-        }
-        names
+            Some(name.as_str())
+        })
     }
 
     /// Whether a paragraph inherits any of the given style names
     /// (case-insensitive).
     fn has_style_name(&self, node: &Node, names: &[&str]) -> bool {
         self.style_names(node)
-            .iter()
             .any(|name| names.iter().any(|n| same_style_name(name, n)))
     }
 
@@ -810,7 +808,7 @@ impl Ctx {
     /// (any case). The space is required: Word's "Heading1" is a different
     /// style and pandoc does not treat it as a heading.
     fn heading_level(&self, node: &Node) -> Option<i64> {
-        self.style_names(node).iter().find_map(|name| heading_level_of(name))
+        self.style_names(node).find_map(heading_level_of)
     }
 
     /// A heading's classes: the paragraph's own style name, when that is
@@ -818,7 +816,7 @@ impl Ctx {
     /// styles do not contribute — they only supply the level.
     fn heading_classes(&self, node: &Node) -> Vec<String> {
         self.style_names(node)
-            .first()
+            .next()
             .filter(|name| heading_level_of(name).is_none())
             .map(|name| vec![name.replace(char::is_whitespace, "-")])
             .unwrap_or_default()
@@ -829,7 +827,7 @@ impl Ctx {
         if node.name != "p" {
             return None;
         }
-        self.style_names(node).iter().find_map(|name| {
+        self.style_names(node).find_map(|name| {
             [
                 ("Title", "title"),
                 ("Subtitle", "subtitle"),
@@ -848,7 +846,7 @@ impl Ctx {
         if node.name != "p" {
             return None;
         }
-        self.style_names(node).iter().find_map(|name| {
+        self.style_names(node).find_map(|name| {
             if same_style_name(name, "Definition Term") {
                 Some(DefinitionRole::Term)
             } else if same_style_name(name, "Definition") {
@@ -861,17 +859,14 @@ impl Ctx {
 
     /// Whether a body part can take a caption: a table, or a paragraph
     /// whose only content is an image.
-    fn is_captionable(&self, node: &Node) -> bool {
+    fn is_captionable(node: &Node) -> bool {
         if node.name == "tbl" {
             return true;
         }
-        node.name == "p" && {
-            let mut state = State::default();
-            matches!(
-                self.inlines(node, &mut state).as_slice(),
-                [Inline::Image(..)]
-            )
-        }
+        // Decided from the XML rather than by converting the paragraph:
+        // this runs for every body part, and building its inlines just to
+        // throw them away doubled the reader's inline work.
+        node.name == "p" && paragraph_is_only_image(node)
     }
 
     /// Attach a caption paragraph's content to a table or image paragraph.
@@ -1691,6 +1686,28 @@ fn same_style_name(a: &str, b: &str) -> bool {
 fn heading_level_of(name: &str) -> Option<i64> {
     let lower = name.to_lowercase();
     lower.strip_prefix("heading ")?.parse::<i64>().ok()
+}
+
+/// Whether a paragraph's entire content is a single drawing.
+fn paragraph_is_only_image(p: &Node) -> bool {
+    let mut images = 0;
+    for node in p.elems() {
+        match node.name.as_str() {
+            "pPr" | "bookmarkStart" | "bookmarkEnd" | "proofErr" => {}
+            "r" => {
+                for child in node.elems() {
+                    match child.name.as_str() {
+                        "rPr" => {}
+                        "drawing" => images += 1,
+                        "t" if child.text().trim().is_empty() => {}
+                        _ => return false,
+                    }
+                }
+            }
+            _ => return false,
+        }
+    }
+    images == 1
 }
 
 /// Whether a paragraph holds nothing but whitespace, which pandoc allows

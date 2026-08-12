@@ -414,6 +414,31 @@ fn bench(paths: &[String], iters: u32) -> Result<()> {
         println!(
             "{p} ({bytes} bytes): ferrodoc {ours:?}/doc vs pandoc subprocess {theirs:?}/doc — {speedup:.1}x (sink {sink})"
         );
+
+        // The DOCX paths, in process only: pandoc cannot be compared here
+        // without also paying for its own zip and XML work in a subprocess,
+        // which the line above already measures.
+        let ast = ferrodoc_markdown::read_commonmark(&markdown);
+        let docx = ferrodoc_docx::write_docx(&ast).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            sink += ferrodoc_docx::write_docx(&ast)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .len();
+        }
+        let write = start.elapsed() / iters;
+        let start = std::time::Instant::now();
+        for _ in 0..iters {
+            sink += ferrodoc_docx::read_docx(&docx)
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .blocks
+                .len();
+        }
+        let read = start.elapsed() / iters;
+        println!(
+            "    docx: write {write:?}/doc, read {read:?}/doc ({} bytes, sink {sink})",
+            docx.len()
+        );
     }
     Ok(())
 }

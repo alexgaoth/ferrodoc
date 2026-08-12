@@ -39,34 +39,45 @@ use std::borrow::Cow;
 /// pandoc's commonmark reader output.
 pub fn read_commonmark(input: &str) -> Pandoc {
     let prepared = preprocess(input);
-    let mut lines: Vec<&str> = prepared.split('\n').collect();
-    if lines.last() == Some(&"") {
-        lines.pop(); // the final newline produces one phantom empty piece
-    }
-    let src = Src { lines };
+    let src = Src::new(&prepared);
     let arena = Arena::new();
     let root = parse_document(&arena, &prepared, &Options::default());
     Pandoc::new(blocks(root.children(), &src, false))
 }
 
-/// The preprocessed source lines, for looking at what follows a node.
+/// The preprocessed source, for looking at what follows a node.
 struct Src<'s> {
-    lines: Vec<&'s str>,
+    /// The preprocessed text, for the rare lookup of a specific line.
+    text: &'s str,
+    /// The 1-based number of the last line with content. Everything after
+    /// it is blank, so "is the rest of the document blank?" is a
+    /// comparison rather than a scan to the end — the difference between
+    /// linear and quadratic on documents full of code blocks.
+    last_content_line: usize,
 }
 
-impl Src<'_> {
+impl<'s> Src<'s> {
+    fn new(text: &'s str) -> Self {
+        let mut last_content_line = 0;
+        for (index, line) in text.split('\n').enumerate() {
+            if !line.trim().is_empty() {
+                last_content_line = index + 1;
+            }
+        }
+        Src { text, last_content_line }
+    }
+
+    /// The 1-based line, as numbered by comrak's sourcepos. Only the
+    /// reference-definition check needs this, so it walks rather than
+    /// keeping an index of every line.
+    fn line(&self, number: usize) -> &'s str {
+        self.text.split('\n').nth(number.wrapping_sub(1)).unwrap_or("")
+    }
+
     /// Whether every line after the 1-based line number `after` is blank
     /// (i.e. only blank lines separate it from EOF).
     fn only_blanks_after(&self, after: usize) -> bool {
-        self.lines
-            .iter()
-            .skip(after)
-            .all(|l| l.trim().is_empty())
-    }
-
-    /// 1-based line lookup, as used by comrak's sourcepos.
-    fn line(&self, number: usize) -> &str {
-        self.lines.get(number.wrapping_sub(1)).copied().unwrap_or("")
+        after >= self.last_content_line
     }
 }
 
@@ -252,26 +263,42 @@ fn contains_closer(literal: &str, block_type: u8) -> bool {
 }
 
 fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>) -> Vec<Inline> {
-    let mut out = Vec::new();
-    for node in nodes {
+    let iter = nodes.into_iter();
+    let mut out = Vec::with_capacity(iter.size_hint().0 * 2);
+    for node in iter {
         inline(node, &mut out);
     }
-    merge_adjacent_emphasis(out)
+    merge_adjacent_emphasis(&mut out);
+    out
 }
 
 /// Merge directly-adjacent same-type `Emph`/`Strong` siblings: pandoc's
 /// commonmark reader never emits two in a row (`_a_*b*` is one `Emph`),
-/// while comrak keeps them separate.
-fn merge_adjacent_emphasis(tokens: Vec<Inline>) -> Vec<Inline> {
-    let mut out: Vec<Inline> = Vec::with_capacity(tokens.len());
-    for token in tokens {
-        match (out.last_mut(), token) {
-            (Some(Inline::Emph(prev)), Inline::Emph(next))
-            | (Some(Inline::Strong(prev)), Inline::Strong(next)) => prev.extend(next),
-            (_, token) => out.push(token),
+/// while comrak keeps them separate. Done in place — this runs once per
+/// paragraph, and the merge is rare enough that reallocating a fresh
+/// vector for it was pure overhead.
+fn merge_adjacent_emphasis(tokens: &mut Vec<Inline>) {
+    let mergeable = |a: &Inline, b: &Inline| {
+        matches!(
+            (a, b),
+            (Inline::Emph(_), Inline::Emph(_)) | (Inline::Strong(_), Inline::Strong(_))
+        )
+    };
+    let mut i = 1;
+    while i < tokens.len() {
+        if mergeable(&tokens[i - 1], &tokens[i]) {
+            let next = tokens.remove(i);
+            let (Inline::Emph(previous) | Inline::Strong(previous)) = &mut tokens[i - 1] else {
+                unreachable!("checked by mergeable")
+            };
+            let (Inline::Emph(next) | Inline::Strong(next)) = next else {
+                unreachable!("checked by mergeable")
+            };
+            previous.extend(next);
+        } else {
+            i += 1;
         }
     }
-    out
 }
 
 fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
