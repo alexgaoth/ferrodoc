@@ -90,10 +90,11 @@
 //!   drops the remaining content rather than recursing without limit.
 
 mod combine;
+mod media;
 mod write;
 mod xml;
 
-pub use write::write_docx;
+pub use write::{write_docx, write_docx_with_media};
 
 use combine::{Modifier, smush_blocks, smush_inlines, stack};
 use ferrodoc_ast::{

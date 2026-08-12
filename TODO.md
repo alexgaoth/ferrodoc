@@ -35,14 +35,24 @@ than inside this one.
 The four documented losses in `write.rs` are limits of CommonMark, not bugs;
 GFM removes none of them.
 
-## 2. Embedded images in the DOCX writer
+## 2. Embedded images in the DOCX writer — done
 
-The largest fidelity gap on a path that already works: the writer drops images
-to their alt text and discards raw blocks. Needs media parts, content-type
-overrides and relationship wiring.
+PNG, JPEG and GIF images are embedded as real pictures: media parts, content
+types, relationship wiring, one part per source image however often it
+appears, and sizing from the document's own `width`/`height` or else the
+image header. Document metadata (title, subtitle, author, date) is written as
+the styled leading paragraphs the reader recovers, and matches pandoc's.
 
-Also here: document metadata (title/author/date) on the write side, since the
-reader already understands it.
+Byte resolution is the caller's job — `write_docx_with_media` takes a
+resolver — because the crate must stay pure enough to compile for `wasm32`.
+The CLI resolves relative to the input document.
+
+Still open, and now the DOCX writer's only real losses:
+
+- Raw blocks, which have no OOXML equivalent at all.
+- Formats beyond PNG/JPEG/GIF (SVG, WebP, TIFF, EMF) fall back to alt text.
+- The reader has no media bag, so `docx → docx` still loses images: the AST
+  records the part path, not the bytes. Exposing them is what would close it.
 
 ## 3. HTML reader — completes the triangle
 

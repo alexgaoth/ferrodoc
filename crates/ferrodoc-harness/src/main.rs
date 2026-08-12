@@ -260,6 +260,39 @@ fn run_pandoc_input(input: &str, args: &[&str]) -> Result<Vec<u8>> {
     run_pandoc(input, args)
 }
 
+/// Rewrite the names of embedded media parts to their order of first
+/// appearance.
+///
+/// Reading a `.docx` back reports each image's URL as the package path it
+/// was stored at, and the two writers number those parts differently —
+/// ferrodoc counts images, pandoc reuses relationship ids. That is zip
+/// layout, not document content, and `diff-write` exists to compare
+/// content. Distinctness and the file extension are kept, so two images
+/// sharing one part, or an image landing in the wrong format, still fail.
+fn normalize_media(value: &mut Value, seen: &mut Vec<String>) {
+    match value {
+        Value::String(text) if text.starts_with("media/") => {
+            let extension = text.rsplit_once('.').map_or(String::new(), |(_, e)| format!(".{e}"));
+            let index = seen.iter().position(|s| s == text).unwrap_or_else(|| {
+                seen.push(text.clone());
+                seen.len() - 1
+            });
+            *text = format!("media/{index}{extension}");
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_media(item, seen);
+            }
+        }
+        Value::Object(fields) => {
+            for (_, field) in fields {
+                normalize_media(field, seen);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Compare our DOCX *writer* against pandoc's, semantically: both engines
 /// write the same AST to a `.docx`, pandoc reads both back, and the two
 /// resulting documents must be identical. Comparing the zip bytes would be
@@ -278,10 +311,15 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
         let ast = ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?;
         let ast_json = serde_json::to_string(&ast)?;
 
-        // Ours: ferrodoc writes the docx, pandoc reads it back.
-        let ours_docx = ferrodoc_docx::write_docx(&ast)
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .with_context(|| format!("ferrodoc failed to write {}", case.name))?;
+        // Ours: ferrodoc writes the docx, pandoc reads it back. Images
+        // resolve against the case's own directory, which is how pandoc
+        // resolves them too — otherwise nothing here would embed one.
+        let base = Path::new(&case.name).parent().unwrap_or(Path::new(".")).to_owned();
+        let ours_docx = ferrodoc_docx::write_docx_with_media(&ast, &|url| {
+            std::fs::read(base.join(url)).ok()
+        })
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .with_context(|| format!("ferrodoc failed to write {}", case.name))?;
         let ours_path = dir.join("ours.docx");
         std::fs::write(&ours_path, &ours_docx)?;
         let ours = pandoc_file(&ours_path)
@@ -290,7 +328,9 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
         // Theirs: pandoc writes the docx and reads it back.
         let theirs_path = dir.join("theirs.docx");
         let status = Command::new("pandoc")
-            .args(["-f", "json", "-t", "docx", "-o"])
+            .args(["-f", "json", "-t", "docx", "--resource-path"])
+            .arg(&base)
+            .arg("-o")
             .arg(&theirs_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -311,7 +351,11 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
                 String::from_utf8_lossy(&status.stderr)
             );
         }
-        let theirs = pandoc_file(&theirs_path)?;
+        let mut theirs = pandoc_file(&theirs_path)?;
+
+        let mut ours = ours;
+        normalize_media(&mut ours, &mut Vec::new());
+        normalize_media(&mut theirs, &mut Vec::new());
 
         if ours == theirs {
             matched += 1;

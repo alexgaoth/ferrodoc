@@ -159,16 +159,32 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
     }
 }
 
-/// Write a document.
+/// Write a document. Images are not embedded; see [`render_with_media`].
 pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
+    render_with_media(doc, to, &|_| None)
+}
+
+/// Write a document, embedding every image whose bytes `media` can supply
+/// for its URL.
+///
+/// Resolving a URL is the caller's job: it may name a file on disk, a
+/// cache, or nothing at all, and this crate has no business guessing. Only
+/// DOCX output embeds media today; other formats ignore the resolver.
+pub fn render_with_media(
+    doc: &Pandoc,
+    to: Format,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<Vec<u8>, Error> {
     match to {
         Format::Markdown => Ok(ferrodoc_markdown::write_markdown(doc).into_bytes()),
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         Format::Plain => Ok(ferrodoc_text::write_text(doc).into_bytes()),
-        Format::Docx => ferrodoc_docx::write_docx(doc).map_err(|e| Error::Invalid {
-            format: to,
-            detail: e.to_string(),
-        }),
+        Format::Docx => {
+            ferrodoc_docx::write_docx_with_media(doc, media).map_err(|e| Error::Invalid {
+                format: to,
+                detail: e.to_string(),
+            })
+        }
         Format::Json => {
             let mut json = serde_json::to_vec(doc).map_err(|e| Error::Invalid {
                 format: to,

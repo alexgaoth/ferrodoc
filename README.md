@@ -53,7 +53,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
-| `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically |
+| `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 
 ```sh
@@ -138,8 +138,8 @@ cargo build --release --target wasm32-unknown-unknown \
 The table above is not the whole picture, and pretending otherwise would make
 the rest less believable. Pandoc supports ~40 formats to ferrodoc's four, plus
 citations, templates, Lua filters, PDF output and fifteen years of edge cases.
-Our DOCX writer also drops things it has nowhere to put: images need media
-parts, raw blocks have no OOXML equivalent. The bet is not that this replaces
+Our DOCX writer still drops raw blocks, which have no OOXML equivalent, and
+embeds only PNG, JPEG and GIF images. The bet is not that this replaces
 pandoc — it is that the common path, markdown/HTML/DOCX called from a program
 rather than a shell, is worth doing natively.
 

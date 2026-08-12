@@ -82,6 +82,12 @@ be a number someone else can reproduce.
   commonmark writer is lossy — 593/652 at `--wrap=preserve`, and 535/652 at
   `--wrap=none`, which flattens SoftBreak to Space — so matching it would
   mean copying its losses. Give pandoc its best setting when scoring it.
+- Images are embedded only when the caller supplies the bytes
+  (`write_docx_with_media`); ferrodoc-docx does no IO, so it keeps building
+  for wasm32. `diff-write` resolves them against the case's directory and
+  passes `--resource-path` to pandoc so both sides see the same files, then
+  renames media parts before comparing — the two writers number them
+  differently and that is zip layout, not document content.
 - DOCX writing is verified by round trip (`diff-write`), never by comparing
   zip bytes: both engines write the same AST, pandoc reads both back, the
   documents must match. `w:rPr` children must be emitted in OOXML schema

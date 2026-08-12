@@ -1,6 +1,6 @@
 //! The `ferrodoc` command-line converter.
 
-use ferrodoc::{Format, convert};
+use ferrodoc::Format;
 use std::io::{Read as _, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -123,7 +123,16 @@ fn run() -> Result<(), String> {
         bytes
     };
 
-    let converted = convert(&bytes, from, to).map_err(|e| e.to_string())?;
+    // Image paths in a document are relative to the document, the way
+    // every editor that wrote one meant them.
+    let base = input
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_owned();
+    let doc = ferrodoc::parse(&bytes, from).map_err(|e| e.to_string())?;
+    let converted = ferrodoc::render_with_media(&doc, to, &|url| std::fs::read(base.join(url)).ok())
+        .map_err(|e| e.to_string())?;
 
     if let Some(path) = &output {
         std::fs::write(path, &converted)
