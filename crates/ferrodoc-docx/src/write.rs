@@ -188,7 +188,9 @@ impl Writer {
     /// belong after the numbering (a paragraph border, say); passing no
     /// style omits `w:pStyle` entirely.
     fn emit_paragraph(&mut self, default_style: Option<&str>, extra: &str, runs: &str) -> String {
-        let mut properties = String::new();
+        let mut out = String::with_capacity(runs.len() + 64);
+        out.push_str("<w:p><w:pPr>");
+        let properties = &mut out;
         if let Some(default_style) = default_style {
             // Only ordinary paragraphs take the surrounding context's style:
             // a code block inside a quote is still code, and a heading is
@@ -212,7 +214,10 @@ impl Writer {
         if let Some(justification) = self.justification {
             let _ = write!(properties, "<w:jc w:val=\"{justification}\"/>");
         }
-        format!("<w:p><w:pPr>{properties}</w:pPr>{runs}</w:p>")
+        out.push_str("</w:pPr>");
+        out.push_str(runs);
+        out.push_str("</w:p>");
+        out
     }
 
     /// Run `body` with a paragraph style forced, restoring the previous one.
@@ -620,7 +625,18 @@ impl RunStyle {
 
     /// The `w:rPr` element, with children in schema order.
     fn render(&self) -> String {
-        let mut out = String::new();
+        if self.character_style.is_none()
+            && !self.bold
+            && !self.italic
+            && !self.small_caps
+            && !self.strike
+            && !self.underline
+            && self.vertical.is_none()
+        {
+            return String::new();
+        }
+        let mut out = String::with_capacity(48);
+        out.push_str("<w:rPr>");
         if let Some(style) = self.character_style {
             let _ = write!(out, "<w:rStyle w:val=\"{style}\"/>");
         }
@@ -642,20 +658,20 @@ impl RunStyle {
         if let Some(vertical) = self.vertical {
             let _ = write!(out, "<w:vertAlign w:val=\"{vertical}\"/>");
         }
-        if out.is_empty() {
-            out
-        } else {
-            format!("<w:rPr>{out}</w:rPr>")
-        }
+        out.push_str("</w:rPr>");
+        out
     }
 }
 
 /// Wrap text in a run carrying the given style.
 fn run(style: &RunStyle, text: &str) -> String {
-    format!(
-        "<w:r>{}<w:t xml:space=\"preserve\">{text}</w:t></w:r>",
-        style.render()
-    )
+    let mut out = String::with_capacity(text.len() + 64);
+    out.push_str("<w:r>");
+    out.push_str(&style.render());
+    out.push_str("<w:t xml:space=\"preserve\">");
+    out.push_str(text);
+    out.push_str("</w:t></w:r>");
+    out
 }
 
 /// Escape XML text content. Ordinary characters — nearly all of them —
@@ -666,37 +682,20 @@ fn escape(text: &str) -> String {
     out
 }
 
-/// Escape XML text content into an existing buffer.
+/// Escape XML text content into an existing buffer. Per character on
+/// purpose — see the note in the HTML writer; searching for the next
+/// special character measured slower on the short strings documents are
+/// made of.
 fn escape_into(out: &mut String, text: &str) {
-    let ordinary = |c: char| !matches!(c, '&' | '<' | '>') && (c >= ' ' || c == '\t');
-    let Some(first) = text.find(|c| !ordinary(c)) else {
-        out.push_str(text);
-        return;
-    };
-    out.reserve(text.len());
-    out.push_str(&text[..first]);
-    let mut rest = &text[first..];
-    loop {
-        let mut chars = rest.chars();
-        match chars.next() {
-            None => return,
-            Some(ch) => {
-                match ch {
-                    '&' => out.push_str("&amp;"),
-                    '<' => out.push_str("&lt;"),
-                    '>' => out.push_str("&gt;"),
-                    // Control characters are not representable in XML.
-                    _ => {}
-                }
-                rest = chars.as_str();
-            }
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            // Control characters are not representable in XML.
+            c if (c as u32) < 0x20 && c != '\t' => {}
+            c => out.push(c),
         }
-        let Some(next) = rest.find(|c| !ordinary(c)) else {
-            out.push_str(rest);
-            return;
-        };
-        out.push_str(&rest[..next]);
-        rest = &rest[next..];
     }
 }
 

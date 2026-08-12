@@ -860,8 +860,6 @@ impl Ctx {
     }
 
     /// Whether a body part can take a caption: a table, or a paragraph
-    /// whose only content is an image.
-    /// Whether a body part can take a caption: a table, or a paragraph
     /// whose content converts to exactly one image.
     ///
     /// This asks the same question the conversion will answer, by doing the
@@ -909,9 +907,14 @@ impl Ctx {
                 )]
             }
             // Anything else keeps both: dropping the body here would
-            // delete content silently.
+            // delete content silently. An empty code block is the one thing
+            // worth discarding — a styled image paragraph converts to one,
+            // and it carries nothing.
             _ => {
-                let mut out = body_blocks;
+                let mut out: Vec<Block> = body_blocks
+                    .into_iter()
+                    .filter(|block| !matches!(block, Block::CodeBlock(_, text) if text.is_empty()))
+                    .collect();
                 out.extend(caption_blocks);
                 out
             }

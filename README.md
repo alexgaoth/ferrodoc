@@ -73,7 +73,9 @@ estimate.
 | 0.6 KB README | 37 µs | 19 ms | **~500×** |
 
 Writing and reading DOCX, in process (`bench-docx`): the 16 KB document takes
-1.2 ms to write and 3.6 ms to read; the 0.6 KB one, 0.2 ms and 0.3 ms.
+~1.4 ms to write and ~5 ms to read on this machine; the 0.6 KB one, ~0.2 ms
+and ~0.3 ms. (Absolute figures move with CPU state — compare interleaved runs,
+not numbers from different sittings.)
 
 The comparison is in-process library call vs `pandoc` subprocess, because that
 is the choice a real pipeline makes: pandoc is a binary, so using it from
