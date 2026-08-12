@@ -8,6 +8,7 @@
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness bench [--iters N] <file>...
+//!   ferrodoc-harness bench-docx [--iters N] <file>...
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -33,8 +34,9 @@ fn main() -> Result<()> {
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
+        Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-docx|diff-write|bench> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-docx|diff-write|bench|bench-docx> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -415,11 +417,25 @@ fn bench(paths: &[String], iters: u32) -> Result<()> {
             "{p} ({bytes} bytes): ferrodoc {ours:?}/doc vs pandoc subprocess {theirs:?}/doc — {speedup:.1}x (sink {sink})"
         );
 
-        // The DOCX paths, in process only: pandoc cannot be compared here
-        // without also paying for its own zip and XML work in a subprocess,
-        // which the line above already measures.
+    }
+    Ok(())
+}
+
+/// Time the DOCX writer and reader. Kept apart from `bench` so that the
+/// markdown numbers there stay comparable between builds: adding code to a
+/// benchmark changes inlining and code layout, which moves its timings even
+/// when the measured library has not changed at all.
+fn bench_docx(paths: &[String], iters: u32) -> Result<()> {
+    if paths.is_empty() {
+        bail!("bench-docx expects at least one markdown file");
+    }
+    for path in paths {
+        let markdown =
+            std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?;
         let ast = ferrodoc_markdown::read_commonmark(&markdown);
         let docx = ferrodoc_docx::write_docx(&ast).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut sink = docx.len();
+
         let start = std::time::Instant::now();
         for _ in 0..iters {
             sink += ferrodoc_docx::write_docx(&ast)
@@ -427,6 +443,7 @@ fn bench(paths: &[String], iters: u32) -> Result<()> {
                 .len();
         }
         let write = start.elapsed() / iters;
+
         let start = std::time::Instant::now();
         for _ in 0..iters {
             sink += ferrodoc_docx::read_docx(&docx)
@@ -435,8 +452,9 @@ fn bench(paths: &[String], iters: u32) -> Result<()> {
                 .len();
         }
         let read = start.elapsed() / iters;
+
         println!(
-            "    docx: write {write:?}/doc, read {read:?}/doc ({} bytes, sink {sink})",
+            "{path}: docx write {write:?}/doc, read {read:?}/doc ({} docx bytes, sink {sink})",
             docx.len()
         );
     }

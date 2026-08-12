@@ -47,6 +47,7 @@ fn run() -> Result<(), String> {
     let mut to: Option<Format> = None;
     let mut output: Option<PathBuf> = None;
     let mut input: Option<PathBuf> = None;
+    let mut stdin_requested = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -75,13 +76,21 @@ fn run() -> Result<(), String> {
                 to = Some(format(&name)?);
             }
             "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
-            "-" => input = None,
+            // An explicit "-" means stdin, and cannot be combined with a
+            // named file — silently ignoring one of them would convert the
+            // wrong document.
+            "-" => {
+                if input.is_some() {
+                    return Err("more than one input given".to_owned());
+                }
+                stdin_requested = true;
+            }
             other if other.starts_with('-') && other.len() > 1 => {
                 return Err(format!("unknown option {other} (try --help)"));
             }
             other => {
-                if input.is_some() {
-                    return Err("more than one input file given".to_owned());
+                if input.is_some() || stdin_requested {
+                    return Err("more than one input given".to_owned());
                 }
                 input = Some(PathBuf::from(other));
             }

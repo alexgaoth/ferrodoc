@@ -42,36 +42,42 @@ pub fn read_commonmark(input: &str) -> Pandoc {
     let src = Src::new(&prepared);
     let arena = Arena::new();
     let root = parse_document(&arena, &prepared, &Options::default());
-    Pandoc::new(blocks(root.children(), &src, false))
+    Pandoc::new(blocks(root.children(), &src, false, 0))
 }
 
-/// The preprocessed source, for looking at what follows a node.
+/// The deepest container nesting converted. Documents nest a handful of
+/// levels; past this the input is hostile, and the remaining content is
+/// dropped rather than overflowing the stack, which aborts the process
+/// uncatchably. The DOCX reader is bounded the same way.
+const MAX_NESTING: usize = 200;
+
+/// The preprocessed source, indexed by line. Both lookups below are used
+/// once per block, so both must be O(1): scanning the document for either
+/// makes the whole reader quadratic.
 struct Src<'s> {
-    /// The preprocessed text, for the rare lookup of a specific line.
-    text: &'s str,
-    /// The 1-based number of the last line with content. Everything after
-    /// it is blank, so "is the rest of the document blank?" is a
-    /// comparison rather than a scan to the end — the difference between
-    /// linear and quadratic on documents full of code blocks.
+    /// Every line of the preprocessed text, in order.
+    lines: Vec<&'s str>,
+    /// The 1-based number of the last line with content; everything after
+    /// it is blank.
     last_content_line: usize,
 }
 
 impl<'s> Src<'s> {
     fn new(text: &'s str) -> Self {
-        let mut last_content_line = 0;
-        for (index, line) in text.split('\n').enumerate() {
-            if !line.trim().is_empty() {
-                last_content_line = index + 1;
-            }
+        let mut lines: Vec<&'s str> = text.split('\n').collect();
+        if lines.last() == Some(&"") {
+            lines.pop(); // a trailing newline produces one phantom piece
         }
-        Src { text, last_content_line }
+        let last_content_line = lines
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .map_or(0, |index| index + 1);
+        Src { lines, last_content_line }
     }
 
-    /// The 1-based line, as numbered by comrak's sourcepos. Only the
-    /// reference-definition check needs this, so it walks rather than
-    /// keeping an index of every line.
+    /// The 1-based line, as numbered by comrak's sourcepos.
     fn line(&self, number: usize) -> &'s str {
-        self.text.split('\n').nth(number.wrapping_sub(1)).unwrap_or("")
+        self.lines.get(number.wrapping_sub(1)).copied().unwrap_or("")
     }
 
     /// Whether every line after the 1-based line number `after` is blank
@@ -133,11 +139,22 @@ fn blocks<'a>(
     nodes: impl Iterator<Item = &'a AstNode<'a>>,
     src: &Src,
     in_quote: bool,
+    depth: usize,
 ) -> Vec<Block> {
-    nodes.filter_map(|n| block(n, src, in_quote)).collect()
+    if depth >= MAX_NESTING {
+        return Vec::new();
+    }
+    nodes
+        .filter_map(|n| block(n, src, in_quote, depth + 1))
+        .collect()
 }
 
-fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> {
+fn block<'a>(
+    node: &'a AstNode<'a>,
+    src: &Src,
+    in_quote: bool,
+    depth: usize,
+) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
         NodeValue::Paragraph => {
@@ -162,7 +179,9 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> 
             Attr::default(),
             inlines(node.children()),
         )),
-        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src, true))),
+        NodeValue::BlockQuote => {
+            Some(Block::BlockQuote(blocks(node.children(), src, true, depth)))
+        }
         NodeValue::CodeBlock(cb) => {
             // Pandoc keeps the literal untouched only for a fence that is
             // never closed, sits outside any blockquote, and is followed by
@@ -213,7 +232,7 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> 
             let items: Vec<Vec<Block>> = node
                 .children()
                 .map(|item| {
-                    let mut bs = blocks(item.children(), src, in_quote);
+                    let mut bs = blocks(item.children(), src, in_quote, depth);
                     if nl.tight {
                         for b in &mut bs {
                             if let Block::Para(is) = b {

@@ -42,7 +42,6 @@ let html = convert(b"# Title\n\nHello.\n", Format::Markdown, Format::Html)?;
 let mut doc = parse(b"# Title\n\ntext\n", Format::Markdown)?;
 doc.blocks.retain(|block| !matches!(block, Block::Header(..)));
 let without_headings = render(&doc, Format::Html)?;
-# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Differential testing
@@ -66,12 +65,15 @@ Measured on this machine (Linux x86-64, pandoc 3.8.2.1, release build). Every
 number below is reproducible with the commands in this repo — none is an
 estimate.
 
-### 1. Throughput: 83×–536× faster in the shape pipelines actually use
+### 1. Throughput: 90×–500× faster in the shape pipelines actually use
 
 | input | ferrodoc (in-process) | pandoc (subprocess) | ratio |
 |---|---|---|---|
-| 16 KB (concatenated spec examples) | 1.23 ms | 102.6 ms | **83×** |
-| 0.6 KB README | 34 µs | 18.0 ms | **536×** |
+| 16 KB (concatenated spec examples) | 0.77 ms | 86 ms | **~110×** |
+| 0.6 KB README | 37 µs | 19 ms | **~500×** |
+
+Writing and reading DOCX, in process (`bench-docx`): the 16 KB document takes
+1.2 ms to write and 3.6 ms to read; the 0.6 KB one, 0.2 ms and 0.3 ms.
 
 The comparison is in-process library call vs `pandoc` subprocess, because that
 is the choice a real pipeline makes: pandoc is a binary, so using it from
@@ -79,7 +81,14 @@ another program *means* spawning a process and serializing through it. The
 small-document ratio is dominated by that startup, which is exactly the cost
 document pipelines pay per file today.
 
-`cargo run -p ferrodoc-harness -- bench <file>`
+Reproduce with:
+
+```sh
+python3 -c "import json; print('\n\n'.join(e['markdown'] for e in json.load(open('corpus/commonmark-spec-0.31.2.json'))))" > /tmp/bigdoc.md
+cargo build --release
+./target/release/ferrodoc-harness bench      /tmp/bigdoc.md corpus/readme-style.md --iters 300
+./target/release/ferrodoc-harness bench-docx /tmp/bigdoc.md corpus/readme-style.md --iters 200
+```
 
 ### 2. Startup: 13 ms → 2 ms per invocation
 
@@ -87,10 +96,19 @@ Even as a plain CLI, converting a one-line document takes pandoc ~13 ms and
 ferrodoc ~2 ms — a Haskell runtime plus a 153 MB binary has to be paged in
 before any work happens.
 
-### 3. Memory: 12.8 MB → 3.4 MB peak RSS
+### 3. Memory: 24× to 48× less
 
-Peak resident set converting the 16 KB document to HTML (`/usr/bin/time -v`).
-No GC, no runtime: memory tracks the document, not the interpreter.
+Peak resident set converting to HTML (`/usr/bin/time`), same machine:
+
+| input | ferrodoc | pandoc |
+|---|---|---|
+| 0.6 KB README | 2.7 MB | 65 MB |
+| 16 KB spec examples | 4.3 MB | 206 MB |
+
+No GC and no runtime: memory tracks the document, not the interpreter. Note
+the 16 KB file is the CommonMark spec's examples concatenated, so it contains
+deliberately pathological markdown — but the small, ordinary document shows
+the same shape.
 
 ### 4. Distribution: 153 MB → 3.1 MB
 

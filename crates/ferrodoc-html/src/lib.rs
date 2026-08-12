@@ -17,8 +17,7 @@ use std::fmt::Write as _;
 /// Render a document as HTML, matching pandoc's HTML writer with
 /// `--wrap=none` and no syntax highlighting.
 pub fn write_html(doc: &Pandoc) -> String {
-    // Most documents land within a small multiple of their block count.
-    let mut out = String::with_capacity(doc.blocks.len() * 64 + 64);
+    let mut out = String::new();
     write_blocks(&mut out, &doc.blocks);
     if out.is_empty() {
         out.push('\n'); // pandoc's output always ends with a newline

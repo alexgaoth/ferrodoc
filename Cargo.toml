@@ -7,7 +7,7 @@ members = [
     "crates/ferrodoc-html",
     "crates/ferrodoc-text",
     "crates/ferrodoc-harness",
-    "crates/ferrodoc-docx", "crates/ferrodoc",
+    "crates/ferrodoc-docx",
 ]
 
 [workspace.package]
