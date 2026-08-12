@@ -103,26 +103,25 @@ fn run() -> Result<(), String> {
         );
     };
 
-    let bytes = match &input {
-        Some(path) => std::fs::read(path)
-            .map_err(|e| format!("cannot read {}: {e}", path.display()))?,
-        None => {
-            let mut bytes = Vec::new();
-            std::io::stdin()
-                .read_to_end(&mut bytes)
-                .map_err(|e| format!("cannot read standard input: {e}"))?;
-            bytes
-        }
+    let bytes = if let Some(path) = &input {
+        std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?
+    } else {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("cannot read standard input: {e}"))?;
+        bytes
     };
 
     let converted = convert(&bytes, from, to).map_err(|e| e.to_string())?;
 
-    match &output {
-        Some(path) => std::fs::write(path, &converted)
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?,
-        None => std::io::stdout()
+    if let Some(path) = &output {
+        std::fs::write(path, &converted)
+            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    } else {
+        std::io::stdout()
             .write_all(&converted)
-            .map_err(|e| format!("cannot write to standard output: {e}"))?,
+            .map_err(|e| format!("cannot write to standard output: {e}"))?;
     }
     Ok(())
 }
