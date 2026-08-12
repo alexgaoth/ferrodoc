@@ -187,27 +187,61 @@ Still missing: a regression fixture for *every* mismatch ever found. The
 recent ones have them; the older ones are described in `.iterate/` verdicts
 rather than pinned in the corpus.
 
-## 5. Ship it
+## 5. Ship it — prepared, not shipped
 
-The CLI and facade crate already exist; this is packaging, not building.
+Everything reversible is done; everything irreversible is waiting on a
+decision that is not mine to make.
 
-- Tag a 0.1 with a documented, deliberately small public API.
-- Static CLI binaries per platform.
-- Publish the crates.
-- A WASM package — the browser story is real and already compiles.
-- Python and Node bindings **only once there is evidence of where users are**.
-  Bindings are the adoption vector, but guessing the wrong one costs months.
+Done:
 
-## 6. Later, and only later: PDF output via embedded Typst
+- **Licences.** `LICENSE-MIT` and `LICENSE-APACHE` exist. `license = "MIT OR
+  Apache-2.0"` was declared for months with no licence text in the tree,
+  which would have blocked publishing and left users guessing.
+- **Crate metadata.** `rust-version`, `homepage`, `keywords`, `categories`
+  and `readme` on all six crates, inherited from the workspace.
+  `cargo publish --dry-run -p ferrodoc-ast` packages clean.
+- **A deliberately small public API**, unchanged and worth keeping small:
+  `Format`, `Error`, `parse`, `render`, `render_with_media`, `convert`, and
+  the `ast` module. Six items and one module.
+- **`.github/workflows/release.yml`.** A tag builds static binaries for
+  linux-musl (so it runs on any distribution, not just new-enough glibc),
+  macOS on both architectures, and Windows, and attaches them to the
+  release, along with a wasm32 artefact.
 
-Filed as a *later phase*, not a non-goal, because it is the one place where
-this project can beat pandoc outright rather than merely match it: pandoc
-cannot produce a PDF without a LaTeX or Typst installation, often gigabytes of
-it. A single ~3 MB binary that renders markdown to PDF with no system
-dependencies is a differentiating capability, not a completeness checkbox.
+Deliberately **not** done, because it is outward-facing and irreversible:
 
-Not before items 1–5. It is a large piece of work and it is worthless on top of
-an unstable core.
+- **`cargo publish`.** A published version cannot be unpublished; yanking
+  leaves it visible. Publish order is `ferrodoc-ast`, then `-markdown`,
+  `-html`, `-text`, `-docx`, then `ferrodoc`. Needs someone to own the name.
+- **Tagging 0.1.** Same reason: the tag is what triggers the release build.
+- **Python and Node bindings**, still waiting on evidence of where users
+  are. Guessing the wrong one costs months.
+
+## 6. PDF output via embedded Typst — measured, and the premise does not hold
+
+The case for this item was: *"A single ~3 MB binary that renders markdown to
+PDF with no system dependencies is a differentiating capability."* That is
+the right idea and the wrong arithmetic, and the measurement kills it in its
+current form.
+
+Adding `typst` and `typst-pdf` takes the dependency tree from **63 crates to
+283** — a 4.5× increase, before counting the embedded fonts and ICU data
+Typst needs to lay text out. The binary would not be ~3 MB. It would be an
+order of magnitude larger than the 4.6 MB one whose smallness is a headline
+claim, measured and published in the README as 35× smaller than pandoc.
+
+So the item as written trades the project's clearest advantage for a
+capability, which is the opposite of the bet. Two ways it could still
+happen, neither of them "add Typst to the CLI":
+
+- **A separate crate**, `ferrodoc-pdf`, that nobody pays for unless they
+  want it. The core binary and the wasm build stay as they are.
+- **A cargo feature**, off by default, with the release workflow shipping
+  both a lean binary and a `ferrodoc-pdf` one, so the 35× claim keeps a
+  binary it honestly describes.
+
+Either way it is a large piece of work and it is not the next one. Filed as
+open, with the number attached, rather than as a plan.
 
 ---
 

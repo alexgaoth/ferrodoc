@@ -3,8 +3,14 @@ name = "ferrodoc-ast"
 description = "Pandoc-compatible document AST with lossless pandoc-JSON interop"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+readme = "../../README.md"
 
 [dependencies]
 serde = { workspace = true }

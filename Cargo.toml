@@ -13,8 +13,14 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+# The edition needs a recent compiler; state it so `cargo add` can refuse
+# rather than fail to build on someone's machine.
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/alexgaoth/ferrodoc"
+homepage = "https://github.com/alexgaoth/ferrodoc"
+keywords = ["pandoc", "markdown", "docx", "html", "converter"]
+categories = ["text-processing", "parser-implementations", "command-line-utilities"]
 
 [workspace.dependencies]
 ferrodoc-ast = { path = "crates/ferrodoc-ast" }
