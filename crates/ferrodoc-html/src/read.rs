@@ -962,7 +962,11 @@ fn merge_adjacent(inlines: &mut Vec<Inline>) {
     for next in inlines.drain(..) {
         match (out.last_mut(), next) {
             (Some(Inline::Emph(inner)), Inline::Emph(next))
-            | (Some(Inline::Strong(inner)), Inline::Strong(next)) => inner.extend(next),
+            | (Some(Inline::Strong(inner)), Inline::Strong(next))
+            | (Some(Inline::Strikeout(inner)), Inline::Strikeout(next))
+            | (Some(Inline::Subscript(inner)), Inline::Subscript(next))
+            | (Some(Inline::Superscript(inner)), Inline::Superscript(next))
+            | (Some(Inline::Underline(inner)), Inline::Underline(next)) => inner.extend(next),
             (Some(Inline::Str(text)), Inline::Str(next)) => text.push_str(&next),
             // A run of whitespace is one space however many nodes it
             // spans; a soft break anywhere in the run makes the run one.
