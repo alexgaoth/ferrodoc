@@ -71,16 +71,36 @@ Repros: `.iterate/20260810-markdown-reader/round-3-verdict.md`.
 `corpus/docx/spec-09.docx`: a list nested inside a table cell in a shape the
 reader flattens.
 
-### DOCX writer — 1 corpus document, and three categories
+### DOCX writer — 1 corpus document, and two categories
 
 - `corpus/nested-structures.md`: a quotation nested in a way the round trip
   does not preserve.
 - **Raw blocks** are dropped: OOXML has no equivalent.
 - **Images** embed as PNG, JPEG and GIF only. SVG, WebP, TIFF and EMF fall
   back to alt text rather than produce a package Word would reject.
-- **`docx → docx` loses images**: the reader records the media part's path,
-  not its bytes, so a re-write has nothing to embed. Closing this needs a
-  media bag on the reader.
+
+`docx → docx` keeps its pictures. The bytes go through unchanged; only the
+part name is renumbered. Media is read **only when the output can embed it**,
+because a `.docx` can hold a part that inflates a thousandfold and
+`docx → markdown` has no use for it: on a 400 MB image part that is 5 MB of
+peak RSS rather than 840 MB.
+
+Where it stops:
+
+- an image in a format the writer cannot embed (above) is alt text on the
+  way out, so it is not in the new package either;
+- a part the archive does not actually hold is skipped, not an error;
+- a relationship that is external (`TargetMode="External"`) is a link, not
+  an embedded part, and stays one.
+
+Two things worth knowing about the other direction. A picture inside a
+footnote is declared by that note's own relationship table, so it is read
+from `word/_rels/footnotes.xml.rels` and only falls back to the document's
+when the note declares none — which is the shape **pandoc writes**, and why
+`pandoc a.docx -t markdown` drops a footnote image from pandoc's own file
+while ferrodoc keeps it. And a figure is written with pandoc's
+`CaptionedFigure` style: written any other way pandoc's reader drops the
+picture, so a round trip through this writer would lose it one hop later.
 
 ### Markdown writer — 4 limits of CommonMark itself
 

@@ -83,6 +83,15 @@ impl Format {
         !matches!(self, Format::Plain)
     }
 
+    /// Whether writing this format embeds image bytes.
+    ///
+    /// Reading a document's media costs memory proportional to it — a
+    /// `.docx` can hold a part that inflates a thousandfold — so
+    /// [`convert`] asks for it only when the answer here is yes.
+    pub fn embeds_media(self) -> bool {
+        matches!(self, Format::Docx)
+    }
+
     /// Whether documents can be written to this format.
     pub fn writable(self) -> bool {
         // Every format here has a writer; `Plain` is the only one-way one,
@@ -140,6 +149,30 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+/// The image bytes a document carries, keyed by the URL its AST refers to
+/// them by. Only DOCX input supplies any today; every other reader
+/// produces an empty bag.
+pub type Media = std::collections::HashMap<String, Vec<u8>>;
+
+/// Read a document together with the bytes of every image it embeds.
+///
+/// [`convert`] uses this, which is why `docx → docx` keeps its pictures.
+/// Callers that go through [`parse`] and [`render`] separately need it
+/// only when the images must survive.
+///
+/// # Errors
+///
+/// The same as [`parse`].
+pub fn parse_with_media(input: &[u8], from: Format) -> Result<(Pandoc, Media), Error> {
+    match from {
+        Format::Docx => ferrodoc_docx::read_docx_with_media(input).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
+        _ => Ok((parse(input, from)?, Media::new())),
+    }
+}
 
 /// Read a document.
 pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
@@ -213,8 +246,16 @@ pub fn render_with_media(
 }
 
 /// Convert a document from one format to another.
+///
+/// Images the input embeds are carried through, so `docx → docx` keeps
+/// its pictures. Images the input only *names* — a markdown `![](x.png)`
+/// — are still the caller's to resolve; see [`render_with_media`].
 pub fn convert(input: &[u8], from: Format, to: Format) -> Result<Vec<u8>, Error> {
-    render(&parse(input, from)?, to)
+    if !to.embeds_media() {
+        return render(&parse(input, from)?, to);
+    }
+    let (doc, media) = parse_with_media(input, from)?;
+    render_with_media(&doc, to, &|url| media.get(url).cloned())
 }
 
 #[cfg(test)]
@@ -234,6 +275,18 @@ mod tests {
         let html = String::from_utf8(html).unwrap();
         assert!(html.contains("<h1"), "{html}");
         assert!(html.contains("Body."), "{html}");
+    }
+
+    #[test]
+    fn only_docx_output_embeds_media() {
+        // What guards the memory: reading a document's images costs peak
+        // RSS proportional to them, and a `.docx` can hold a part that
+        // inflates a thousandfold. Widen this and `docx -> markdown`
+        // starts paying for pictures it will never write.
+        assert!(Format::Docx.embeds_media());
+        for format in [Format::Markdown, Format::Gfm, Format::Html, Format::Json, Format::Plain] {
+            assert!(!format.embeds_media(), "{format} does not embed image bytes");
+        }
     }
 
     #[test]
@@ -279,6 +332,34 @@ mod tests {
         assert!(gfm.contains("| North | 120 |"), "{gfm}");
         let md = String::from_utf8(convert(&docx, Format::Docx, Format::Markdown).unwrap()).unwrap();
         assert!(!md.contains('|'), "{md}");
+    }
+
+    #[test]
+    fn images_survive_docx_to_docx() {
+        // A `.docx` is the one input that carries its pictures inside
+        // itself, so it is the one conversion that can keep them without
+        // the caller resolving anything.
+        let png: &[u8] = &[
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
+            0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0, 0, b'I',
+            b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
+        ];
+        let doc = parse(b"![alt](pic.png)\n", Format::Markdown).unwrap();
+        let first = render_with_media(&doc, Format::Docx, &|url| {
+            (url == "pic.png").then(|| png.to_vec())
+        })
+        .unwrap();
+
+        let (_, media) = parse_with_media(&first, Format::Docx).unwrap();
+        assert_eq!(media.len(), 1, "the reader hands back what the package holds");
+
+        let second = convert(&first, Format::Docx, Format::Docx).unwrap();
+        let (_, again) = parse_with_media(&second, Format::Docx).unwrap();
+        assert_eq!(again.values().next().map(Vec::as_slice), Some(png));
+
+        // A reader with nothing to carry hands back an empty bag rather
+        // than making the caller ask which formats have one.
+        assert!(parse_with_media(b"# t\n", Format::Markdown).unwrap().1.is_empty());
     }
 
     #[test]

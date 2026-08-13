@@ -565,6 +565,12 @@ fn fuzz_run(seeds: &[Vec<u8>], iters: u32, seed: u64) -> (u32, u32) {
         } else {
             refused += 1;
         }
+        // The media path decompresses parts the plain read never touches.
+        if ferrodoc_docx::read_docx_with_media(&input).is_ok() {
+            ok += 1;
+        } else {
+            refused += 1;
+        }
         // Then as text, for the readers that take one.
         if let Ok(text) = std::str::from_utf8(&input) {
             if ferrodoc_markdown::read_commonmark(text).is_ok() {

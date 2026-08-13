@@ -74,6 +74,7 @@ pub fn write_docx_with_media(
     part("word/styles.xml", STYLES)?;
     part("word/numbering.xml", &w.numbering())?;
     part("word/footnotes.xml", &w.footnotes_part())?;
+    part("word/_rels/footnotes.xml.rels", &w.footnotes_rels())?;
     // `part` borrows the zip; the media parts are written directly.
     #[expect(dropping_references, reason = "releases the borrow on `zip`")]
     drop(&part);
@@ -214,7 +215,21 @@ impl Writer<'_> {
             ),
             Block::Table(table) => self.without_numbering(|w| w.table(table)),
             Block::Figure(_, caption, blocks) => {
-                let mut out = self.blocks(blocks);
+                // The figure's own paragraphs carry `CaptionedFigure`, not
+                // the ordinary body style. Pandoc's reader keys the pair on
+                // it: an `ImageCaption` paragraph after anything else makes
+                // it drop the picture, so a captioned figure written the
+                // plain way survives a round trip here and vanishes the
+                // moment pandoc reads it.
+                let mut out = String::new();
+                for block in blocks {
+                    match block {
+                        Block::Plain(inlines) | Block::Para(inlines) => {
+                            out.push_str(&self.paragraph("CaptionedFigure", inlines));
+                        }
+                        other => out.push_str(&self.block(other)),
+                    }
+                }
                 out.push_str(&self.caption_paragraphs(caption, "ImageCaption"));
                 out
             }
@@ -623,6 +638,23 @@ impl Writer<'_> {
 
     // --- generated parts ---
 
+    /// The relationships of `footnotes.xml`.
+    ///
+    /// A footnote body draws its link and image ids from the same counter
+    /// the document body does, and a relationship id resolves against the
+    /// rels of the part that *uses* it. Declaring the same set here is
+    /// what makes an image inside a footnote resolvable at all — without
+    /// it the picture sits in the package unreachable, and Word shows a
+    /// broken frame.
+    fn footnotes_rels(&self) -> String {
+        let mut out = String::new();
+        out.push_str(XML_DECL);
+        out.push_str(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
+        self.relation_entries(&mut out);
+        out.push_str("</Relationships>");
+        out
+    }
+
     fn document_rels(&self) -> String {
         let mut out = String::new();
         out.push_str(XML_DECL);
@@ -643,6 +675,14 @@ impl Writer<'_> {
             );
             let _ = external;
         }
+        self.relation_entries(&mut out);
+        out.push_str("</Relationships>");
+        out
+    }
+
+    /// One `<Relationship>` per link and image, numbered as the body
+    /// referenced them.
+    fn relation_entries(&self, out: &mut String) {
         for (index, relation) in self.relations.iter().enumerate() {
             let id = RELS_BASE + index + 1;
             match relation {
@@ -664,8 +704,6 @@ impl Writer<'_> {
                 }
             }
         }
-        out.push_str("</Relationships>");
-        out
     }
 
     /// The content types part, which must declare every media extension
@@ -723,7 +761,10 @@ impl Writer<'_> {
     fn footnotes_part(&self) -> String {
         let mut out = String::new();
         out.push_str(XML_DECL);
-        out.push_str(r#"<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>"#);
+        // The same namespaces `document.xml` declares: a footnote may
+        // hold a link or a picture, and an unbound `r:`/`wp:`/`a:`/`pic:`
+        // prefix makes the part malformed and the package unopenable.
+        out.push_str(r#"<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>"#);
         for (index, body) in self.footnotes.iter().enumerate() {
             let _ = write!(
                 out,
@@ -987,6 +1028,7 @@ const STYLES: &str = concat!(
     r#"<w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/></w:style>"#,
     r#"<w:style w:type="paragraph" w:styleId="Author"><w:name w:val="Author"/><w:basedOn w:val="Normal"/></w:style>"#,
     r#"<w:style w:type="paragraph" w:styleId="Date"><w:name w:val="Date"/><w:basedOn w:val="Normal"/></w:style>"#,
+    r#"<w:style w:type="paragraph" w:styleId="CaptionedFigure"><w:name w:val="Captioned Figure"/><w:basedOn w:val="Normal"/></w:style>"#,
     r#"<w:style w:type="paragraph" w:styleId="ImageCaption"><w:name w:val="Image Caption"/><w:basedOn w:val="Normal"/></w:style>"#,
     r#"<w:style w:type="paragraph" w:styleId="TableCaption"><w:name w:val="Table Caption"/><w:basedOn w:val="Normal"/></w:style>"#,
     r#"<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/></w:style>"#,
@@ -1009,6 +1051,170 @@ const STYLES: &str = concat!(
 mod tests {
     use super::*;
     use crate::read_docx;
+
+    /// Pandoc's reader keys a figure on the `CaptionedFigure` style of
+    /// the paragraph before the caption. Written any other way it drops
+    /// the picture, and nothing here would notice: our own round trip is
+    /// fine, and the package is valid. So the style is asserted where it
+    /// stands, in the order the two paragraphs must appear.
+    #[test]
+    fn a_figure_carries_the_style_pandoc_reads_it_by() {
+        let doc = Pandoc::new(vec![Block::Figure(
+            Attr::default(),
+            Caption {
+                short: None,
+                blocks: vec![Block::Plain(vec![Inline::Str("caption".to_owned())])],
+            },
+            vec![Block::Plain(vec![Inline::Image(
+                Attr::default(),
+                Vec::new(),
+                Target { url: "f.png".to_owned(), title: String::new() },
+            )])],
+        )]);
+        let bytes = write_docx_with_media(&doc, &|_| Some(swatch())).expect("writable");
+        let styles = ids(&entry(&bytes, "word/document.xml"), "w:pStyle w:val=\"");
+        assert_eq!(styles, ["CaptionedFigure", "ImageCaption"]);
+    }
+
+    /// A relationship id resolves against the rels of the part that uses
+    /// it, so every id a part references must be declared there. A
+    /// footnote draws its ids from the same counter the body does, and
+    /// for a while `footnotes.xml` referenced ids only `document.xml`
+    /// declared: the picture sat in the package unreachable.
+    #[test]
+    fn every_relationship_a_part_uses_is_declared_in_its_own_rels() {
+        let doc = Pandoc::new(vec![
+            Block::Para(vec![
+                Inline::Link(
+                    Attr::default(),
+                    vec![Inline::Str("body link".to_owned())],
+                    Target { url: "https://example.com".to_owned(), title: String::new() },
+                ),
+                Inline::Note(vec![Block::Para(vec![
+                    Inline::Image(
+                        Attr::default(),
+                        Vec::new(),
+                        Target { url: "n.png".to_owned(), title: String::new() },
+                    ),
+                    Inline::Link(
+                        Attr::default(),
+                        vec![Inline::Str("note link".to_owned())],
+                        Target { url: "https://example.org".to_owned(), title: String::new() },
+                    ),
+                ])]),
+            ]),
+            Block::Para(vec![Inline::Image(
+                Attr::default(),
+                Vec::new(),
+                Target { url: "b.png".to_owned(), title: String::new() },
+            )]),
+            // A figure, so the styles it needs are exercised too.
+            Block::Figure(
+                Attr::default(),
+                Caption {
+                    short: None,
+                    blocks: vec![Block::Plain(vec![Inline::Str("caption".to_owned())])],
+                },
+                vec![Block::Plain(vec![Inline::Image(
+                    Attr::default(),
+                    Vec::new(),
+                    Target { url: "f.png".to_owned(), title: String::new() },
+                )])],
+            ),
+        ]);
+        let bytes = write_docx_with_media(&doc, &|_| Some(swatch())).expect("writable");
+
+        // Every XML part must parse, prefixes bound. A part that names a
+        // relationship it never declared the namespace for is malformed,
+        // and a malformed part is a package no reader will open — which
+        // an id-string comparison alone would not notice.
+        for part in xml_parts(&bytes) {
+            let text = entry(&bytes, &part);
+            crate::xml::parse(&text).unwrap_or_else(|e| panic!("{part} is malformed: {e}"));
+            for prefix in used_prefixes(&text) {
+                assert!(
+                    text.contains(&format!("xmlns:{prefix}=")),
+                    "{part} uses the {prefix}: prefix without binding it"
+                );
+            }
+        }
+
+        // Every style a part names must be declared, or Word renders the
+        // paragraph unstyled and a reader matching by name sees nothing.
+        let styles = entry(&bytes, "word/styles.xml");
+        for part in ["word/document.xml", "word/footnotes.xml"] {
+            for style in ids(&entry(&bytes, part), "w:pStyle w:val=\"") {
+                assert!(
+                    styles.contains(&format!("w:styleId=\"{style}\"")),
+                    "{part} uses the {style} style, which styles.xml does not declare"
+                );
+            }
+        }
+
+        for part in ["word/document.xml", "word/footnotes.xml"] {
+            let used = ids(&entry(&bytes, part), "r:id=\"");
+            let used: Vec<String> = used
+                .into_iter()
+                .chain(ids(&entry(&bytes, part), "r:embed=\""))
+                .collect();
+            assert!(!used.is_empty(), "{part} references no relationship at all");
+            let rels = entry(&bytes, &format!("word/_rels/{}.rels", part.trim_start_matches("word/")));
+            let declared = ids(&rels, "Id=\"");
+            for id in used {
+                assert!(declared.contains(&id), "{part} uses {id}, which its rels do not declare");
+            }
+        }
+    }
+
+    /// Every XML part in the package, rels included.
+    fn xml_parts(bytes: &[u8]) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        (0..archive.len())
+            .filter_map(|i| {
+                let name = archive.by_index(i).ok()?.name().to_owned();
+                matches!(name.rsplit('.').next(), Some("xml" | "rels")).then_some(name)
+            })
+            .collect()
+    }
+
+    /// Every namespace prefix used on an element or attribute name.
+    fn used_prefixes(xml: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for tag in xml.split('<').skip(1) {
+            let tag = tag.trim_start_matches('/');
+            for token in tag.split(['>', ' ', '\t']).filter(|t| !t.is_empty()) {
+                let name = token.split('=').next().unwrap_or(token);
+                if let Some((prefix, _)) = name.split_once(':')
+                    && !prefix.is_empty()
+                    && prefix != "xmlns"
+                    && prefix != "xml"
+                    && prefix.chars().all(|c| c.is_ascii_alphanumeric())
+                    && !out.contains(&prefix.to_owned())
+                {
+                    out.push(prefix.to_owned());
+                }
+            }
+        }
+        out
+    }
+
+    fn entry(bytes: &[u8], name: &str) -> String {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        let mut file = archive.by_name(name).unwrap_or_else(|_| panic!("no {name}"));
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut file, &mut text).expect("readable");
+        text
+    }
+
+    /// Every value of an attribute spelled `prefix`, e.g. `r:embed="`.
+    fn ids(xml: &str, prefix: &str) -> Vec<String> {
+        xml.match_indices(prefix)
+            .filter_map(|(at, _)| {
+                let rest = &xml[at + prefix.len()..];
+                rest.find('"').map(|end| rest[..end].to_owned())
+            })
+            .collect()
+    }
 
     /// A 64x32 PNG whose pixels do not matter, only its header.
     fn swatch() -> Vec<u8> {

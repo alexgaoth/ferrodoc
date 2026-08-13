@@ -97,6 +97,7 @@ cargo install --path crates/ferrodoc     # installs the `ferrodoc` binary
 
 ```sh
 ferrodoc README.md -o readme.html        # formats inferred from extensions
+ferrodoc report.docx -o copy.docx        # DOCX in, DOCX out — keeps its images
 ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out — keeps tables
 ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table syntax
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout

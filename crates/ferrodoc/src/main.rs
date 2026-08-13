@@ -137,8 +137,15 @@ fn run() -> Result<(), String> {
         .and_then(std::path::Path::parent)
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_owned();
-    let doc = ferrodoc::parse(&bytes, from).map_err(|e| e.to_string())?;
-    let converted = ferrodoc::render_with_media(&doc, to, &|url| std::fs::read(base.join(url)).ok())
+    // Only when the output can hold them: a document's images can be far
+    // larger than its text, and reading them to throw them away is how a
+    // `docx -> markdown` conversion runs a machine out of memory.
+    let (doc, embedded) = if to.embeds_media() {
+        ferrodoc::parse_with_media(&bytes, from).map_err(|e| e.to_string())?
+    } else {
+        (ferrodoc::parse(&bytes, from).map_err(|e| e.to_string())?, ferrodoc::Media::new())
+    };
+    let converted = ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
         .map_err(|e| e.to_string())?;
 
     if let Some(path) = &output {
@@ -152,6 +159,25 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+/// Where an image's bytes come from: the input package first, then a file
+/// of that name beside the document.
+///
+/// That order matters. A `.docx` names its pictures by part path, so a
+/// file called `media/image1.png` sitting next to the document is a
+/// different picture entirely — preferring it would silently swap one
+/// image for another.
+fn resolve<'a>(
+    embedded: &'a ferrodoc::Media,
+    base: &'a std::path::Path,
+) -> impl Fn(&str) -> Option<Vec<u8>> + 'a {
+    move |url| {
+        embedded
+            .get(url)
+            .cloned()
+            .or_else(|| std::fs::read(base.join(url)).ok())
+    }
+}
+
 fn format(name: &str) -> Result<Format, String> {
     Format::parse(name).ok_or_else(|| {
         format!(
@@ -159,4 +185,32 @@ fn format(name: &str) -> Result<Format, String> {
             Format::NAMES.join(", ")
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The package wins over a same-named file on disk. Nothing else in
+    /// the workspace exercises `main.rs`, and swapping the two silently
+    /// embeds the wrong picture.
+    #[test]
+    fn the_package_outranks_a_file_of_the_same_name() {
+        let dir = std::env::temp_dir().join("ferrodoc-resolve-test");
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        std::fs::write(dir.join("pic.png"), b"from disk").expect("writable");
+
+        let mut embedded = ferrodoc::Media::new();
+        embedded.insert("pic.png".to_owned(), b"from the package".to_vec());
+        assert_eq!(resolve(&embedded, &dir)("pic.png").as_deref(), Some(&b"from the package"[..]));
+
+        // ...and the disk is still the fallback for what the package
+        // never held, which is how `![](x.png)` in markdown resolves.
+        assert_eq!(
+            resolve(&ferrodoc::Media::new(), &dir)("pic.png").as_deref(),
+            Some(&b"from disk"[..])
+        );
+        assert!(resolve(&ferrodoc::Media::new(), &dir)("absent.png").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

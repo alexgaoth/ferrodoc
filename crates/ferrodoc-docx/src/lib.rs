@@ -133,9 +133,37 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// The image bytes a document carries, keyed by the URL its AST refers to
+/// them by — exactly the string [`write_docx_with_media`]'s resolver is
+/// asked for, so a bag from one document feeds straight into writing
+/// another.
+pub type Media = HashMap<String, Vec<u8>>;
+
 /// Read a DOCX document into a [`Pandoc`] AST equivalent to pandoc's docx
 /// reader output.
+///
+/// The AST names each image by its part path but does not carry the bytes;
+/// use [`read_docx_with_media`] when the images have to survive.
 pub fn read_docx(bytes: &[u8]) -> Result<Pandoc, Error> {
+    read(bytes, false).map(|(doc, _)| doc)
+}
+
+/// Read a DOCX document together with the bytes of every image it embeds.
+///
+/// Without this a `docx → docx` conversion silently loses its pictures:
+/// the AST records where an image *was*, and the package it came from is
+/// the only thing that knows what it held.
+///
+/// # Errors
+///
+/// The same as [`read_docx`]. A referenced part that is missing from the
+/// archive is left out of the bag rather than failing the read — the
+/// document is still readable, and the writer falls back to alt text.
+pub fn read_docx_with_media(bytes: &[u8]) -> Result<(Pandoc, Media), Error> {
+    read(bytes, true)
+}
+
+fn read(bytes: &[u8], want_media: bool) -> Result<(Pandoc, Media), Error> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| Error::Zip(e.to_string()))?;
     let mut part = |name: &str| -> Option<String> {
@@ -148,20 +176,28 @@ pub fn read_docx(bytes: &[u8]) -> Result<Pandoc, Error> {
     let numbering = part("word/numbering.xml");
     let rels = part("word/_rels/document.xml.rels");
     let footnotes = part("word/footnotes.xml");
+    let footnote_rels = part("word/_rels/footnotes.xml.rels");
     let endnotes = part("word/endnotes.xml");
+    let endnote_rels = part("word/_rels/endnotes.xml.rels");
     let styles = part("word/styles.xml");
 
     let document = xml::parse(&document)?;
     let body = document.child("body").ok_or(Error::MissingPart("w:body"))?;
+    let rels = rels.as_deref().map(xml::parse).transpose()?;
+    let footnote_rels = footnote_rels.as_deref().map(xml::parse).transpose()?;
+    let endnote_rels = endnote_rels.as_deref().map(xml::parse).transpose()?;
+    // Every part's images, because a picture inside a note is declared by
+    // that note's relationship table, not the document's.
+    let images: HashSet<String> = [&rels, &footnote_rels, &endnote_rels]
+        .into_iter()
+        .flatten()
+        .flat_map(image_targets)
+        .collect();
     let ctx = Ctx {
         numbering: numbering.as_deref().map(xml::parse).transpose()?,
-        rels: rels
-            .as_deref()
-            .map(xml::parse)
-            .transpose()?
-            .as_ref()
-            .map(parse_rels)
-            .unwrap_or_default(),
+        rels: rels.as_ref().map(parse_rels).unwrap_or_default(),
+        footnote_rels: footnote_rels.as_ref().map(parse_rels).unwrap_or_default(),
+        endnote_rels: endnote_rels.as_ref().map(parse_rels).unwrap_or_default(),
         footnotes: footnotes.as_deref().map(xml::parse).transpose()?,
         endnotes: endnotes.as_deref().map(xml::parse).transpose()?,
         styles: styles
@@ -174,12 +210,168 @@ pub fn read_docx(bytes: &[u8]) -> Result<Pandoc, Error> {
         text_width: text_width(body),
     };
     let mut state = State::default();
-    Ok(ctx.document(body, &mut state))
+    let doc = ctx.document(body, &mut state);
+
+    let mut media = Media::new();
+    if want_media {
+        // Driven by the AST rather than by the relationship table: this
+        // collects exactly the parts the writer will ask for, and cannot
+        // pick up a header's logo or an embedded spreadsheet.
+        let mut urls = Vec::new();
+        collect_image_urls(&doc.blocks, &mut urls);
+        for url in urls {
+            if media.contains_key(&url) || !images.contains(&url) {
+                continue;
+            }
+            // A part named but missing is not an error: the document is
+            // still readable and the writer falls back to alt text.
+            if let Ok(mut file) = archive.by_name(&part_path(&url)) {
+                let mut bytes = Vec::new();
+                if file.read_to_end(&mut bytes).is_ok() {
+                    media.insert(url, bytes);
+                }
+            }
+        }
+    }
+    Ok((doc, media))
+}
+
+/// The archive entry a relationship target names.
+///
+/// OPC allows three spellings and Word writes all of them: relative to the
+/// declaring part (`media/x.png`, and `word/document.xml` is that part),
+/// package-absolute (`/word/media/x.png`), and relative with `..`
+/// (`../word/media/x.png`). Reserved characters are percent-encoded in the
+/// target and literal in the entry name. Getting any of these wrong loses
+/// a picture silently, which is the whole defect this exists to close.
+fn part_path(url: &str) -> String {
+    let (mut segments, rest) = match url.strip_prefix('/') {
+        Some(absolute) => (Vec::new(), absolute),
+        None => (vec!["word".to_owned()], url),
+    };
+    // Decoded first, then resolved: an escape that spells a separator or a
+    // dot segment is one, and doing it the other way round leaves a path
+    // that matches no entry.
+    for segment in rest.split('/').map(percent_decode) {
+        for segment in segment.split('/') {
+            match segment {
+                "" | "." => {}
+                ".." => {
+                    segments.pop();
+                }
+                segment => segments.push(segment.to_owned()),
+            }
+        }
+    }
+    segments.join("/")
+}
+
+/// Decode `%XX` escapes, leaving anything malformed as written.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| (b as char).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(hi), Some(lo)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push(u8::try_from(hi * 16 + lo).unwrap_or(b'?'));
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| text.to_owned())
+}
+
+/// Every image URL in the document. The order is unspecified — callers
+/// key by the URL, not by position. Iterative: a document nests as deeply
+/// as its containers do.
+fn collect_image_urls(blocks: &[Block], out: &mut Vec<String>) {
+    let mut blocks: Vec<&Block> = blocks.iter().rev().collect();
+    let mut inlines: Vec<&Inline> = Vec::new();
+    while let Some(block) = blocks.pop() {
+        match block {
+            Block::Plain(is) | Block::Para(is) | Block::Header(_, _, is) => {
+                inlines.extend(is.iter().rev());
+            }
+            Block::LineBlock(lines) => inlines.extend(lines.iter().flatten().rev()),
+            Block::BlockQuote(bs) | Block::Div(_, bs) => blocks.extend(bs.iter().rev()),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                blocks.extend(items.iter().flatten().rev());
+            }
+            Block::DefinitionList(items) => {
+                for (term, definitions) in items {
+                    inlines.extend(term.iter().rev());
+                    blocks.extend(definitions.iter().flatten().rev());
+                }
+            }
+            Block::Figure(_, caption, bs) => {
+                blocks.extend(caption.blocks.iter().rev());
+                blocks.extend(bs.iter().rev());
+            }
+            Block::Table(table) => {
+                blocks.extend(table.caption.blocks.iter().rev());
+                for row in table_rows(table) {
+                    blocks.extend(row.cells.iter().flat_map(|c| c.blocks.iter()).rev());
+                }
+            }
+            Block::CodeBlock(..) | Block::RawBlock(..) | Block::HorizontalRule => {}
+        }
+        while let Some(inline) = inlines.pop() {
+            match inline {
+                Inline::Image(_, alt, target) => {
+                    out.push(target.url.clone());
+                    inlines.extend(alt.iter().rev());
+                }
+                Inline::Emph(is)
+                | Inline::Strong(is)
+                | Inline::Strikeout(is)
+                | Inline::Superscript(is)
+                | Inline::Subscript(is)
+                | Inline::SmallCaps(is)
+                | Inline::Underline(is)
+                | Inline::Span(_, is)
+                | Inline::Quoted(_, is)
+                | Inline::Cite(_, is)
+                | Inline::Link(_, is, _) => inlines.extend(is.iter().rev()),
+                Inline::Note(bs) => blocks.extend(bs.iter().rev()),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Every row of a table, head, bodies and foot alike.
+fn table_rows(table: &Table) -> impl Iterator<Item = &Row> {
+    table
+        .head
+        .rows
+        .iter()
+        .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+        .chain(&table.foot.rows)
 }
 
 fn parse_rels(rels: &Node) -> HashMap<String, String> {
     rels.children_named("Relationship")
         .filter_map(|r| Some((r.attr("Id")?.to_owned(), r.attr("Target")?.to_owned())))
+        .collect()
+}
+
+/// The targets of the relationships that declare themselves images.
+///
+/// The bag is restricted to these, so a document whose picture reference
+/// resolves to something else — a crafted package can point a `blip` at
+/// `comments.xml` — cannot make the reader load an arbitrary part.
+fn image_targets(rels: &Node) -> HashSet<String> {
+    rels.children_named("Relationship")
+        .filter(|r| r.attr("Type").is_some_and(|t| t.ends_with("/image")))
+        .filter_map(|r| r.attr("Target").map(str::to_owned))
         .collect()
 }
 
@@ -233,6 +425,20 @@ struct State {
     depth: usize,
     /// Footnote ids currently being expanded, to break reference cycles.
     open_notes: HashSet<String>,
+    /// Which part the runs being read belong to. A relationship id is
+    /// resolved against the rels of the part that *uses* it, and a
+    /// Word-written package numbers each part's relationships from one —
+    /// so the same `rId5` names a different picture in each.
+    part: Part,
+}
+
+/// The part a run belongs to, for resolving its relationship ids.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Part {
+    #[default]
+    Document,
+    Footnotes,
+    Endnotes,
 }
 
 /// The deepest container nesting converted. Real documents nest a handful
@@ -330,6 +536,8 @@ fn plain_text(inlines: &[Inline]) -> String {
 struct Ctx {
     numbering: Option<Node>,
     rels: HashMap<String, String>,
+    footnote_rels: HashMap<String, String>,
+    endnote_rels: HashMap<String, String>,
     footnotes: Option<Node>,
     endnotes: Option<Node>,
     styles: HashMap<String, (String, Option<String>)>,
@@ -1275,7 +1483,7 @@ impl Ctx {
                     let relationship = node.attr("r:id");
                     let fragment = node.attr("w:anchor");
                     let url = match (relationship, fragment) {
-                        (Some(id), fragment) => match self.rels.get(id) {
+                        (Some(id), fragment) => match self.rels(state).get(id) {
                             Some(target) => match fragment {
                                 Some(fragment) => format!("{target}#{fragment}"),
                                 None => target.clone(),
@@ -1346,7 +1554,7 @@ impl Ctx {
                     }
                 }
                 "drawing" => {
-                    if let Some(img) = self.image(node) {
+                    if let Some(img) = self.image(node, state) {
                         tokens.push(img);
                     }
                 }
@@ -1414,9 +1622,21 @@ impl Ctx {
         stack(&modifiers, tokens)
     }
 
-    fn image(&self, drawing: &Node) -> Option<Inline> {
+    /// The relationships of the part currently being read. A package
+    /// that declares none for its notes — ferrodoc's own output before
+    /// this was understood, and any writer that shares one table — falls
+    /// back to the document's, which is what resolved them before.
+    fn rels(&self, state: &State) -> &HashMap<String, String> {
+        match state.part {
+            Part::Footnotes if !self.footnote_rels.is_empty() => &self.footnote_rels,
+            Part::Endnotes if !self.endnote_rels.is_empty() => &self.endnote_rels,
+            _ => &self.rels,
+        }
+    }
+
+    fn image(&self, drawing: &Node, state: &State) -> Option<Inline> {
         let blip = find_descendant(drawing, "blip")?;
-        let target = self.rels.get(blip.attr("r:embed")?)?;
+        let target = self.rels(state).get(blip.attr("r:embed")?)?;
         let docpr = find_descendant(drawing, "docPr");
         let alt = docpr.and_then(|d| d.attr("descr")).unwrap_or_default();
         let title = docpr.and_then(|d| d.attr("title")).unwrap_or_default();
@@ -1455,7 +1675,12 @@ impl Ctx {
             return None;
         }
         // Pandoc does not rebuild lists inside notes.
+        let outer = std::mem::replace(
+            &mut state.part,
+            if element == "footnote" { Part::Footnotes } else { Part::Endnotes },
+        );
         let blocks = self.blocks(note, state, false);
+        state.part = outer;
         state.open_notes.remove(&format!("{element}{id}"));
         Some(Inline::Note(blocks))
     }
@@ -1915,6 +2140,311 @@ fn trim_paragraph(mut inlines: Vec<Inline>) -> Vec<Inline> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A one-pixel PNG, embedded and read back out.
+    #[test]
+    fn media_survives_a_round_trip_through_the_package() {
+        let png: &[u8] = &[
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
+            0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0, 0, b'I',
+            b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
+        ];
+        let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
+            Attr::default(),
+            vec![Inline::Str("alt".to_owned())],
+            Target { url: "pic.png".to_owned(), title: String::new() },
+        )])]);
+        let bytes = write_docx_with_media(&doc, &|url| {
+            (url == "pic.png").then(|| png.to_vec())
+        })
+        .expect("writable");
+
+        let (back, media) = read_docx_with_media(&bytes).expect("readable");
+        // The reader names the image by its part path; whatever that is,
+        // the bag must be keyed by the same string the writer will ask
+        // for, so the two compose without the caller translating.
+        let url = image_url(&back).expect("an image came back");
+        assert_eq!(media.get(&url).map(Vec::as_slice), Some(png), "keyed by {url}");
+
+        // ...which is what makes `docx -> docx` keep its picture.
+        let again = write_docx_with_media(&back, &|u| media.get(u).cloned()).expect("writable");
+        let (_, still) = read_docx_with_media(&again).expect("readable");
+        assert_eq!(still.values().next().map(Vec::as_slice), Some(png));
+
+        // Reading without the bag costs nothing and yields nothing.
+        assert_eq!(read_docx(&bytes).expect("readable").blocks, back.blocks);
+
+        // A part the document names but the archive does not hold leaves
+        // the read succeeding and the bag short — the writer falls back
+        // to alt text, which is a document, where an error is nothing.
+        let stripped = without_part(&bytes, &format!("word/{url}"));
+        let (still, empty) = read_docx_with_media(&stripped).expect("still readable");
+        assert!(empty.is_empty(), "a missing part is not an error");
+        assert_eq!(still.blocks, back.blocks);
+    }
+
+    #[test]
+    fn only_an_image_relationship_can_pull_a_part_into_the_bag() {
+        let bytes = one_image_docx();
+        // A package whose picture reference resolves to something that is
+        // not an image — hand-crafted, but nothing stops a real one — must
+        // not make the reader load that part. Retyping the relationship
+        // is the whole difference.
+        let retyped = rewrite_rels(&bytes, |rels| {
+            rels.replace("/relationships/image", "/relationships/comments")
+        });
+        let (_, media) = read_docx_with_media(&retyped).expect("readable");
+        assert!(media.is_empty(), "loaded a part no image relationship named");
+
+        // The package-absolute spelling of a target is legal OPC, and
+        // naming the same part that way must still find it.
+        let absolute = rewrite_rels(&bytes, |rels| rels.replace("Target=\"media/", "Target=\"/word/media/"));
+        let (_, media) = read_docx_with_media(&absolute).expect("readable");
+        assert_eq!(media.len(), 1, "an absolute target names the same part");
+    }
+
+    #[test]
+    fn a_note_resolves_its_relationships_against_its_own_part() {
+        let doc = Pandoc::new(vec![Block::Para(vec![Inline::Note(vec![Block::Para(vec![
+            Inline::Image(
+                Attr::default(),
+                Vec::new(),
+                Target { url: "n.png".to_owned(), title: String::new() },
+            ),
+        ])])])]);
+        let bytes = write_docx_with_media(&doc, &|_| Some(one_pixel_png())).expect("writable");
+
+        // A Word-written package numbers each part's relationships from
+        // one, so the same id names a different picture in each. Pointing
+        // the note's id somewhere else must move the note's picture.
+        let split = rebuild(&bytes, |name, content| {
+            let text = String::from_utf8_lossy(content).into_owned();
+            Some(match name {
+                "word/_rels/footnotes.xml.rels" => {
+                    text.replace("Target=\"media/image1.png\"", "Target=\"media/note.png\"")
+                        .into_bytes()
+                }
+                _ => content.to_vec(),
+            })
+        });
+        assert_eq!(image_url(&read_docx(&split).expect("readable")).as_deref(), Some("media/note.png"));
+
+        // Pandoc writes an *empty* `footnotes.xml.rels` and declares the
+        // note's image in the document's, which is why it loses its own
+        // footnote pictures. Falling back keeps those documents working.
+        let empty = rebuild(&bytes, |name, content| {
+            Some(match name {
+                "word/_rels/footnotes.xml.rels" => br#"<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>"#.to_vec(),
+                _ => content.to_vec(),
+            })
+        });
+        assert_eq!(
+            image_url(&read_docx(&empty).expect("readable")).as_deref(),
+            Some("media/image1.png"),
+            "a part with no relationships of its own falls back to the document's"
+        );
+
+        // A Word package declares a note's picture *only* in the note's
+        // rels, so a bag built from the document's alone would miss it.
+        let note_only = rebuild(&bytes, |name, content| {
+            let text = String::from_utf8_lossy(content);
+            Some(match name {
+                "word/_rels/document.xml.rels" => {
+                    let start = text.find(r#"<Relationship Id="rId4""#).expect("the image rel");
+                    let end = text[start..].find("/>").expect("its end") + start + 2;
+                    format!("{}{}", &text[..start], &text[end..]).into_bytes()
+                }
+                _ => content.to_vec(),
+            })
+        });
+        let (_, media) = read_docx_with_media(&note_only).expect("readable");
+        assert_eq!(media.len(), 1, "a picture only the note's rels declare is still carried");
+    }
+
+    fn one_pixel_png() -> Vec<u8> {
+        vec![
+            0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R',
+            0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89, 0, 0, 0, 0, b'I',
+            b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
+        ]
+    }
+
+    #[test]
+    fn every_legal_spelling_of_a_target_names_the_same_part() {
+        // All four are what Word and pandoc actually write.
+        for spelling in [
+            "media/image1.png",
+            "/word/media/image1.png",
+            "../word/media/image1.png",
+            "media/./image1.png",
+        ] {
+            assert_eq!(part_path(spelling), "word/media/image1.png", "{spelling}");
+        }
+        // Reserved characters are escaped in the target and literal in
+        // the archive entry name.
+        assert_eq!(part_path("media/my%20image.png"), "word/media/my image.png");
+        assert_eq!(part_path("media/a%2Bb.png"), "word/media/a+b.png");
+        // Anything that is not an escape stays exactly as written.
+        assert_eq!(part_path("media/100%.png"), "word/media/100%.png");
+        assert_eq!(part_path("media/%zz.png"), "word/media/%zz.png");
+        // `..` past the root cannot escape anywhere: the result is looked
+        // up as a zip entry name, and an archive has no parent.
+        assert_eq!(part_path("../../../etc/passwd"), "etc/passwd");
+        // An escape that spells a separator or a dot segment is one, so
+        // it must be decoded before the `..` pass, not after.
+        assert_eq!(part_path("media/%2e%2e/other/x.png"), "word/other/x.png");
+        assert_eq!(part_path("media%2fx.png"), "word/media/x.png");
+    }
+
+    /// A minimal package holding exactly one embedded image.
+    fn one_image_docx() -> Vec<u8> {
+        let png = one_pixel_png();
+        let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
+            Attr::default(),
+            Vec::new(),
+            Target { url: "pic.png".to_owned(), title: String::new() },
+        )])]);
+        write_docx_with_media(&doc, &|_| Some(png.clone())).expect("writable")
+    }
+
+    /// The same archive with every relationship part rewritten. Every
+    /// one, because the writer declares the same set in each and a test
+    /// that changed only the document's would prove nothing.
+    fn rewrite_rels(bytes: &[u8], edit: impl Fn(&str) -> String) -> Vec<u8> {
+        rebuild(bytes, |name, content| {
+            if name.rsplit('.').next() == Some("rels") {
+                Some(edit(&String::from_utf8_lossy(content)).into_bytes())
+            } else {
+                Some(content.to_vec())
+            }
+        })
+    }
+
+    /// The same archive with one entry left out.
+    fn without_part(bytes: &[u8], drop: &str) -> Vec<u8> {
+        let dropped = drop.to_owned();
+        rebuild(bytes, move |name, content| {
+            (name != dropped).then(|| content.to_vec())
+        })
+    }
+
+    /// Copy an archive entry by entry, letting `keep` drop or rewrite each.
+    fn rebuild(bytes: &[u8], keep: impl Fn(&str, &[u8]) -> Option<Vec<u8>>) -> Vec<u8> {
+        let mut source = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for i in 0..source.len() {
+            let mut file = source.by_index(i).expect("an entry");
+            let name = file.name().to_owned();
+            let mut content = Vec::new();
+            file.read_to_end(&mut content).expect("readable");
+            if let Some(content) = keep(&name, &content) {
+                out.start_file(name, zip::write::SimpleFileOptions::default())
+                    .expect("writable");
+                std::io::Write::write_all(&mut out, &content).expect("writable");
+            }
+        }
+        out.finish().expect("finishable").into_inner()
+    }
+
+    fn image_url(doc: &Pandoc) -> Option<String> {
+        let mut urls = Vec::new();
+        collect_image_urls(&doc.blocks, &mut urls);
+        urls.into_iter().next()
+    }
+
+    #[test]
+    fn image_urls_are_collected_from_every_container() {
+        let image = |name: &str| {
+            Inline::Image(
+                Attr::default(),
+                Vec::new(),
+                Target { url: name.to_owned(), title: String::new() },
+            )
+        };
+        let doc = Pandoc::new(vec![
+            Block::Header(1, Attr::default(), vec![image("h.png")]),
+            Block::DefinitionList(vec![(
+                vec![image("dt.png")],
+                vec![vec![Block::Para(vec![image("dd.png")])]],
+            )]),
+            Block::Figure(
+                Attr::default(),
+                Caption {
+                    short: None,
+                    blocks: vec![Block::Plain(vec![image("fc.png")])],
+                },
+                vec![Block::Plain(vec![image("fb.png")])],
+            ),
+            Block::LineBlock(vec![vec![image("lb.png")]]),
+            Block::BlockQuote(vec![Block::Para(vec![image("q.png")])]),
+            Block::BulletList(vec![vec![Block::Plain(vec![image("l.png")])]]),
+            Block::Table(Box::new(Table {
+                attr: Attr::default(),
+                caption: Caption::default(),
+                colspecs: vec![ColSpec {
+                    alignment: Alignment::AlignDefault,
+                    width: ColWidth::ColWidthDefault,
+                }],
+                head: TableHead {
+                    attr: Attr::default(),
+                    rows: vec![Row {
+                        attr: Attr::default(),
+                        cells: vec![Cell {
+                            attr: Attr::default(),
+                            alignment: Alignment::AlignDefault,
+                            row_span: 1,
+                            col_span: 1,
+                            blocks: vec![Block::Plain(vec![image("t.png")])],
+                        }],
+                    }],
+                },
+                bodies: vec![TableBody {
+                    attr: Attr::default(),
+                    row_head_columns: 0,
+                    head: Vec::new(),
+                    body: vec![Row {
+                        attr: Attr::default(),
+                        cells: vec![Cell {
+                            attr: Attr::default(),
+                            alignment: Alignment::AlignDefault,
+                            row_span: 1,
+                            col_span: 1,
+                            blocks: vec![Block::Plain(vec![image("b.png")])],
+                        }],
+                    }],
+                }],
+                foot: TableFoot {
+                    attr: Attr::default(),
+                    rows: vec![Row {
+                        attr: Attr::default(),
+                        cells: vec![Cell {
+                            attr: Attr::default(),
+                            alignment: Alignment::AlignDefault,
+                            row_span: 1,
+                            col_span: 1,
+                            blocks: vec![Block::Plain(vec![image("f.png")])],
+                        }],
+                    }],
+                },
+            })),
+            Block::Para(vec![Inline::Note(vec![Block::Para(vec![image("n.png")])])]),
+            Block::Para(vec![Inline::Emph(vec![Inline::Link(
+                Attr::default(),
+                vec![image("e.png")],
+                Target::default(),
+            )])]),
+        ]);
+        let mut urls = Vec::new();
+        collect_image_urls(&doc.blocks, &mut urls);
+        urls.sort();
+        assert_eq!(
+            urls,
+            [
+                "b.png", "dd.png", "dt.png", "e.png", "f.png", "fb.png", "fc.png", "h.png",
+                "l.png", "lb.png", "n.png", "q.png", "t.png",
+            ]
+        );
+    }
 
     #[test]
     fn haskell_show_double_matches_pandoc() {

@@ -40,6 +40,7 @@ behind them.
 | DOCX writer | 643/652, with embedded PNG/JPEG/GIF and document metadata |
 | HTML reader | 631/657 identical; closes the Markdown ↔ AST ↔ HTML ↔ DOCX square |
 | GFM | reader 654/655 identical; writer 655/655 round-trip fidelity — **pandoc manages 589/655**. `docx → gfm` keeps its tables |
+| Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
 | Verifiability | CI on three platforms against pinned pandoc, wasm32 build, 500k-mutation fuzz per run, `COMPATIBILITY.md` |
 | Packaging | licences, crate metadata, tag-driven static binaries — everything except the irreversible steps |
 
@@ -52,19 +53,7 @@ docx → markdown: 8 MB / 365 MB / **3.5 GB**.
 
 ## Next, in order
 
-### 1. A media bag, so `docx → docx` keeps its images
-
-Verified: a DOCX with one image, round-tripped, comes out with no media part
-at all. Pandoc keeps it. The reader records the part *path* in `Target.url`
-and throws the bytes away, so the writer's resolver has nothing to resolve.
-
-- Expose the media on the read side (`read_docx_with_media`, mirroring
-  `write_docx_with_media`) so the bytes survive the AST.
-- Wire it through the facade so `convert` and the CLI carry media end to end.
-- Covers `docx → docx` and `docx → html`; the same bag is what a future
-  `--extract-media` would use.
-
-### 2. Bounded-memory DOCX reading
+### 1. Bounded-memory DOCX reading
 
 3.5 GB of peak RSS for a 4.3 MB `.docx` — roughly 800× the input, because the
 whole XML tree and the whole AST are live at once. Fine on a laptop, fatal in
@@ -80,7 +69,7 @@ pandoc is usable.
 Second-order, same area: `HTML → AST` is also superlinear (93 ms → 2.3 s
 across a 10× input). Worth a look once the DOCX path is done.
 
-### 3. `--standalone` HTML output
+### 2. `--standalone` HTML output
 
 The writer emits fragments. Anyone converting a document *for the web* — the
 obvious reason to want HTML — has to hand-write `<html>`, `<head>`, a charset
@@ -89,7 +78,7 @@ and a title around it. Pandoc's `--standalone` is one flag.
 - `<!doctype>`, `<html lang>`, charset, `<title>` from document metadata.
 - Optional CSS by path; no template language (that is a declared non-goal).
 
-### 4. Publish 0.1 — blocked on a decision, not on work
+### 3. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -98,7 +87,7 @@ version is still visible, so it needs an owner's go-ahead.
   `ferrodoc`.
 - Tag `v0.1.0` — the tag is what triggers the release build.
 
-### 5. PDF output — as a separate crate, not in the binary
+### 4. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -110,7 +99,7 @@ So: a separate `ferrodoc-pdf` crate, or a default-off feature shipping a
 second binary. Nobody who wants a small converter pays for a typesetter. Large
 work; not next.
 
-### 6. Python and Node bindings — blocked on evidence
+### 5. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.
