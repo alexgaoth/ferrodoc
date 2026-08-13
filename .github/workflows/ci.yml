@@ -71,6 +71,12 @@ jobs:
         run: ./target/release/ferrodoc-harness diff-write corpus --fail-under 90
       - name: markdown writer
         run: ./target/release/ferrodoc-harness diff-md corpus/commonmark-spec-0.31.2.json --fail-under 100
+      - name: GFM reader (corpus)
+        run: ./target/release/ferrodoc-harness diff-gfm corpus/gfm --fail-under 100
+      - name: GFM reader (spec)
+        run: ./target/release/ferrodoc-harness diff-gfm corpus/commonmark-spec-0.31.2.json --fail-under 99.8
+      - name: GFM writer
+        run: ./target/release/ferrodoc-harness diff-gfm-md corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
       - name: HTML reader
         run: ./target/release/ferrodoc-harness diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
 

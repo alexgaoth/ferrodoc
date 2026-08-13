@@ -29,15 +29,16 @@
 
 mod write;
 
-pub use write::write_markdown;
+pub use write::{write_gfm, write_markdown};
 
-use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue};
+use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue, TableAlignment};
 use comrak::{Arena, Options, parse_document};
 use ferrodoc_ast::{
-    Attr, Block, Format, Inline, ListAttributes, ListNumberDelim, ListNumberStyle, Pandoc,
-    Target,
+    Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Format, Inline, ListAttributes,
+    ListNumberDelim, ListNumberStyle, Pandoc, Row, Table, TableBody, TableFoot, TableHead, Target,
 };
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 /// A document this reader will not convert.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,17 +70,52 @@ impl std::error::Error for Error {}
 ///
 /// Returns [`Error::TooDeeplyNested`] for pathologically nested input.
 pub fn read_commonmark(input: &str) -> Result<Pandoc, Error> {
+    read(input, false)
+}
+
+/// Parse a `GitHub Flavored Markdown` document into a [`Pandoc`] AST.
+///
+/// On top of `CommonMark` this recognizes the five extensions the GFM
+/// specification defines — pipe tables, task list items, strikethrough and
+/// extended autolinks (the fifth, tag filtering, is off because pandoc's
+/// `gfm` does not apply it either) — plus the heading identifiers pandoc's
+/// `gfm_auto_identifiers` derives.
+///
+/// Pandoc's own `gfm` bundles further *pandoc* extensions that the GFM
+/// specification does not define — emoji shortcodes, footnotes, alerts,
+/// `$math$` and YAML metadata blocks. Those are not read here; see
+/// `COMPATIBILITY.md`.
+///
+/// # Errors
+///
+/// Returns [`Error::TooDeeplyNested`] for pathologically nested input.
+pub fn read_gfm(input: &str) -> Result<Pandoc, Error> {
+    read(input, true)
+}
+
+fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
     let prepared = preprocess(input);
     let src = Src::new(&prepared);
     let arena = Arena::new();
-    let root = parse_document(&arena, &prepared, &Options::default());
+    let mut options = Options::default();
+    if gfm {
+        options.extension.table = true;
+        options.extension.strikethrough = true;
+        options.extension.tasklist = true;
+        options.extension.autolink = true;
+    }
+    let root = parse_document(&arena, &prepared, &options);
     // Check the depth once, without recursing, and leave the conversion
     // itself exactly as shallow-document-shaped as it was: threading a
     // depth counter through every call measured ~8% slower.
     if tree_depth(root) > MAX_NESTING {
         return Err(Error::TooDeeplyNested);
     }
-    Ok(Pandoc::new(blocks(root.children(), &src, false)))
+    let mut blocks = blocks(root.children(), &src, false);
+    if gfm {
+        Identifiers::default().assign(&mut blocks);
+    }
+    Ok(Pandoc::new(blocks))
 }
 
 /// The deepest nesting in a parsed tree, computed iteratively so that
@@ -184,7 +220,103 @@ fn blocks<'a>(
     src: &Src,
     in_quote: bool,
 ) -> Vec<Block> {
-    nodes.filter_map(|n| block(n, src, in_quote)).collect()
+    let mut out = Vec::new();
+    for node in nodes {
+        // A list is the one node that can map to more than one block:
+        // pandoc's gfm reader treats task items as a different kind of
+        // list, so a plain item among them starts a new one.
+        let list = match node.data.borrow().value {
+            NodeValue::List(nl) => Some(nl),
+            _ => None,
+        };
+        if let Some(nl) = list {
+            out.extend(lists(node, &nl, src, in_quote));
+        } else if let Some(block) = block(node, src, in_quote) {
+            out.push(block);
+        }
+    }
+    out
+}
+
+/// Map one comrak list, splitting it wherever a task item meets a plain
+/// one — pandoc parses task items as a different kind of list, so a plain
+/// item among them starts a new one.
+///
+/// Each run's tightness is then its own, not the source list's: pandoc
+/// parses the runs separately from the start, so a run with no blank line
+/// inside it is tight even when the list it was cut from is loose.
+fn lists<'a>(
+    node: &'a AstNode<'a>,
+    nl: &comrak::nodes::NodeList,
+    src: &Src,
+    in_quote: bool,
+) -> Vec<Block> {
+    // Only bullet lists have task items in pandoc, so an ordered list is
+    // never split.
+    let mut runs: Vec<(bool, Vec<&'a AstNode<'a>>)> = Vec::new();
+    for item in node.children() {
+        let is_task = nl.list_type == ListType::Bullet
+            && matches!(item.data.borrow().value, NodeValue::TaskItem(_));
+        match runs.last_mut() {
+            Some((kind, nodes)) if *kind == is_task => nodes.push(item),
+            _ => runs.push((is_task, vec![item])),
+        }
+    }
+    let split = runs.len() > 1;
+    runs.into_iter()
+        .map(|(_, nodes)| {
+            let tight = nl.tight || (split && !is_loose(&nodes, src));
+            let items: Vec<Vec<Block>> = nodes
+                .iter()
+                .map(|item| {
+                    let mut item_blocks = blocks(item.children(), src, in_quote);
+                    if tight {
+                        for block in &mut item_blocks {
+                            if let Block::Para(inlines) = block {
+                                *block = Block::Plain(std::mem::take(inlines));
+                            }
+                        }
+                    }
+                    if let NodeValue::TaskItem(t) = item.data.borrow().value {
+                        prepend(&mut item_blocks, task_marker(t.symbol, nl.list_type), tight);
+                    }
+                    item_blocks
+                })
+                .collect();
+            match nl.list_type {
+                ListType::Bullet => Block::BulletList(items),
+                ListType::Ordered => Block::OrderedList(
+                    ListAttributes {
+                        start: i64::try_from(nl.start).unwrap_or(i64::MAX),
+                        style: ListNumberStyle::Decimal,
+                        delim: match nl.delimiter {
+                            ListDelimType::Period => ListNumberDelim::Period,
+                            ListDelimType::Paren => ListNumberDelim::OneParen,
+                        },
+                    },
+                    items,
+                ),
+            }
+        })
+        .collect()
+}
+
+/// Whether a run of list items is loose in `CommonMark`'s sense: a blank
+/// line between two items, or between two blocks inside one item. Read
+/// from the source rather than from comrak, whose flag describes the whole
+/// list — including blank lines that fall outside this run.
+fn is_loose<'a>(items: &[&'a AstNode<'a>], src: &Src) -> bool {
+    let blank_between = |a: &'a AstNode<'a>, b: &'a AstNode<'a>| {
+        let after = a.data.borrow().sourcepos.end.line;
+        let before = b.data.borrow().sourcepos.start.line;
+        // A blank line inside a container still carries its `>` markers.
+        (after + 1..before).any(|n| first_nonmarker_char(src.line(n)).is_none())
+    };
+    items.windows(2).any(|pair| blank_between(pair[0], pair[1]))
+        || items.iter().any(|item| {
+            let blocks: Vec<_> = item.children().collect();
+            blocks.windows(2).any(|pair| blank_between(pair[0], pair[1]))
+        })
 }
 
 fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> {
@@ -259,39 +391,207 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> 
             Some(Block::RawBlock(Format("html".to_owned()), literal))
         }
         NodeValue::ThematicBreak => Some(Block::HorizontalRule),
-        NodeValue::List(nl) => {
-            let items: Vec<Vec<Block>> = node
-                .children()
-                .map(|item| {
-                    let mut bs = blocks(item.children(), src, in_quote);
-                    if nl.tight {
-                        for b in &mut bs {
-                            if let Block::Para(is) = b {
-                                *b = Block::Plain(std::mem::take(is));
-                            }
-                        }
-                    }
-                    bs
-                })
-                .collect();
-            Some(match nl.list_type {
-                ListType::Bullet => Block::BulletList(items),
-                ListType::Ordered => Block::OrderedList(
-                    ListAttributes {
-                        start: i64::try_from(nl.start).unwrap_or(i64::MAX),
-                        style: ListNumberStyle::Decimal,
-                        delim: match nl.delimiter {
-                            ListDelimType::Period => ListNumberDelim::Period,
-                            ListDelimType::Paren => ListNumberDelim::OneParen,
-                        },
-                    },
-                    items,
-                ),
-            })
-        }
-        // Only core-CommonMark nodes occur with default comrak options; the
+        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments)))),
+        // Only core-CommonMark nodes occur with default comrak options, and
+        // the GFM extensions add exactly the ones handled above; the
         // differential harness would surface anything dropped here.
         _ => None,
+    }
+}
+
+/// The `☐`/`☒` a task list item contributes, as pandoc's gfm reader writes
+/// it. Pandoc recognizes task items in bullet lists only, so an ordered
+/// list keeps the literal brackets comrak consumed.
+fn task_marker(symbol: Option<char>, list_type: ListType) -> Vec<Inline> {
+    match (list_type, symbol) {
+        (ListType::Bullet, None) => vec![Inline::Str("\u{2610}".to_owned()), Inline::Space],
+        (ListType::Bullet, Some(_)) => vec![Inline::Str("\u{2612}".to_owned()), Inline::Space],
+        (_, None) => vec![
+            Inline::Str("[".to_owned()),
+            Inline::Space,
+            Inline::Str("]".to_owned()),
+            Inline::Space,
+        ],
+        (_, Some(c)) => vec![Inline::Str(format!("[{c}]")), Inline::Space],
+    }
+}
+
+/// Put `prefix` in front of an item's first line of text, opening a
+/// [`Block::Plain`] for it when the item starts with something that holds
+/// no inlines (an empty item, or one opening with a code block).
+fn prepend(item: &mut Vec<Block>, mut prefix: Vec<Inline>, tight: bool) {
+    let target = match item.first_mut() {
+        Some(Block::Plain(inlines) | Block::Para(inlines)) => Some(inlines),
+        _ => None,
+    };
+    // The single space after the marker is the one the source already
+    // spells. Where the content opens with its own — `- [ ]  two spaces`
+    // — or where there is no content at all, ours would be a second.
+    let doubled = target
+        .as_ref()
+        .is_none_or(|inlines| matches!(inlines.first(), None | Some(Inline::Space)));
+    if doubled {
+        while prefix.last() == Some(&Inline::Space) {
+            prefix.pop();
+        }
+    }
+    match target {
+        Some(inlines) => {
+            inlines.splice(..0, prefix);
+        }
+        // An item with no content at all still gets a block, and it is a
+        // paragraph exactly when the list around it is loose.
+        None => item.insert(0, if tight { Block::Plain(prefix) } else { Block::Para(prefix) }),
+    }
+}
+
+/// Map a GFM pipe table. comrak has already padded short rows and dropped
+/// cells past the column count, which is what pandoc does too, so the grid
+/// arrives rectangular.
+fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment]) -> Table {
+    let row = |n: &'a AstNode<'a>| Row {
+        attr: Attr::default(),
+        cells: n
+            .children()
+            .map(|c| {
+                let content = inlines(c.children());
+                Cell {
+                    attr: Attr::default(),
+                    alignment: Alignment::AlignDefault,
+                    row_span: 1,
+                    col_span: 1,
+                    blocks: if content.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![Block::Plain(content)]
+                    },
+                }
+            })
+            .collect(),
+    };
+    let mut head = Vec::new();
+    let mut body = Vec::new();
+    for child in node.children() {
+        if matches!(child.data.borrow().value, NodeValue::TableRow(true)) {
+            head.push(row(child));
+        } else {
+            body.push(row(child));
+        }
+    }
+    Table {
+        attr: Attr::default(),
+        caption: Caption::default(),
+        colspecs: alignments
+            .iter()
+            .map(|a| ColSpec {
+                alignment: match a {
+                    TableAlignment::Left => Alignment::AlignLeft,
+                    TableAlignment::Center => Alignment::AlignCenter,
+                    TableAlignment::Right => Alignment::AlignRight,
+                    TableAlignment::None => Alignment::AlignDefault,
+                },
+                width: ColWidth::ColWidthDefault,
+            })
+            .collect(),
+        head: TableHead { attr: Attr::default(), rows: head },
+        // Pandoc emits one body even when the table is nothing but its
+        // header row, so an empty `body` is still one empty `TableBody`.
+        bodies: vec![TableBody {
+            attr: Attr::default(),
+            row_head_columns: 0,
+            head: Vec::new(),
+            body,
+        }],
+        foot: TableFoot::default(),
+    }
+}
+
+/// Heading identifiers, handed out in document order the way pandoc's
+/// `gfm_auto_identifiers` does.
+///
+/// The name is a per-base counter, not a set of names already used: a
+/// heading whose own slug is `a-1` takes `a-1` even when an earlier `a`
+/// already produced it. Probed, because it looks like a bug and is not
+/// ours to fix — `# a` `# a` `# a-1` gives `a`, `a-1`, `a-1`.
+#[derive(Default)]
+struct Identifiers {
+    seen: HashMap<String, u32>,
+}
+
+impl Identifiers {
+    /// Assign identifiers to every heading, descending into the only
+    /// containers this reader can nest one in.
+    fn assign(&mut self, blocks: &mut [Block]) {
+        for block in blocks {
+            match block {
+                Block::Header(_, attr, inlines) => {
+                    let mut text = String::new();
+                    stringify(inlines, &mut text);
+                    attr.identifier = self.unique(&slug(&text));
+                }
+                Block::BlockQuote(inner) => self.assign(inner),
+                Block::BulletList(items) | Block::OrderedList(_, items) => {
+                    for item in items {
+                        self.assign(item);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn unique(&mut self, base: &str) -> String {
+        let count = self.seen.entry(base.to_owned()).or_insert(0);
+        let identifier = if *count == 0 {
+            base.to_owned()
+        } else {
+            format!("{base}-{count}")
+        };
+        *count += 1;
+        identifier
+    }
+}
+
+/// GitHub's slug: lowercase, drop everything that is not a word character,
+/// a hyphen or a space, and turn spaces into hyphens. Any whitespace
+/// counts, not just the ASCII space — pandoc slugs a heading holding a
+/// non-breaking space as `a-b`, not `ab`.
+fn slug(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            out.push('-');
+        } else if ch == '-' || ch == '_' || ch.is_alphanumeric() {
+            out.extend(ch.to_lowercase());
+        }
+    }
+    out
+}
+
+/// The plain text of an inline sequence, as pandoc's `stringify` produces
+/// it for identifiers: every kind of break is a space, and raw HTML and
+/// footnotes contribute nothing.
+fn stringify(inlines: &[Inline], out: &mut String) {
+    for inline in inlines {
+        match inline {
+            Inline::Str(text) | Inline::Code(_, text) | Inline::Math(_, text) => {
+                out.push_str(text);
+            }
+            Inline::Space | Inline::SoftBreak | Inline::LineBreak => out.push(' '),
+            Inline::RawInline(..) | Inline::Note(_) => {}
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => stringify(inner, out),
+        }
     }
 }
 
@@ -347,6 +647,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
         }
         NodeValue::Emph => out.push(Inline::Emph(inlines(node.children()))),
         NodeValue::Strong => out.push(Inline::Strong(inlines(node.children()))),
+        NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children()))),
         NodeValue::Link(l) => out.push(Inline::Link(
             Attr::default(),
             inlines(node.children()),
@@ -397,13 +698,189 @@ mod tests {
         serde_json::to_value(read_commonmark(md).expect("convertible")).unwrap()["blocks"].clone()
     }
 
+    fn gfm(md: &str) -> serde_json::Value {
+        serde_json::to_value(read_gfm(md).expect("convertible")).unwrap()["blocks"].clone()
+    }
+
+    /// Every heading's identifier, in document order.
+    fn ids(md: &str) -> Vec<String> {
+        read_gfm(md)
+            .expect("convertible")
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Header(_, attr, _) => Some(attr.identifier.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn gfm_constructs_are_off_in_commonmark() {
+        // The same input, read both ways: only `read_gfm` sees a table.
+        let table = "a|b\n-|-\n1|2\n";
+        assert_eq!(doc(table)[0]["t"], "Para");
+        assert_eq!(gfm(table)[0]["t"], "Table");
+        assert_eq!(doc("~~x~~\n")[0]["c"][0]["t"], "Str");
+        assert_eq!(gfm("~~x~~\n")[0]["c"][0]["t"], "Strikeout");
+        assert_eq!(doc("# a\n")[0]["c"][1][0], "");
+        assert_eq!(gfm("# a\n")[0]["c"][1][0], "a");
+    }
+
+    #[test]
+    fn table_rows_are_padded_and_truncated_to_the_column_count() {
+        let table = &gfm("a|b\n-|-\n1\n1|2|3\n")[0]["c"];
+        // Two colspecs, one head row, one body holding both data rows.
+        assert_eq!(table[2].as_array().unwrap().len(), 2);
+        let rows = &table[4][0][3];
+        assert_eq!(rows[0][1].as_array().unwrap().len(), 2);
+        assert_eq!(rows[1][1].as_array().unwrap().len(), 2);
+        // The padded cell holds no blocks at all, as pandoc's does.
+        assert_eq!(rows[0][1][1][4], serde_json::json!([]));
+    }
+
+    #[test]
+    fn table_alignment_comes_from_the_delimiter_row() {
+        let colspecs = &gfm("a|b|c|d\n:-|:-:|-:|-\n1|2|3|4\n")[0]["c"][2];
+        let names: Vec<&str> = colspecs
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c[0]["t"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["AlignLeft", "AlignCenter", "AlignRight", "AlignDefault"]);
+    }
+
+    #[test]
+    fn task_items_become_ballot_boxes_in_bullet_lists_only() {
+        assert_eq!(
+            gfm("- [ ] a\n- [x] b\n"),
+            serde_json::json!([{"t": "BulletList", "c": [
+                [{"t": "Plain", "c": [{"t": "Str", "c": "\u{2610}"}, {"t": "Space"}, {"t": "Str", "c": "a"}]}],
+                [{"t": "Plain", "c": [{"t": "Str", "c": "\u{2612}"}, {"t": "Space"}, {"t": "Str", "c": "b"}]}]
+            ]}])
+        );
+        // Pandoc has no task items in ordered lists, so comrak's are
+        // written back as the literal brackets it consumed.
+        assert_eq!(
+            gfm("1. [x] a\n")[0]["c"][1][0][0]["c"][0],
+            serde_json::json!({"t": "Str", "c": "[x]"})
+        );
+    }
+
+    #[test]
+    fn a_plain_item_among_task_items_starts_a_new_list() {
+        let blocks = gfm("- [ ] a\n- b\n- [ ] c\n");
+        assert_eq!(blocks.as_array().unwrap().len(), 3);
+        for block in blocks.as_array().unwrap() {
+            assert_eq!(block["t"], "BulletList");
+            assert_eq!(block["c"].as_array().unwrap().len(), 1);
+        }
+        // An ordered list has no task items, so it is never split.
+        assert_eq!(gfm("1. [ ] a\n2. b\n").as_array().unwrap().len(), 1);
+    }
+
+    /// Where this reader deliberately follows GitHub's `cmark-gfm` — the
+    /// implementation the format is named after — rather than pandoc's
+    /// stricter `commonmark-hs`. None of these can go in the corpus, which
+    /// is scored against pandoc; pinning them here is what keeps a future
+    /// change from moving one by accident. Each is listed in
+    /// `COMPATIBILITY.md` with the pandoc output beside it.
+    #[test]
+    fn deliberate_divergences_from_pandoc_hold() {
+        // A single tilde marks strikeout on GitHub; pandoc wants two.
+        assert_eq!(gfm("~x~\n")[0]["c"][0]["t"], "Strikeout");
+        // A pipe table may interrupt a paragraph; pandoc keeps one `Para`.
+        let interrupted = gfm("Some text:\n| a | b |\n|---|---|\n");
+        assert_eq!(interrupted.as_array().unwrap().len(), 2);
+        assert_eq!(interrupted[1]["t"], "Table");
+        // A plain line after a row is another row, not a new paragraph.
+        assert_eq!(gfm("| a |\n|---|\n| 1 |\nlazy\n").as_array().unwrap().len(), 1);
+        // An autolink inside link text stays text; pandoc nests a `Link`
+        // inside a `Link`, which no markdown grammar permits.
+        assert_eq!(
+            gfm("[http://e.com](http://e.com)\n")[0]["c"][0]["c"][1][0],
+            serde_json::json!({"t": "Str", "c": "http://e.com"})
+        );
+        // The link text of a `mailto:` autolink keeps its scheme; pandoc
+        // splits the scheme off into a preceding `Str`.
+        assert_eq!(
+            gfm("mailto:x@e.com\n")[0]["c"][0]["c"][1][0],
+            serde_json::json!({"t": "Str", "c": "mailto:x@e.com"})
+        );
+        // `www.` autolinks only at a word boundary; pandoc takes it after
+        // a dot as well.
+        assert_eq!(gfm("a.www.e.com\n")[0]["c"][0]["t"], "Str");
+        // Pandoc's `gfm` bundles a YAML metadata block; this does not.
+        assert_eq!(gfm("---\n---\n")[0]["t"], "HorizontalRule");
+    }
+
+    #[test]
+    fn heading_identifiers_follow_githubs_slug() {
+        assert_eq!(ids("# Foo, Bar & Baz!\n"), ["foo-bar--baz"]);
+        assert_eq!(ids("# a_b-c.d\n"), ["a_b-cd"]);
+        assert_eq!(ids("# \u{dc}n\u{ef}code \u{c4}\n"), ["\u{fc}n\u{ef}code-\u{e4}"]);
+        assert_eq!(ids("# `code` *em*\n"), ["code-em"]);
+        // Breaks are spaces, images contribute their alt text, and
+        // footnotes contribute nothing.
+        assert_eq!(ids("A b\nc d\n===\n"), ["a-b-c-d"]);
+        assert_eq!(ids("# ![alt](x) t\n"), ["alt-t"]);
+        // Any whitespace, not just the ASCII space.
+        assert_eq!(ids("# a\u{a0}b\n"), ["a-b"]);
+    }
+
+    #[test]
+    fn an_empty_task_item_has_no_space_after_its_box() {
+        assert_eq!(
+            gfm("- [ ]\n- [x] a\n"),
+            serde_json::json!([{"t": "BulletList", "c": [
+                [{"t": "Plain", "c": [{"t": "Str", "c": "\u{2610}"}]}],
+                [{"t": "Plain", "c": [{"t": "Str", "c": "\u{2612}"}, {"t": "Space"}, {"t": "Str", "c": "a"}]}]
+            ]}])
+        );
+    }
+
+    #[test]
+    fn each_run_of_a_split_list_works_out_its_own_tightness() {
+        // The list is loose in the source, but every run it splits into
+        // holds one item and no blank line, so pandoc calls each tight.
+        let blocks = gfm("- [ ] a\n\n- b\n\n- [x] c\n");
+        assert_eq!(blocks.as_array().unwrap().len(), 3);
+        for block in blocks.as_array().unwrap() {
+            assert_eq!(block["c"][0][0]["t"], "Plain");
+        }
+        // A run that is loose on its own stays loose.
+        assert_eq!(gfm("- [ ] a\n\n- [ ] b\n")[0]["c"][0][0]["t"], "Para");
+    }
+
+    #[test]
+    fn duplicate_identifiers_count_per_name_not_per_document() {
+        assert_eq!(ids("# a\n\n# a\n\n# a\n"), ["a", "a-1", "a-2"]);
+        // The counter is per base name, so a heading whose own slug is
+        // already taken repeats it — probed against pandoc, which does
+        // the same rather than searching for a free name.
+        assert_eq!(ids("# a\n\n# a\n\n# a-1\n\n# a\n"), ["a", "a-1", "a-1", "a-2"]);
+        // Headings inside containers share the document's counter.
+        assert_eq!(ids("# a\n"), ["a"]);
+        assert_eq!(
+            read_gfm("# a\n\n> # a\n").unwrap().blocks[1],
+            Block::BlockQuote(vec![Block::Header(
+                1,
+                Attr { identifier: "a-1".to_owned(), ..Attr::default() },
+                vec![Inline::Str("a".to_owned())],
+            )])
+        );
+    }
+
     #[test]
     fn pathological_nesting_is_refused_not_truncated() {
         let deep = ">".repeat(MAX_NESTING + 1);
         assert_eq!(read_commonmark(&deep), Err(Error::TooDeeplyNested));
+        assert_eq!(read_gfm(&deep), Err(Error::TooDeeplyNested));
         // A document at the limit still converts.
         let shallow = ">".repeat(10);
         assert!(read_commonmark(&shallow).is_ok());
+        assert!(read_gfm(&shallow).is_ok());
     }
 
     #[test]

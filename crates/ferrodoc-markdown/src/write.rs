@@ -1,33 +1,62 @@
-//! Markdown writer: renders the ferrodoc AST back to `CommonMark`.
+//! Markdown writer: renders the ferrodoc AST back to `CommonMark`, or to
+//! `GitHub Flavored Markdown` when the caller asks for it.
 //!
 //! The contract is semantic, not textual: what this emits must *re-read*
 //! to the document it was given. `ferrodoc-harness diff-md` checks exactly
-//! that, and it holds for all 652 `CommonMark` spec examples. Output is
-//! therefore escaped conservatively — a writer that emits `*` where the
-//! source meant a literal asterisk is silently lossy, and that is the only
-//! way a markdown writer really fails.
+//! that, and it holds for all 652 `CommonMark` spec examples;
+//! `diff-gfm-md` does the same for GFM. Output is therefore escaped
+//! conservatively — a writer that emits `*` where the source meant a
+//! literal asterisk is silently lossy, and that is the only way a markdown
+//! writer really fails.
 //!
 //! Known losses, all of them limits of the format rather than of this
 //! code:
 //!
 //! - `CommonMark` has no tables, footnotes or definition lists. Like
-//!   pandoc's `commonmark` writer, those degrade to their content.
+//!   pandoc's `commonmark` writer, those degrade to their content. GFM has
+//!   tables; use [`write_gfm`] for anything that has one.
+//! - A GFM pipe table keeps its grid and nothing else: extra head rows and
+//!   the foot become body rows, merged cells are expanded into separate
+//!   ones, a cell's blocks are flattened onto one line, the caption
+//!   follows as a paragraph, and column widths are dropped. Each is
+//!   stated in [`Writer::pipe_table`] and in `COMPATIBILITY.md`.
 //! - Emphasis directly inside emphasis needs `_`, which is not a delimiter
 //!   inside a word, so `foo*_bar_*baz` cannot be written.
 //! - Two ordered lists in a row that share a delimiter can only be kept
 //!   apart by a `<!-- -->` comment, which re-reads as a raw block.
 //! - An unterminated raw HTML block swallows the blank line that follows
 //!   it, so it absorbs whatever separator a container needs.
+//! - A hard break directly after a soft one has no spelling: the line it
+//!   would stand on holds nothing else, and a line holding only
+//!   whitespace ends the paragraph. It is written as a backslash break,
+//!   which keeps the paragraph whole and loses the soft break.
 
 use ferrodoc_ast::{
-    Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType,
+    Alignment, Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType, Row, Table,
 };
 use std::fmt::Write as _;
 
 /// Render a document as `CommonMark`.
 pub fn write_markdown(doc: &Pandoc) -> String {
+    render(doc, false)
+}
+
+/// Render a document as `GitHub Flavored Markdown`.
+///
+/// The difference from [`write_markdown`] is the four GFM constructs a
+/// document can actually carry: pipe tables, task list items,
+/// strikethrough, and the extra escaping bare URLs need so that text which
+/// merely looks like a link does not become one.
+///
+/// A table always keeps its grid. Everything a pipe table cannot express
+/// degrades in a stated way rather than silently: see the module docs.
+pub fn write_gfm(doc: &Pandoc) -> String {
+    render(doc, true)
+}
+
+fn render(doc: &Pandoc, gfm: bool) -> String {
     let mut out = String::new();
-    Writer::default().blocks(&mut out, &doc.blocks, "");
+    Writer { gfm, ..Writer::default() }.blocks(&mut out, &doc.blocks, "");
     // Exactly one trailing newline, like every other writer here.
     while out.ends_with("\n\n") {
         out.pop();
@@ -47,6 +76,8 @@ struct Writer {
     /// Whether the emphasis about to be written must use `_` rather than
     /// `*`, because its parent is emphasis that wraps nothing else.
     alternate: bool,
+    /// Whether the GFM extensions are available.
+    gfm: bool,
 }
 
 impl Writer {
@@ -122,14 +153,7 @@ impl Writer {
                     self.blocks(out, blocks, &inner);
                 }
             }
-            Block::BulletList(items) => {
-                // Fixed for the whole list: a marker that changed between
-                // items would split the list in two.
-                let bullet = if self.bullet { '*' } else { '-' };
-                let saved = self.bullet;
-                self.list(out, items, prefix, move |_| format!("{bullet} "));
-                self.bullet = saved;
-            }
+            Block::BulletList(items) => self.bullet_list(out, items, prefix),
             Block::OrderedList(attrs, items) => {
                 // CommonMark numbers every ordered list; the roman and
                 // alphabetic styles have no syntax and degrade to numbers.
@@ -181,8 +205,116 @@ impl Writer {
                 }
             }
             Block::Div(_, blocks) => self.blocks(out, blocks, prefix),
+            // A table with no columns has no pipe-table spelling at all —
+            // not even an empty one — so it degrades like the rest.
+            Block::Table(table) if self.gfm && !table.colspecs.is_empty() => {
+                self.pipe_table(out, table, prefix);
+            }
             Block::Figure(..) | Block::Table(_) => self.unrepresentable(out, block, prefix),
         }
+    }
+
+    fn bullet_list(&mut self, out: &mut String, items: &[Vec<Block>], prefix: &str) {
+        // The bullet is fixed for the whole list: a marker that changed
+        // between items would split the list in two.
+        let bullet = if self.bullet { '*' } else { '-' };
+        let saved = self.bullet;
+        // A `☐`/`☒` opening an item is what a GFM task item reads as, so
+        // write it back as one. Both spellings re-read to the same
+        // document; the brackets are the one a reader recognizes.
+        let tasks: Vec<Option<bool>> = if self.gfm {
+            items.iter().map(|item| task_state(item)).collect()
+        } else {
+            vec![None; items.len()]
+        };
+        if tasks.iter().any(Option::is_some) {
+            let stripped: Vec<Vec<Block>> = items
+                .iter()
+                .zip(&tasks)
+                .map(|(item, task)| {
+                    if task.is_some() { without_task_marker(item) } else { item.clone() }
+                })
+                .collect();
+            self.list(out, &stripped, prefix, |index| match tasks[index] {
+                Some(true) => format!("{bullet} [x] "),
+                Some(false) => format!("{bullet} [ ] "),
+                None => format!("{bullet} "),
+            });
+        } else {
+            self.list(out, items, prefix, move |_| format!("{bullet} "));
+        }
+        self.bullet = saved;
+    }
+
+    /// Write a table as a GFM pipe table.
+    ///
+    /// The grid always survives; what a pipe table cannot hold degrades in
+    /// one of four stated ways. Extra head rows and the foot become body
+    /// rows, because GFM has exactly one header row and no foot. A cell
+    /// spanning columns is expanded into that many cells, the content in
+    /// the first and the rest empty, and a cell spanning rows simply
+    /// leaves the rows below it short, which pads them out — a pipe
+    /// table's columns are positional and cannot merge. A cell's blocks
+    /// are flattened onto one line, joined by spaces, because a row is one
+    /// line. The caption follows the table as an ordinary paragraph.
+    fn pipe_table(&mut self, out: &mut String, table: &Table, prefix: &str) {
+        let columns = table.colspecs.len();
+        if columns == 0 {
+            return;
+        }
+        let mut rows = table.head.rows.iter();
+        let header = rows.next();
+        let body = rows
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows);
+
+        // The header row decides the column count, so it must exist even
+        // when the table has no head: an empty one still reads back as a
+        // table of the right shape.
+        let cells = header.map(|row| self.cells(row, columns)).unwrap_or_default();
+        push_line(out, prefix, &pipe_row(&cells, columns));
+        let rule: Vec<String> = table
+            .colspecs
+            .iter()
+            .map(|spec| match spec.alignment {
+                Alignment::AlignLeft => ":---".to_owned(),
+                Alignment::AlignCenter => ":---:".to_owned(),
+                Alignment::AlignRight => "---:".to_owned(),
+                Alignment::AlignDefault => "----".to_owned(),
+            })
+            .collect();
+        push_line(out, prefix, &pipe_row(&rule, columns));
+        for row in body {
+            let cells = self.cells(row, columns);
+            push_line(out, prefix, &pipe_row(&cells, columns));
+        }
+        if !table.caption.blocks.is_empty() {
+            push_line(out, prefix, "");
+            self.blocks(out, &table.caption.blocks, prefix);
+        }
+    }
+
+    /// One row's cells, rendered to single-line text with spans expanded.
+    fn cells(&mut self, row: &Row, columns: usize) -> Vec<String> {
+        let mut out: Vec<String> = Vec::with_capacity(columns);
+        for cell in &row.cells {
+            let mut text = String::new();
+            for block in &cell.blocks {
+                let mut piece = String::new();
+                self.block(&mut piece, block, "");
+                let piece = piece.trim_end_matches('\n');
+                if !text.is_empty() && !piece.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(piece);
+            }
+            out.push(cell_text(&text));
+            // A spanned cell occupies further columns that carry nothing.
+            for _ in 1..cell.col_span.max(1) {
+                out.push(String::new());
+            }
+        }
+        out
     }
 
     /// Blocks `CommonMark` has no syntax for: emit their content rather
@@ -233,15 +365,20 @@ impl Writer {
         marker: impl Fn(usize) -> String,
     ) {
         // A list whose items are all `Plain` is tight: no blank lines.
+        // A pipe table needs one anyway — it cannot interrupt a paragraph.
         let tight = items
             .iter()
-            .all(|item| item.iter().all(|b| !matches!(b, Block::Para(_))));
+            .all(|item| item.iter().all(|b| !matches!(b, Block::Para(_) | Block::Table(_))));
         for (index, item) in items.iter().enumerate() {
             if index > 0 && !tight {
                 push_line(out, prefix, "");
             }
             let marker = marker(index);
-            let indent = " ".repeat(marker.chars().count());
+            // Continuation lines line up under the item's *content*, which
+            // starts after the list marker — `- `, `10. `, and for a task
+            // item still `- `, since `[x] ` is already content. Every
+            // marker ends its list part at its first space.
+            let indent = " ".repeat(marker.find(' ').map_or(marker.len(), |i| i + 1));
             // A tight list's items must not contain blank lines: one
             // would make the whole list loose when it is read back, and
             // every `Plain` inside would come back as a `Para`.
@@ -281,6 +418,35 @@ impl Writer {
         text
     }
 
+    /// Write GFM strikeout, never emitting a `~~` that touches another.
+    ///
+    /// `~~` is a flanking delimiter: whitespace just inside it stops the
+    /// run opening or closing, so the spaces move outside. And two runs
+    /// that meet make four tildes — not a delimiter at all but a tilde
+    /// code fence, which swallows the rest of the document. Where that
+    /// would happen the markup degrades to its content instead.
+    fn strikeout(&mut self, out: &mut String, inner: &[Inline]) {
+        let text = self.inlines(inner);
+        let body = text.trim_matches([' ', '\n']);
+        // A tilde at either edge is strikeout immediately inside
+        // strikeout; nesting with text in between spells out fine.
+        if body.is_empty() || body.starts_with('~') || body.ends_with('~') {
+            out.push_str(&text);
+            return;
+        }
+        let lead = &text[..text.len() - text.trim_start_matches([' ', '\n']).len()];
+        let tail = &text[text.trim_end_matches([' ', '\n']).len()..];
+        if lead.is_empty() && out.ends_with("~~") {
+            // Reopening the previous run keeps every word struck. The two
+            // nodes arrive back as one, which is what pandoc's own HTML
+            // reader makes of adjacent `<del>` anyway.
+            out.truncate(out.len() - 2);
+            let _ = write!(out, "{body}~~{tail}");
+        } else {
+            let _ = write!(out, "{lead}~~{body}~~{tail}");
+        }
+    }
+
     fn inlines(&mut self, inlines: &[Inline]) -> String {
         let mut out = String::new();
         for inline in inlines {
@@ -291,14 +457,23 @@ impl Writer {
 
     fn inline(&mut self, out: &mut String, inline: &Inline) {
         match inline {
-            Inline::Str(text) => escape_text(out, text),
+            Inline::Str(text) => escape_text(out, text, self.gfm),
             Inline::Space => out.push(' '),
             // A soft break is a real line break in the source, and this
             // writer never re-wraps, so keeping it is both faithful and
             // free. Callers that cannot hold a newline flatten it back.
             Inline::SoftBreak => out.push('\n'),
-            // Two trailing spaces before the newline is a hard break.
-            Inline::LineBreak => out.push_str("  \n"),
+            // Two trailing spaces before the newline is a hard break —
+            // but on an otherwise empty line they are just whitespace, so
+            // the line reads as a blank one and splits the paragraph in
+            // two. A backslash is a hard break wherever it stands.
+            Inline::LineBreak => {
+                if out.is_empty() || out.ends_with('\n') {
+                    out.push_str("\\\n");
+                } else {
+                    out.push_str("  \n");
+                }
+            }
             // Emphasis wrapping nothing but emphasis must alternate
             // delimiters: `**foo**` is strong, not emphasis in emphasis.
             Inline::Emph(inner) => {
@@ -312,6 +487,7 @@ impl Writer {
                 let text = self.nested(inner, false);
                 let _ = write!(out, "**{text}**");
             }
+            Inline::Strikeout(inner) if self.gfm => self.strikeout(out, inner),
             // No CommonMark syntax: keep the text, drop the styling.
             Inline::Strikeout(inner)
             | Inline::Superscript(inner)
@@ -358,7 +534,7 @@ impl Writer {
                     MathType::InlineMath => "$",
                     MathType::DisplayMath => "$$",
                 };
-                escape_text(out, &format!("{delimiter}{text}{delimiter}"));
+                escape_text(out, &format!("{delimiter}{text}{delimiter}"), self.gfm);
             }
             Inline::Link(_, inner, target) => {
                 let text = self.inlines(inner);
@@ -389,6 +565,64 @@ impl Writer {
             }
         }
     }
+}
+
+/// Whether a list item opens with the `☐`/`☒` a GFM task item reads as,
+/// and if so whether it is checked.
+fn task_state(item: &[Block]) -> Option<bool> {
+    let (Block::Plain(inlines) | Block::Para(inlines)) = item.first()? else {
+        return None;
+    };
+    match inlines.first()? {
+        Inline::Str(marker) if marker == "\u{2610}" => Some(false),
+        Inline::Str(marker) if marker == "\u{2612}" => Some(true),
+        _ => None,
+    }
+}
+
+/// The item without the `☐`/`☒` and the space after it, which the `[ ]`
+/// marker replaces.
+fn without_task_marker(item: &[Block]) -> Vec<Block> {
+    let mut item = item.to_vec();
+    if let Some(Block::Plain(inlines) | Block::Para(inlines)) = item.first_mut() {
+        let drop = if matches!(inlines.get(1), Some(Inline::Space)) { 2 } else { 1 };
+        inlines.drain(..drop);
+    }
+    item
+}
+
+/// A pipe-table row, padded with empty cells or truncated to exactly
+/// `columns` of them — the delimiter row sets the width and a row that
+/// disagrees would not be part of the table.
+fn pipe_row(cells: &[String], columns: usize) -> String {
+    let mut line = String::from("|");
+    for index in 0..columns {
+        let _ = write!(line, " {} |", cells.get(index).map_or("", String::as_str));
+    }
+    line
+}
+
+/// Cell content reduced to what fits between two pipes: a bare `|` would
+/// end the cell and a newline would end the row. A reader unescapes `\|`
+/// before it parses the cell, so the escape survives even inside a code
+/// span.
+fn cell_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut backslashes = 0usize;
+    for ch in text.chars() {
+        match ch {
+            // Text has already been escaped once; escaping it again would
+            // leave a literal backslash and a live cell divider behind.
+            // Only the pipes markup carries — inside a code span, a raw
+            // inline, a URL — arrive here bare.
+            '|' if backslashes % 2 == 1 => out.push('|'),
+            '|' => out.push_str("\\|"),
+            '\n' => out.push(' '),
+            ch => out.push(ch),
+        }
+        backslashes = if ch == '\\' { backslashes + 1 } else { 0 };
+    }
+    out
 }
 
 /// A link destination, wrapped in angle brackets when it needs them.
@@ -462,16 +696,46 @@ fn digits_since_line_start(out: &str) -> bool {
     before.len() < out.len() && (before.is_empty() || before.ends_with('\n'))
 }
 
+/// Whether `ch`, appended here, would complete one of GFM's autolink
+/// triggers: a `www.` host, an `http`/`https`/`ftp` scheme, or the `@` of
+/// an email address.
+fn opens_autolink(out: &str, ch: char) -> bool {
+    let before = |word: &str| {
+        out.strip_suffix(word)
+            .is_some_and(|rest| !rest.ends_with(|c: char| c.is_alphanumeric()))
+    };
+    match ch {
+        ':' => before("http") || before("https") || before("ftp"),
+        '.' => before("www"),
+        // Anything the local part of an address may end with.
+        '@' => out.ends_with(|c: char| c.is_alphanumeric() || matches!(c, '.' | '+' | '-' | '_')),
+        _ => false,
+    }
+}
+
 /// Escape text so it re-reads as itself.
 ///
 /// Conservative on purpose: characters that could open markup are always
 /// escaped, and line-leading characters that could start a block are
 /// escaped too. Everything else is left alone so the output stays readable.
-fn escape_text(out: &mut String, text: &str) {
+fn escape_text(out: &mut String, text: &str, gfm: bool) {
     for ch in text.chars() {
         let at_line_start = out.is_empty() || out.ends_with('\n');
         match ch {
             '\\' | '*' | '_' | '[' | ']' | '<' | '>' | '`' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            // GFM adds two delimiters that mean something anywhere: `~~`
+            // opens strikeout, and `|` divides a table row.
+            '~' | '|' if gfm => {
+                out.push('\\');
+                out.push(ch);
+            }
+            // Text that merely looks like a link becomes one under GFM's
+            // extended autolinks. One escape inside the trigger stops
+            // that, and the reader gives the character back.
+            ':' | '.' | '@' if gfm && opens_autolink(out, ch) => {
                 out.push('\\');
                 out.push(ch);
             }
@@ -520,6 +784,243 @@ mod tests {
             );
         }
         first.blocks == second.blocks
+    }
+
+    /// The same property for GFM: what `write_gfm` emits must re-read to
+    /// the document it was given.
+    fn gfm_round_trips(markdown: &str) -> bool {
+        let first = crate::read_gfm(markdown).expect("convertible");
+        let written = write_gfm(&first);
+        let second = crate::read_gfm(&written).expect("convertible");
+        if first.blocks != second.blocks {
+            eprintln!("--- input:\n{markdown}\n--- written:\n{written}");
+            eprintln!(
+                "--- first: {:?}\n--- second: {:?}",
+                first.blocks, second.blocks
+            );
+        }
+        first.blocks == second.blocks
+    }
+
+    fn gfm_of(markdown: &str) -> String {
+        write_gfm(&crate::read_gfm(markdown).expect("convertible"))
+    }
+
+    #[test]
+    fn gfm_constructs_round_trip() {
+        assert!(gfm_round_trips("| a | b |\n|:--|--:|\n| 1 | 2 |\n"));
+        assert!(gfm_round_trips("| a | b |\n| - | - |\n"));
+        assert!(gfm_round_trips("| a |\n|---|\n| `x\\|y` |\n"));
+        assert!(gfm_round_trips("- [ ] a\n- [x] b\n"));
+        assert!(gfm_round_trips("- [ ] a\n  - [x] deep\n- [ ] b\n"));
+        assert!(gfm_round_trips("- [ ] a\n- plain\n- [x] c\n"));
+        assert!(gfm_round_trips("~~gone~~ and ~~*both*~~\n"));
+        assert!(gfm_round_trips("> | q | r |\n> |---|---|\n> | 1 | 2 |\n"));
+    }
+
+    #[test]
+    fn text_that_looks_like_a_link_stays_text() {
+        // GFM autolinks bare URLs, so a `Str` holding one has to be
+        // broken or the round trip gains a `Link` the document never had.
+        assert!(gfm_round_trips("http\\://example.com\n"));
+        assert!(gfm_round_trips("www\\.example.com\n"));
+        assert!(gfm_round_trips("user\\@example.com\n"));
+        assert!(gfm_round_trips("a \\~\\~b\\~\\~ c and p\\|q\n"));
+        // ...and an escape is only spent where the trigger is real.
+        assert_eq!(gfm_of("ratio 3\\:1\n"), "ratio 3:1\n");
+    }
+
+    #[test]
+    fn a_hard_break_on_an_empty_line_does_not_split_the_paragraph() {
+        // `  \n` is only whitespace on a line of its own, so the line
+        // reads as blank and one paragraph comes back as two. A backslash
+        // is a hard break wherever it stands. The `SoftBreak` before it
+        // has no spelling at all and is the residual loss.
+        let doc = Pandoc::new(vec![Block::Para(vec![
+            Inline::Str("a".to_owned()),
+            Inline::SoftBreak,
+            Inline::LineBreak,
+            Inline::Str("b".to_owned()),
+        ])]);
+        for written in [write_gfm(&doc), write_markdown(&doc)] {
+            assert_eq!(written, "a\n\\\nb\n");
+            assert_eq!(crate::read_gfm(&written).unwrap().blocks.len(), 1);
+        }
+    }
+
+    #[test]
+    fn a_ballot_box_is_written_back_as_a_task_item() {
+        // The round-trip gates cannot see this: `- ☐ a` re-reads to the
+        // same AST as `- [ ] a`. What differs is what GitHub renders — a
+        // checkbox, or a literal box character.
+        assert_eq!(
+            gfm_of("- [ ] a\n- [x] b\n- plain\n"),
+            "- [ ] a\n- [x] b\n\n* plain\n"
+        );
+        // Without the extensions it stays the character the AST holds.
+        assert_eq!(
+            write_markdown(&crate::read_gfm("- [ ] a\n").unwrap()),
+            "- \u{2610} a\n"
+        );
+    }
+
+    #[test]
+    fn strikeout_never_emits_a_tilde_fence() {
+        // Two `~~` runs that meet make four tildes, which opens a code
+        // fence and swallows the rest of the document. Neither nesting
+        // nor adjacency may produce one.
+        let doc = Pandoc::new(vec![
+            Block::Para(vec![
+                Inline::Strikeout(vec![Inline::Strikeout(vec![Inline::Str("deep".to_owned())])]),
+                Inline::Space,
+                Inline::Str("tail".to_owned()),
+            ]),
+            Block::Para(vec![
+                Inline::Strikeout(vec![Inline::Str("a".to_owned())]),
+                Inline::Strikeout(vec![Inline::Str("b".to_owned())]),
+            ]),
+        ]);
+        let written = write_gfm(&doc);
+        assert_eq!(written, "~~deep~~ tail\n\n~~ab~~\n");
+        // Every word survives, struck, and nothing after it is swallowed.
+        let back = crate::read_gfm(&written).unwrap();
+        assert_eq!(back.blocks.len(), 2);
+        assert!(matches!(back.blocks[1], Block::Para(ref is) if is.len() == 1));
+    }
+
+    #[test]
+    fn gfm_degrades_rather_than_drops() {
+        // A table with no columns has no pipe-table spelling; its content
+        // must still come out.
+        let empty_grid = Pandoc::new(vec![Block::Table(Box::new(Table {
+            colspecs: Vec::new(),
+            ..one_by_one()
+        }))]);
+        assert_eq!(write_gfm(&empty_grid), "a\n");
+        // `~~` will not open or close against whitespace, so the spaces
+        // move outside the delimiters instead of stranding them.
+        let spaced = Pandoc::new(vec![Block::Para(vec![
+            Inline::Strikeout(vec![Inline::Str("a".to_owned()), Inline::Space]),
+            Inline::Str("b".to_owned()),
+        ])]);
+        assert_eq!(write_gfm(&spaced), "~~a~~ b\n");
+        // Content that is only whitespace cannot carry the markup at all,
+        // so it degrades exactly as it does without the extensions.
+        let blank = Pandoc::new(vec![Block::Para(vec![Inline::Strikeout(vec![Inline::Space])])]);
+        assert_eq!(write_gfm(&blank), write_markdown(&blank));
+    }
+
+    #[test]
+    fn a_pipe_in_a_cell_is_escaped_exactly_once() {
+        // Both escapers can want the same `|`: the inline one, so a
+        // paragraph of pipes cannot become a table, and the cell one, so
+        // the cell does not end early. cmark-gfm's splitter is lenient
+        // enough to survive a doubled escape, but `p\\|q` is not what the
+        // document says.
+        assert_eq!(
+            gfm_of("| a |\n|---|\n| p\\|q |\n"),
+            "| a |\n| ---- |\n| p\\|q |\n"
+        );
+    }
+
+    #[test]
+    fn a_table_in_a_list_item_gets_the_blank_line_it_needs() {
+        // A pipe table cannot interrupt a paragraph, so an item holding a
+        // `Plain` and a table must be written loose. Only a converted
+        // document reaches this shape; GFM source cannot express it.
+        let doc = Pandoc::new(vec![Block::BulletList(vec![vec![
+            Block::Plain(vec![Inline::Str("item".to_owned())]),
+            Block::Table(Box::new(one_by_one())),
+        ]])]);
+        let written = write_gfm(&doc);
+        assert_eq!(written, "- item\n\n  | a |\n  | ---- |\n");
+        assert!(matches!(
+            crate::read_gfm(&written).unwrap().blocks[0],
+            Block::BulletList(ref items) if matches!(items[0][1], Block::Table(_))
+        ));
+    }
+
+    /// A table whose only content is one header cell reading `a`.
+    fn one_by_one() -> Table {
+        Table {
+            attr: ferrodoc_ast::Attr::default(),
+            caption: ferrodoc_ast::Caption::default(),
+            colspecs: vec![ferrodoc_ast::ColSpec {
+                alignment: Alignment::AlignDefault,
+                width: ferrodoc_ast::ColWidth::ColWidthDefault,
+            }],
+            head: ferrodoc_ast::TableHead {
+                attr: ferrodoc_ast::Attr::default(),
+                rows: vec![Row {
+                    attr: ferrodoc_ast::Attr::default(),
+                    cells: vec![cell(1, vec![Block::Plain(vec![Inline::Str("a".to_owned())])])],
+                }],
+            },
+            bodies: vec![ferrodoc_ast::TableBody {
+                attr: ferrodoc_ast::Attr::default(),
+                row_head_columns: 0,
+                head: Vec::new(),
+                body: Vec::new(),
+            }],
+            foot: ferrodoc_ast::TableFoot::default(),
+        }
+    }
+
+    #[test]
+    fn tables_keep_their_grid_whatever_the_cells_hold() {
+        // A cell's blocks are flattened onto the row's single line.
+        let table = Block::Table(Box::new(Table {
+            attr: ferrodoc_ast::Attr::default(),
+            caption: ferrodoc_ast::Caption {
+                short: None,
+                blocks: vec![Block::Para(vec![Inline::Str("Cap".to_owned())])],
+            },
+            colspecs: vec![
+                ferrodoc_ast::ColSpec {
+                    alignment: Alignment::AlignDefault,
+                    width: ferrodoc_ast::ColWidth::ColWidthDefault,
+                };
+                3
+            ],
+            head: ferrodoc_ast::TableHead::default(),
+            bodies: vec![ferrodoc_ast::TableBody {
+                attr: ferrodoc_ast::Attr::default(),
+                row_head_columns: 0,
+                head: Vec::new(),
+                body: vec![Row {
+                    attr: ferrodoc_ast::Attr::default(),
+                    cells: vec![
+                        cell(2, vec![Block::Para(vec![Inline::Str("wide".to_owned())])]),
+                        cell(
+                            1,
+                            vec![
+                                Block::Para(vec![Inline::Str("one".to_owned())]),
+                                Block::Para(vec![Inline::Str("two".to_owned())]),
+                            ],
+                        ),
+                    ],
+                }],
+            }],
+            foot: ferrodoc_ast::TableFoot::default(),
+        }));
+        let doc = Pandoc::new(vec![table]);
+        assert_eq!(
+            write_gfm(&doc),
+            "|  |  |  |\n| ---- | ---- | ---- |\n| wide |  | one two |\n\nCap\n"
+        );
+        // CommonMark has no table syntax, so the same document degrades to
+        // its cell contents there — that is the loss GFM mode exists for.
+        assert!(!write_markdown(&doc).contains('|'));
+    }
+
+    fn cell(col_span: i64, blocks: Vec<Block>) -> ferrodoc_ast::Cell {
+        ferrodoc_ast::Cell {
+            attr: ferrodoc_ast::Attr::default(),
+            alignment: Alignment::AlignDefault,
+            row_span: 1,
+            col_span,
+            blocks,
+        }
     }
 
     #[test]

@@ -22,12 +22,18 @@ OPTIONS:
     -V, --version           Print the version
 
 FORMATS:
-    input:   markdown (commonmark, md), html, docx, json
-    output:  markdown, html, docx, json, plain (text)
+    input:   markdown (commonmark, md), gfm, html, docx, json
+    output:  those, plus plain (text)
+
+    `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
+    and bare-URL links. Prefer it over `markdown` for anything with a
+    table — CommonMark has no table syntax, so a table degrades there to
+    one paragraph per cell.
 
 EXAMPLES:
     ferrodoc README.md -o readme.html
-    ferrodoc report.docx -t markdown        # DOCX in, markdown out
+    ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out
+    ferrodoc report.docx -t markdown        # DOCX in, CommonMark out
     ferrodoc page.html -t markdown          # HTML in, markdown out
     ferrodoc report.docx -t plain
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx

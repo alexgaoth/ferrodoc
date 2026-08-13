@@ -1,0 +1,41 @@
+# Task lists, strikeout and autolinks
+
+- [ ] unchecked
+- [x] checked
+- [X] checked with a capital
+- plain item
+- [ ] with a nested list
+  - [x] deeper
+- [ ] **bold** after the box
+
+A tight list stays tight:
+
+- [ ] one
+- [ ] two
+
+An ordered list has no task items, so the brackets stay literal:
+
+1. [ ] not a task
+2. [x] also not
+
+Strikeout ~~across words~~, ~~*with emphasis*~~, and ~~nested ~~inner~~ text~~.
+A lone tilde in the middle of a~word is literal, and so is ~~ ~~ with spaces.
+Escaped delimiters stay text: \~\~not struck\~\~ and a \| pipe.
+
+Autolinks: http://example.com/a?b=c&d=e and https://example.com and
+www.example.com and ftp://files.example.com and user@example.com.
+An autolink inside a list item:
+
+- see https://example.com/x for more
+
+## Duplicate heading
+
+## Duplicate heading
+
+## Duplicate heading
+
+## Punctuation, & symbols!
+
+## Ünïcode Ä and a_b-c.d
+
+## `code` and *emphasis* and ![alt](i.png)

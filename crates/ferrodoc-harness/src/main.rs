@@ -8,6 +8,8 @@
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-md [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness diff-gfm [--verbose] [--fail-under PCT] <dir-or-spec.json>...
+//!   ferrodoc-harness diff-gfm-md [--verbose] [--fail-under PCT] <dir-or-spec.json>...
 //!   ferrodoc-harness diff-html-read [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness fuzz [--iters N] [--seed N] <file-or-dir>...
 //!   ferrodoc-harness bench [--iters N] <file>...
@@ -37,13 +39,15 @@ fn main() -> Result<()> {
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
+        Some("diff-gfm") => diff_gfm(&args[1..], verbose, fail_under),
+        Some("diff-gfm-md") => diff_gfm_md(&args[1..], verbose, fail_under),
         Some("diff-html-read") => diff_html_read(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         Some("bench-sizes") => bench_sizes(&args[1..], iters),
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|bench|bench-sizes|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -260,6 +264,133 @@ fn diff_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<(
     report(&cases, matched, &failures, verbose, fail_under)
 }
 
+/// Compare our GFM *reader* against pandoc's `-f gfm`.
+///
+/// Pandoc's `gfm` bundles extensions the GFM specification does not define
+/// — emoji, footnotes, alerts, `$math$`, YAML metadata — which this reader
+/// deliberately does not implement, so a corpus exercising those is
+/// expected to diverge and `COMPATIBILITY.md` says so.
+fn diff_gfm(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let cases = collect_gfm(paths)?;
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        let ours = serde_json::to_value(
+            ferrodoc_markdown::read_gfm(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?,
+        )?;
+        let theirs = gfm_json(&case.markdown)
+            .with_context(|| format!("pandoc failed on {}", case.name))?;
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Measure the GFM *writer* by fidelity, exactly as `diff-md` does for
+/// `CommonMark`: write the AST back out, have pandoc read the result, and
+/// require the document that comes back to be the one we started from.
+/// Pandoc's own `-t gfm` is scored on the same corpus beside it.
+fn diff_gfm_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let cases = collect_gfm(paths)?;
+    let mut matched = 0usize;
+    let mut pandoc_matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        let ast = ferrodoc_markdown::read_gfm(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let original = serde_json::to_value(&ast)?;
+        let ast_json = serde_json::to_string(&ast)?;
+
+        let ours_md = ferrodoc_markdown::write_gfm(&ast);
+        let ours = gfm_json(&ours_md)
+            .with_context(|| format!("pandoc could not read our gfm for {}", case.name))?;
+
+        let theirs_md =
+            run_pandoc_input(&ast_json, &["-f", "json", "-t", "gfm", "--wrap=preserve"])?;
+        let theirs_md = String::from_utf8(theirs_md).context("pandoc emitted invalid UTF-8")?;
+        if gfm_json(&theirs_md)? == original {
+            pandoc_matched += 1;
+        }
+
+        if ours == original {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &original, "")));
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let pandoc_pct = 100.0 * pandoc_matched as f64 / cases.len() as f64;
+    println!(
+        "pandoc round-trips {pandoc_matched}/{} of the same corpus ({pandoc_pct:.1}%)",
+        cases.len()
+    );
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Collect GFM cases: `.json` files contribute each spec example's
+/// markdown, everything else is a `.gfm` file. The extension is not `.md`
+/// on purpose — those belong to the `CommonMark` gates, which walk the
+/// same corpus directory.
+fn collect_gfm(paths: &[String]) -> Result<Vec<Case>> {
+    let mut cases = Vec::new();
+    for p in paths {
+        let path = Path::new(p);
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
+            let raw = std::fs::read_to_string(p).with_context(|| format!("reading {p}"))?;
+            let examples: Vec<Value> = serde_json::from_str(&raw).context("parsing spec.json")?;
+            for ex in &examples {
+                cases.push(Case {
+                    name: format!(
+                        "example {} ({})",
+                        ex["example"].as_i64().unwrap_or(0),
+                        ex["section"].as_str().unwrap_or("?")
+                    ),
+                    markdown: ex["markdown"]
+                        .as_str()
+                        .context("spec example without markdown")?
+                        .to_owned(),
+                });
+            }
+        } else {
+            collect_by_extension(path, "gfm", &mut cases)?;
+        }
+    }
+    if cases.is_empty() {
+        bail!("no gfm inputs found");
+    }
+    Ok(cases)
+}
+
+/// Every file under `path` whose extension is `extension`.
+fn collect_by_extension(path: &Path, extension: &str, cases: &mut Vec<Case>) -> Result<()> {
+    if path.is_dir() {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
+            .with_context(|| format!("reading {}", path.display()))?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<std::io::Result<_>>()?;
+        entries.sort();
+        for entry in entries {
+            if entry.is_dir() || entry.extension().is_some_and(|e| e == extension) {
+                collect_by_extension(&entry, extension, cases)?;
+            }
+        }
+    } else {
+        cases.push(Case {
+            name: path.display().to_string(),
+            markdown: std::fs::read_to_string(path)
+                .with_context(|| format!("reading {}", path.display()))?,
+        });
+    }
+    Ok(())
+}
+
+fn gfm_json(markdown: &str) -> Result<Value> {
+    let out = run_pandoc(markdown, &["-f", "gfm", "-t", "json"])?;
+    Ok(serde_json::from_slice(&out)?)
+}
+
 /// Compare our HTML *reader* against pandoc's: both read the same page,
 /// and the two documents must be identical.
 ///
@@ -396,7 +527,7 @@ fn collect_bytes(path: &Path, out: &mut Vec<Vec<u8>>) -> Result<()> {
         }
     } else if path
         .extension()
-        .is_some_and(|e| matches!(e.to_str(), Some("md" | "html" | "docx")))
+        .is_some_and(|e| matches!(e.to_str(), Some("md" | "gfm" | "html" | "docx")))
     {
         out.push(std::fs::read(path).with_context(|| format!("reading {}", path.display()))?);
     }
@@ -437,6 +568,11 @@ fn fuzz_run(seeds: &[Vec<u8>], iters: u32, seed: u64) -> (u32, u32) {
         // Then as text, for the readers that take one.
         if let Ok(text) = std::str::from_utf8(&input) {
             if ferrodoc_markdown::read_commonmark(text).is_ok() {
+                ok += 1;
+            } else {
+                refused += 1;
+            }
+            if ferrodoc_markdown::read_gfm(text).is_ok() {
                 ok += 1;
             } else {
                 refused += 1;

@@ -1,0 +1,52 @@
+# Tables
+
+Every alignment, and a column that states none.
+
+| Left | Center | Right | Default |
+|:-----|:------:|------:|---------|
+| a    | b      | c     | d       |
+| *em* | `x|y`  | [l](u)| ![i](p) |
+
+A row with too few cells is padded and one with too many is cut:
+
+| one | two | three |
+| --- | --- | ----- |
+| 1   | 2   |
+| 1   | 2   | 3     | 4 |
+
+A table that is nothing but its header row:
+
+| only | header |
+| ---- | ------ |
+
+Cells may be empty, including the first and the last:
+
+| a | b | c |
+|---|---|---|
+|   | y |   |
+
+A pipe reaches a cell as text, as code, and inside a link target:
+
+| plain | code | link |
+|-------|------|------|
+| p\|q  | `x\|y` | [t](<u\|v>) |
+| p\\\|q | a\\b  | [t](u)      |
+
+Inside a block quote:
+
+> | q | r |
+> |---|---|
+> | 1 | 2 |
+
+Inside a list item:
+
+- item
+
+  | s | t |
+  |---|---|
+  | 3 | 4 |
+
+Not a table, because the delimiter row disagrees:
+
+| a | b |
+| - |

@@ -1,7 +1,8 @@
 # ferrodoc
 
-A universal document converter in Rust — markdown, HTML and DOCX — that
-produces the same output as pandoc, and produces it far faster.
+A universal document converter in Rust — markdown (CommonMark and GFM),
+HTML and DOCX — that produces the same output as pandoc, and produces it
+far faster.
 
 ## ferrodoc vs pandoc
 
@@ -15,7 +16,7 @@ Every row measured on this machine in one sitting (Linux x86-64, pandoc
 | **Startup** (one tiny document) | 13 ms | **2 ms** | **6× faster** |
 | **Peak memory**, 0.6 KB document | 65 MB | **3.8 MB** | **17× less** |
 | **Peak memory**, 16 KB document | 207 MB | **4.7 MB** | **44× less** |
-| **Binary on disk** | 153 MB | **4.4 MB** | **35× smaller** |
+| **Binary on disk** | 153 MB | **4.5 MB** | **34× smaller** |
 | **Malformed DOCX** (self-referential footnote) | hangs, killed at 60 s | **handled in 12 ms** | — |
 | **Same document written twice** | different bytes | **identical bytes** | — |
 | **Runs in a browser / edge worker** | no | **yes** (wasm32) | — |
@@ -51,10 +52,12 @@ nothing is trusted because it looks right.
 |---|---|
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
+| `ferrodoc-markdown` GFM reader | **654/655** documents produce identical ASTs |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
+| `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
 | `ferrodoc-html` reader | **631/657** HTML documents produce identical ASTs |
 
 ```sh
@@ -64,6 +67,9 @@ cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json -
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
 cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
 cargo run -p ferrodoc-harness -- diff-md    corpus/commonmark-spec-0.31.2.json --fail-under 100
+cargo run -p ferrodoc-harness -- diff-gfm    corpus/gfm --fail-under 100
+cargo run -p ferrodoc-harness -- diff-gfm    corpus/commonmark-spec-0.31.2.json --fail-under 99.8
+cargo run -p ferrodoc-harness -- diff-gfm-md corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
 ```
 
@@ -91,14 +97,18 @@ cargo install --path crates/ferrodoc     # installs the `ferrodoc` binary
 
 ```sh
 ferrodoc README.md -o readme.html        # formats inferred from extensions
-ferrodoc report.docx -t markdown         # DOCX in, markdown out — for RAG and migrations
+ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out — keeps tables
+ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table syntax
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
 cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
-Inputs: `markdown` (`commonmark`, `md`), `html`, `docx`, `json` (the pandoc AST).
-Outputs: `markdown`, `html`, `docx`, `json`, `plain`.
+Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `json` (the
+pandoc AST). Outputs: those plus `plain`.
+
+Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
+no table syntax, so a table degrades to one paragraph per cell there.
 
 As a library, one call converts — and the AST is right there when you want to
 transform rather than convert, with no subprocess and no JSON round trip:
@@ -137,8 +147,9 @@ cargo build --release --target wasm32-unknown-unknown \
 
 Every gate, every known loss and every deliberate divergence is listed one
 by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
-produces it. CI runs all seven on Linux, macOS and Windows against a pinned
-pandoc, plus a wasm32 build and a 500,000-mutation fuzz campaign.
+produces it. CI runs all nine against a pinned pandoc, and builds and tests on
+Linux, macOS and Windows, plus a wasm32 build and a 500,000-mutation fuzz
+campaign.
 
 ## Where pandoc is still ahead
 

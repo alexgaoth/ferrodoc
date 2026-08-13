@@ -1,5 +1,5 @@
-//! Universal document converter: read markdown, HTML, DOCX or the pandoc
-//! JSON AST, write markdown, HTML, DOCX, plain text or the pandoc JSON AST.
+//! Universal document converter: read markdown (`CommonMark` or GFM),
+//! HTML, DOCX or the pandoc JSON AST, write any of those plus plain text.
 //!
 //! Everything goes through one document model — the same AST pandoc uses —
 //! so any supported input can produce any supported output.
@@ -41,6 +41,9 @@ use std::fmt;
 pub enum Format {
     /// `CommonMark`. Readable and writable.
     Markdown,
+    /// `GitHub Flavored Markdown`: `CommonMark` plus tables, task lists,
+    /// strikethrough and extended autolinks. Readable and writable.
+    Gfm,
     /// HTML. Readable and writable.
     Html,
     /// Office Open XML word processing documents. Readable and writable.
@@ -54,13 +57,14 @@ pub enum Format {
 impl Format {
     /// Every format name accepted on the command line, in help order.
     pub const NAMES: &'static [&'static str] = &[
-        "markdown", "commonmark", "html", "docx", "json", "plain",
+        "markdown", "commonmark", "gfm", "html", "docx", "json", "plain",
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
     pub fn parse(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
             "markdown" | "commonmark" | "md" => Some(Format::Markdown),
+            "gfm" | "markdown_github" => Some(Format::Gfm),
             "html" | "htm" => Some(Format::Html),
             "docx" => Some(Format::Docx),
             "json" => Some(Format::Json),
@@ -90,6 +94,7 @@ impl Format {
     pub fn name(self) -> &'static str {
         match self {
             Format::Markdown => "markdown",
+            Format::Gfm => "gfm",
             Format::Html => "html",
             Format::Docx => "docx",
             Format::Json => "json",
@@ -149,6 +154,10 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
             format: from,
             detail: e.to_string(),
         }),
+        Format::Gfm => ferrodoc_markdown::read_gfm(&text(input)?).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
         Format::Docx => ferrodoc_docx::read_docx(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
@@ -183,6 +192,7 @@ pub fn render_with_media(
 ) -> Result<Vec<u8>, Error> {
     match to {
         Format::Markdown => Ok(ferrodoc_markdown::write_markdown(doc).into_bytes()),
+        Format::Gfm => Ok(ferrodoc_markdown::write_gfm(doc).into_bytes()),
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         Format::Plain => Ok(ferrodoc_text::write_text(doc).into_bytes()),
         Format::Docx => {
@@ -256,6 +266,19 @@ mod tests {
         let md = String::from_utf8(md).expect("utf8");
         assert!(md.contains("# Title"), "{md}");
         assert!(md.contains("*text*"), "{md}");
+    }
+
+    #[test]
+    fn a_table_survives_docx_to_gfm() {
+        // The workflow the README sells. `markdown` has no table syntax,
+        // so the same conversion loses the grid there and `gfm` keeps it.
+        let source = b"| Region | Q1 |\n|--------|---:|\n| North  | 120 |\n";
+        let docx = convert(source, Format::Gfm, Format::Docx).expect("writable");
+        let gfm = String::from_utf8(convert(&docx, Format::Docx, Format::Gfm).unwrap()).unwrap();
+        assert!(gfm.contains("| Region | Q1 |"), "{gfm}");
+        assert!(gfm.contains("| North | 120 |"), "{gfm}");
+        let md = String::from_utf8(convert(&docx, Format::Docx, Format::Markdown).unwrap()).unwrap();
+        assert!(!md.contains('|'), "{md}");
     }
 
     #[test]

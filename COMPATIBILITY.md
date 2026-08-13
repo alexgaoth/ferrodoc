@@ -12,7 +12,8 @@ published sources describe a later pandoc than this binary.
 
 | | read | write |
 |---|---|---|
-| CommonMark | yes | yes |
+| CommonMark | yes | yes (no tables — see below) |
+| GFM | yes (the five spec extensions) | yes |
 | HTML | yes | yes (fragments; no `--standalone`) |
 | DOCX | yes | yes |
 | pandoc JSON AST | yes | yes |
@@ -31,6 +32,9 @@ cargo run -p ferrodoc-harness -- diff-html      corpus/commonmark-spec-0.31.2.js
 cargo run -p ferrodoc-harness -- diff-docx      corpus/docx --fail-under 96
 cargo run -p ferrodoc-harness -- diff-write     corpus --fail-under 90
 cargo run -p ferrodoc-harness -- diff-md        corpus/commonmark-spec-0.31.2.json --fail-under 100
+cargo run -p ferrodoc-harness -- diff-gfm       corpus/gfm --fail-under 100
+cargo run -p ferrodoc-harness -- diff-gfm       corpus/commonmark-spec-0.31.2.json --fail-under 99.8
+cargo run -p ferrodoc-harness -- diff-gfm-md    corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
 ```
 
@@ -42,10 +46,13 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-docx` | DOCX reader produces pandoc's AST | **36/37** |
 | `diff-write` | DOCX writer survives a round trip through pandoc | **10/11** |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
+| `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
+| `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
 | `diff-html-read` | HTML reader produces pandoc's AST | **631/657** |
 
-`diff-md` is the one place ferrodoc is measurably *ahead*: pandoc's own
-commonmark writer loses 59 of the same 652 documents, at its best setting.
+The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
+own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
+in `gfm`, at their best setting.
 
 ## Known losses, one by one
 
@@ -77,17 +84,98 @@ reader flattens.
 
 ### Markdown writer — 4 limits of CommonMark itself
 
-Listed in `crates/ferrodoc-markdown/src/write.rs`. Briefly: no tables,
-footnotes or definition lists; emphasis directly inside emphasis inside a
-word; two ordered lists in a row sharing a delimiter; an unterminated raw
-HTML block swallowing the blank line after it.
+**Use `-t gfm`, not `-t markdown`, for anything with a table.** CommonMark
+has no table syntax, so a table becomes one paragraph per cell there and
+the row/column relationship is gone — not recoverable afterwards. GFM
+output keeps it.
+
+The other four, listed in `crates/ferrodoc-markdown/src/write.rs`: footnotes
+and definition lists degrade to their content; emphasis directly inside
+emphasis inside a word; two ordered lists in a row sharing a delimiter; an
+unterminated raw HTML block swallowing the blank line after it.
+
+### GFM — a chosen subset, and what a pipe table cannot hold
+
+ferrodoc reads and writes the five extensions the **GFM specification**
+defines: pipe tables, task list items, strikethrough, extended autolinks,
+and tag filtering (which is off, because pandoc does not apply it either).
+Heading identifiers are derived too, since pandoc's `gfm` always does.
+
+Pandoc's `gfm` additionally bundles *pandoc* extensions the GFM
+specification does not define, and those are **not** read: emoji
+shortcodes, footnotes, alerts, `$math$`, and YAML metadata blocks. That
+last one is the single `diff-gfm` mismatch — pandoc reads `---\n---\n` as
+an empty metadata block where we read two thematic breaks.
+
+Six further reader divergences, all the same shape: ferrodoc parses with
+comrak, a port of GitHub's own **`cmark-gfm`**, and pandoc parses with
+`commonmark-hs`, which is stricter than the implementation the format is
+named after. Where the two disagree on well-formed input this reader
+follows GitHub — a GFM document should convert the way GitHub reads it.
+These are not in the corpus, because the corpus is scored against pandoc;
+each is pinned by
+`deliberate_divergences_from_pandoc_hold` in `crates/ferrodoc-markdown/src/lib.rs`.
+
+| input | here (and on GitHub) | pandoc |
+|---|---|---|
+| `~one tilde~` | `Strikeout` | literal tildes |
+| `Text:` then a pipe table | `Para` + `Table` | one `Para` of literal pipes |
+| a plain line after a table row | another row | a new `Para` |
+| `[http://e.com](http://e.com)` | link text stays text | `Link` inside a `Link` |
+| `mailto:x@e.com` | link text keeps the scheme | `Str "mailto:"` + `Link` |
+| `a.www.e.com` | no autolink — `www.` needs a word boundary | autolinked |
+| `- [x]` then a lazy line | the line continues the item | the list closes, new `Para` |
+
+The first two are the ones an ordinary GitHub README hits.
+
+A pipe table always keeps its grid; everything else about a table degrades
+in a stated way, because GFM's table syntax is one header row of one-line
+cells:
+
+- extra head rows and the whole foot become body rows;
+- a cell spanning columns becomes that many cells, content in the first;
+  a cell spanning rows leaves the rows below it short, which pads them;
+- a cell's blocks are flattened onto one line, joined by spaces — a list
+  in a cell loses its markers;
+- the caption follows the table as an ordinary paragraph;
+- column widths are dropped, and a table with no head gains an empty
+  header row;
+- a `Cell`'s own alignment is dropped — only the column's survives, since
+  a pipe table states alignment once per column in the delimiter row.
+
+Pandoc demotes extra head and foot rows exactly as this does, but for a
+table with merged or nested cells it falls back to a raw HTML `<table>`
+instead. That renders on GitHub too, and it keeps the merge — but it
+re-reads as a `RawBlock` rather than a table, so the document stops being
+a table at all. Keeping the grid is the smaller loss.
+
+Strikeout degrades in three stated ways, because `~~` is a flanking
+delimiter and two runs that meet make a tilde code fence:
+
+- a space just inside the `~~` moves outside it (`~~a~~ b`), as pandoc
+  does too;
+- content that is nothing but whitespace loses the markup entirely;
+- strikeout whose content starts or ends with strikeout loses one of the
+  two levels — the one at the edge keeps its `~~` and the other does not,
+  so `<del>a<del>b</del></del>` comes back as plain `a` plus struck `b`.
+  Nesting with text on both sides (`~~outer ~~inner~~ tail~~`) is exact.
+  Two adjacent `Strikeout` nodes arrive back as one, which is what
+  pandoc's *reader* makes of adjacent `<del>` anyway. Pandoc's writer
+  emits the four tildes instead, and its own output then re-reads as a
+  code block that swallows the rest of the document.
 
 ### HTML reader — 26 of 657
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
 pandoc parses with `tagsoup`, which does not.** On malformed markup the two
-build different trees and no mapping reconciles them. Not all of them are
-that, and `TODO.md` names the exceptions.
+build different trees and no mapping reconciles them — a tag with no closing
+`>`, an unclosed `<a>` whose formatting element is reconstructed after the
+paragraph, a `<pre>` or `<div>` opened inside a `<tr>` and never closed.
+
+Not all of them are that, and assuming so hid real bugs for a review round:
+the `<![CDATA[…]]>` and `<style>` raw-text boundaries are a tokenizer
+disagreement on input that is merely unusual, and `<a/>` self-closing syntax
+sends the two parsers down different recovery paths.
 
 Two deliberate divergences, both chosen on the same principle — *match
 pandoc wherever pandoc has a describable rule on well-formed input; diverge
@@ -114,8 +202,8 @@ only where matching would mean reproducing a parse failure*:
 
 ## Resource limits worth knowing
 
-Measured with `ferrodoc-harness bench-sizes` and `/usr/bin/time`; see the
-table in `TODO.md`. The one to plan around:
+Measured with `ferrodoc-harness bench-sizes` and `/usr/bin/time`; the full
+table is in `TODO.md`. The one to plan around:
 
 **`docx → markdown` peaks at ~3.5 GB of RSS for a 4.3 MB `.docx`** — the
 whole XML tree and the whole AST are live at once. Fine on a laptop, fatal

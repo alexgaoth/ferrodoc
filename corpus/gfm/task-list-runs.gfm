@@ -1,0 +1,57 @@
+# Task items and plain items are different lists
+
+Pandoc parses a task list as its own kind of list, so a plain item among
+task items starts a new one — and each run works out its own tightness.
+
+- [ ] alpha
+
+- beta
+
+- [x] gamma
+
+Tight throughout, three runs:
+
+- [ ] one
+- [ ] two
+- plain
+- also plain
+- [x] three
+
+A run that really is loose stays loose:
+
+- [ ] first
+
+- [ ] second
+
+An item holding two paragraphs is loose whoever cut it:
+
+- [ ] head
+
+  tail
+- plain after
+
+Inside a block quote:
+
+> - [ ] quoted
+>
+> - plain
+
+Nested, and empty:
+
+- [ ] outer
+  - [x] inner
+- [ ]
+- [x]
+
+The space after the box is the source's own, however wide the source
+aligns it:
+
+- [ ]  two spaces
+- [x]   three
+- [ ] one
+
+An empty item in a loose list is a paragraph, not a plain:
+
+1. [ ]
+
+2. text
