@@ -64,6 +64,10 @@ repo-wide.
 - Regenerate benchmark inputs in `/tmp` first: they are cleaned between
   sessions and a missing one fails *quietly* — `bench` prints nothing and
   `/usr/bin/time` reports pandoc's error-path RSS (~12 MB) as a conversion.
+  **`/tmp` is tmpfs on this machine**, so those inputs and any baseline
+  `target/` live in RAM. Delete them the moment the measurement is taken;
+  a few hundred MB of fixtures plus a second build tree is enough to make
+  the machine swap.
 - A README claim needs its reproducing command, figures from one sitting, and
   pandoc's advantages beside it — selling wins without limits is what makes a
   reader stop trusting the wins.
