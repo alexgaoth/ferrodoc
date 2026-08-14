@@ -57,24 +57,26 @@ repo-wide.
 - A percentage threshold over a large corpus is not a regression gate: 99%
   of 654 tolerates five failures. Gate a small hand-written corpus at 100
   separately from the spec run.
+- Code no input has ever reached is not code that works, and every gate is
+  green while it stays unreached. Making a dormant path live — `docx → docx`
+  first embedding a picture, a fixture stopping being skipped — is a change
+  to verify end to end, not by its diff. Both shipped breakage that way.
 - Never compare builds by absolute timings: this machine drifts ~2× within a
   session. Interleave against a baseline worktree and report the ratio.
   (`bench-sizes` prints absolute per-path latency on purpose — for users
   sizing a pipeline, not for judging a change.)
-- Regenerate benchmark inputs in `/tmp` first: they are cleaned between
-  sessions and a missing one fails *quietly* — `bench` prints nothing and
-  `/usr/bin/time` reports pandoc's error-path RSS (~12 MB) as a conversion.
-  **`/tmp` is tmpfs on this machine**, so those inputs and any baseline
-  `target/` live in RAM. Delete them the moment the measurement is taken;
-  a few hundred MB of fixtures plus a second build tree is enough to make
-  the machine swap.
+- Regenerate benchmark inputs in `/tmp` first: a missing one fails *quietly*
+  (`bench` prints nothing, `/usr/bin/time` reports pandoc's ~12 MB error path
+  as a conversion). `/tmp` is **tmpfs**, so fixtures and any baseline
+  `target/` are RAM — delete them as soon as the number is taken.
 - A README claim needs its reproducing command, figures from one sitting, and
   pandoc's advantages beside it — selling wins without limits is what makes a
   reader stop trusting the wins.
-- Measure every optimization against the code it replaces; the intuitive ones
-  lost here. Slice-scanning escapers are slower than a per-character loop (the
-  strings are short words) and `String::with_capacity` on writer output cost
-  more than growing. Revert what does not measure.
+- Measure every optimization against the code it replaces, and *ablate first*
+  to find where the cost is: interning names in the DOCX tree would have won
+  8% where deleting the tree won 5×. Slice-scanning escapers lost to a
+  per-character loop and `with_capacity` lost to growing. Revert what does
+  not measure.
 
 ## Gotchas
 
