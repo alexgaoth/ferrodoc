@@ -110,14 +110,33 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. Publish 0.1 — blocked on a decision, not on work
+### 1. Publish 0.1 — two credentialed commands away
 
-Everything reversible is done. Publishing cannot be undone and a yanked
-version is still visible, so it needs an owner's go-ahead.
+Everything that can be done without credentials is done: the six crate
+names are free on crates.io, internal dependencies now carry a version as
+well as a path (without which `cargo publish` refuses every crate above
+`ferrodoc-ast`), `cargo publish --dry-run -p ferrodoc-ast` reaches the
+upload step, and **`v0.1.0` is tagged on `master`**.
 
-- Publish order: `ferrodoc-ast`, `-markdown`, `-html`, `-text`, `-docx`, then
-  `ferrodoc`.
-- Tag `v0.1.0` — the tag is what triggers the release build.
+Two things this machine does not have:
+
+- **A crates.io token.** `cargo login` first; `cargo publish` prompts and
+  fails without one.
+- **A git remote.** `git remote add origin …` then `git push --tags`; the
+  release build is triggered by the tag arriving at GitHub, so until the
+  tag is pushed nothing is built.
+
+Then, in this order, waiting for each to appear on the index before the
+next — a crate cannot be verified until the ones below it exist:
+
+```sh
+for c in ferrodoc-ast ferrodoc-markdown ferrodoc-html ferrodoc-text ferrodoc-docx ferrodoc; do
+    cargo publish -p "$c"
+done
+```
+
+Publishing cannot be undone and a yanked version stays visible, which is
+why the two commands above are the owner's to run.
 
 **Iterate: no.** Nothing to review; it is a decision.
 
