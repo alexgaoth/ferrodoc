@@ -65,10 +65,22 @@ repo-wide.
   session. Interleave against a baseline worktree and report the ratio.
   (`bench-sizes` prints absolute per-path latency on purpose — for users
   sizing a pipeline, not for judging a change.)
-- Regenerate benchmark inputs in `/tmp` first: a missing one fails *quietly*
-  (`bench` prints nothing, `/usr/bin/time` reports pandoc's ~12 MB error path
-  as a conversion). `/tmp` is **tmpfs**, so fixtures and any baseline
-  `target/` are RAM — delete them as soon as the number is taken.
+- Benchmark inputs come from `bash corpus/bench/generate.sh`, which writes
+  them to `~/.cache/ferrodoc-bench` — **not** `/tmp`, which is tmpfs here, so
+  a fixture and its derived forms would be resident memory rather than disk.
+  A baseline `target/` there is RAM too; delete it as soon as the number is
+  taken.
+- **The fastest way to read a document is to refuse it.** A missing fixture
+  fails quietly (`bench` prints nothing, `/usr/bin/time` reports pandoc's
+  ~12 MB error path as a conversion), and so does a fixture the reader
+  rejects: `HTML -> AST` was published at 4.12 s for 10 MB, which was the
+  cost of refusing a document that nested past the 200-level bound, not of
+  reading one. `bench-sizes` now runs every read once for real and fails
+  loudly. Do not reintroduce a timing loop that discards a `Result`.
+- Tiling a corpus document to make a large fixture changes what it is:
+  `corpus/truncation-cases.md` holds unterminated HTML comments, and past the
+  first repetition each one swallows the closing tags of everything after it,
+  so the document nests without bound. Generated prose is the safer fixture.
 - A README claim needs its reproducing command, figures from one sitting, and
   pandoc's advantages beside it — selling wins without limits is what makes a
   reader stop trusting the wins.

@@ -45,14 +45,25 @@ behind them.
 | Verifiability | CI on three platforms against pinned pandoc, wasm32 build, 500k-mutation fuzz per run, `COMPATIBILITY.md` |
 | Packaging | licences, crate metadata, tag-driven static binaries — everything except the irreversible steps |
 | DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
+| Benchmarks | every path measured on fixtures `corpus/bench/generate.sh` writes, and `bench-sizes` now fails when a read errors instead of timing the refusal |
 | Standalone HTML | `-s` writes a whole page — doctype, charset, `lang`, title, authors — and `--css` inlines a stylesheet |
 
-Performance, measured with `bench-sizes` at 10 KB / 1 MB / 10 MB: markdown →
-AST 0.78 ms / 103 ms / 709 ms; AST → HTML 25 µs / 6.7 ms / 39 ms; AST → docx
-1.4 ms / 108 ms / 1.24 s; docx → AST 4.1 ms / 472 ms / 16.6 s. Peak RSS for
-docx → markdown: 6 MB / **152 MB** / **1.34 GB** — what remains is the AST
-and the source, not the XML tree. (Absolute figures drift ~2× between
-sittings on this machine; only interleaved ratios are comparable.)
+Performance at 10 KB / 1 MB / 10 MB, one sitting, on fixtures
+`bash corpus/bench/generate.sh` writes:
+
+| path | 10 KB | 1 MB | 10 MB |
+|---|---|---|---|
+| markdown → AST | 531 µs | 43.8 ms | 551 ms |
+| AST → HTML | 37 µs | 10.8 ms | 115 ms |
+| AST → markdown | 77 µs | 13.1 ms | 137 ms |
+| AST → docx | 1.09 ms | 73.2 ms | 963 ms |
+| docx → AST | 4.4 ms | 491 ms | 11.1 s |
+| HTML → AST | 381 µs | 53.6 ms | 644 ms |
+
+Every path is linear in its input. Peak RSS for docx → markdown: 6 MB /
+117 MB / **1.12 GB** — what remains is the AST and the source, not the XML
+tree. (Absolute figures drift ~2× between sittings on this machine; only
+interleaved ratios are comparable.)
 
 ---
 
@@ -95,23 +106,7 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. `HTML → AST` is superlinear — probably no `/iterate`
-
-1.25 ms / 168 ms / **4.12 s** across 10 KB / 1 MB / 10 MB: the same shape the
-DOCX reader had before its body was streamed, and there is now a playbook for
-it. Ablate first to find where the cost actually is — interning names in the
-DOCX tree would have won 8% where deleting the tree won 5×.
-
-`html5ever` builds an `Rc`-based DOM that this reader then walks and drops, so
-the tree may be the cost the same way it was there. Measure before choosing.
-
-**Iterate: only if the fix restructures the reader.** A pure optimization is
-judged by an interleaved A/B against a baseline, which is a better critic than
-a reviewer. But if it changes *how* the reader walks — as streaming did for
-DOCX — the truncation and error-path questions come back, and those are worth
-a round.
-
-### 2. Raw passthrough in the HTML reader — `/iterate`
+### 1. Raw passthrough in the HTML reader — `/iterate`
 
 An element the reader does not know contributes its children and loses its own
 tag, so `<video>`, `<iframe>`, `<figure>` and every custom element quietly
@@ -123,7 +118,7 @@ worth doing before the polish items below.
 **Iterate: yes** — the same reason the image formats did. `diff-html-read` would score it,
 but "what did the user lose" is not a number that gate reports.
 
-### 3. Publish 0.1 — blocked on a decision, not on work
+### 2. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -134,7 +129,7 @@ version is still visible, so it needs an owner's go-ahead.
 
 **Iterate: no.** Nothing to review; it is a decision.
 
-### 4. PDF output — as a separate crate, not in the binary
+### 3. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -149,7 +144,7 @@ work; not next.
 **Iterate: yes, per phase** — a new crate with a new output format has no gate
 at all until one is built, which is the condition the loop exists for.
 
-### 5. Python and Node bindings — blocked on evidence
+### 4. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.

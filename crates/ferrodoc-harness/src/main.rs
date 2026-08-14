@@ -674,6 +674,16 @@ fn bench_sizes(paths: &[String], iters: u32) -> Result<()> {
         let html = ferrodoc_html::write_html(&ast);
         let docx = ferrodoc_docx::write_docx(&ast).map_err(|e| anyhow::anyhow!("{e}"))?;
 
+        // Every read runs once for real before anything is timed. The
+        // loops below discard the result, and the fastest way to "read" a
+        // document is to refuse it: a fixture whose HTML nests past the
+        // reader's depth bound was published for months as 4.12 s of
+        // throughput, when it was 4.12 s of rejecting the input.
+        ferrodoc_html::read_html(&html)
+            .map_err(|e| anyhow::anyhow!("{p}: the HTML this writes cannot be read back: {e}"))?;
+        ferrodoc_docx::read_docx(&docx)
+            .map_err(|e| anyhow::anyhow!("{p}: the docx this writes cannot be read back: {e}"))?;
+
         // Big documents are slow enough that a fixed iteration count would
         // take minutes; scale it down but never below one.
         let scaled = (iters as usize).saturating_mul(100_000) / bytes.max(1);

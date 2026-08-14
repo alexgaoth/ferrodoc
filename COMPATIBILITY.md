@@ -283,7 +283,7 @@ only where matching would mean reproducing a parse failure*:
 Measured with `ferrodoc-harness bench-sizes` and `/usr/bin/time`; the full
 table is in `TODO.md`. The one to plan around:
 
-**`docx → markdown` peaks at ~1.34 GB of RSS for a 10 MB source document.**
+**`docx → markdown` peaks at ~1.12 GB of RSS for a 10 MB source document.**
 The body is read one part at a time, so its XML tree never exists in full —
 what is left is the AST, which is the answer, and the part being decompressed.
 Streaming it cut peak RSS 2.7× and was ~12% *faster*, measured interleaved
