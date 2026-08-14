@@ -271,6 +271,17 @@ only where matching would mean reproducing a parse failure*:
   one is one paragraph. Measured: `<p>x <canvas>t</canvas> y</p>` is three
   blocks to pandoc and one `Para` here.
 
+Two more, measured, where ferrodoc keeps *more* than pandoc: a `<tr>`
+inside a `<template>` stays a table row here (tagsoup has no notion of a
+template, so pandoc flattens the table to a `Plain`), and a `<bdo>` keeps
+the `dir` attribute that is its whole point.
+
+One is the other way and is a real gap: an **inline `<svg>`** is dropped
+here, where pandoc serializes it into a `data:image/svg+xml;base64,…`
+image. A chart written inline in a page is lost. Also `<xmp>`, an obsolete
+raw-text element, is read as raw text here (which is what the HTML spec
+says it is) and as markup by pandoc.
+
 One case is neither: a `<template>` that is the **first thing in a
 document** with no `<body>` around it. A conforming parser puts it in the
 head, which this reader does not read, and tagsoup has no head to put it

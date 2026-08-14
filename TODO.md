@@ -159,6 +159,10 @@ None of these need a loop: each is a single rule with a gate that scores it.
   if someone needs the structure more than the grid.
 - A regression fixture for *every* mismatch ever found. The recent ones have
   them; older ones live only in `.iterate/` verdicts.
+- An inline `<svg>` is dropped, where pandoc serializes it into a
+  `data:image/svg+xml;base64,…` image — a chart written inline in a page is
+  lost. Needs an XML serializer and base64 in `ferrodoc-html`, neither of
+  which it has; the only silent-loss family left in the HTML reader.
 - Pandoc counts `<output>`, `<canvas>` and `<textarea>` block-level and
   splits a paragraph around them into `Plain` fragments; this reader keeps
   them inline, because all three are phrasing content. And a `<template>`

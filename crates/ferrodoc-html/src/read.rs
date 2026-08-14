@@ -434,7 +434,9 @@ impl Reader {
                     .retain(|(k, _)| k != "src" && k != "title" && k != "alt");
                 out.push(Inline::Image(attr, alt, target));
             }
-            "span" => out.push(Inline::Span(attributes(node), self.inlines(kids)?)),
+            // `<bdo>` is a span whose whole point is its `dir`
+            // attribute: read as its children, the override is gone.
+            "span" | "bdo" => out.push(Inline::Span(attributes(node), self.inlines(kids)?)),
             // A quotation, whose marks are the element. Dropping it to its
             // children loses the quoting entirely — nothing in the text
             // says any more that the words are someone else's. The marks
@@ -663,14 +665,43 @@ impl Reader {
 fn children(node: &Handle) -> Vec<Handle> {
     // A `<template>`'s content is parsed into a fragment of its own rather
     // than into its children, so a walk that reads children alone finds
-    // the element empty and loses every word inside it. Pandoc reads that
-    // content and splices it where the element stood.
-    if let NodeData::Element { template_contents, .. } = &node.data
-        && let Some(contents) = template_contents.borrow().as_ref()
-    {
-        return contents.children.borrow().clone();
+    // the element empty and loses every word inside it.
+    //
+    // The content stands where the element stands, which is both what
+    // pandoc produces and what makes the rest of the reader see it at all:
+    // a `<tr>` inside a template reaches the table walk only because the
+    // template is spliced away here rather than skipped as an element the
+    // walk does not know.
+    let kids = node.children.borrow();
+    if !kids.iter().any(is_template) {
+        return kids.clone();
     }
-    node.children.borrow().clone()
+    let mut out = Vec::with_capacity(kids.len());
+    for kid in kids.iter() {
+        if is_template(kid) {
+            out.extend(template_content(kid));
+        } else {
+            out.push(kid.clone());
+        }
+    }
+    out
+}
+
+fn is_template(node: &Handle) -> bool {
+    matches!(&node.data, NodeData::Element { name, .. } if name.local.as_ref() == "template")
+}
+
+/// What a `<template>` holds, which hangs off the element by a link of its
+/// own rather than off its children.
+fn template_content(node: &Handle) -> Vec<Handle> {
+    let NodeData::Element { template_contents, .. } = &node.data else {
+        return Vec::new();
+    };
+    let contents = template_contents.borrow();
+    contents
+        .as_ref()
+        .map(children)
+        .unwrap_or_default()
 }
 
 fn element_name(node: &Handle) -> Option<String> {
@@ -1427,6 +1458,47 @@ mod tests {
                 Attr::default(),
                 vec![Block::Plain(vec![Inline::Str("abc".to_owned())])]
             )]
+        );
+    }
+
+    /// Splicing a template away where it stands, rather than skipping it
+    /// as an element the walk does not know, is what lets the rest of the
+    /// reader see inside one. A row in a template is a row: read the
+    /// other way the table comes back with no rows at all, and the cell
+    /// is gone with no sign of it.
+    ///
+    /// Pandoc flattens this to `Plain [Str "cell"]` — tagsoup has no
+    /// notion of a template, so the table goes with it. Keeping the row
+    /// keeps more, and `COMPATIBILITY.md` records the difference.
+    #[test]
+    fn a_row_inside_a_template_is_still_a_row() {
+        let blocks = blocks("<table><tbody><template><tr><td>cell</td></tr></template></tbody></table>");
+        let [Block::Table(table)] = blocks.as_slice() else {
+            panic!("expected one table, got {blocks:?}")
+        };
+        let cells: Vec<&Block> = table
+            .bodies
+            .iter()
+            .flat_map(|body| body.head.iter().chain(&body.body))
+            .flat_map(|row| &row.cells)
+            .flat_map(|cell| &cell.blocks)
+            .collect();
+        assert_eq!(cells, vec![&Block::Plain(vec![Inline::Str("cell".to_owned())])]);
+    }
+
+    /// A `<bdo>` exists to state a direction, and reading it as its
+    /// children drops the one attribute it is for.
+    #[test]
+    fn a_direction_override_keeps_its_attribute() {
+        assert_eq!(
+            blocks(r#"<p><bdo dir="rtl">text</bdo></p>"#),
+            vec![Block::Para(vec![Inline::Span(
+                Attr {
+                    attributes: vec![("dir".to_owned(), "rtl".to_owned())],
+                    ..Attr::default()
+                },
+                vec![Inline::Str("text".to_owned())],
+            )])]
         );
     }
 
