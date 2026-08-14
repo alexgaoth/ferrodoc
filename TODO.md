@@ -106,7 +106,27 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. Publish 0.1 — blocked on a decision, not on work
+### 1. Inline `<svg>` is dropped — `/iterate`
+
+The last silent-loss family left in a reader. A chart or an icon written
+inline in a page — `<svg>…</svg>` rather than `<img src>` — becomes nothing
+at all here. Pandoc serializes the element back to text and emits it as an
+`Image` with a `data:image/svg+xml;base64,…` URL, which is why the picture
+survives a conversion through pandoc and not through this.
+
+Found by sweeping the element vocabulary in valid contexts, after the two
+losses that sweep was looking for had already been fixed.
+
+- `ferrodoc-html` has neither an XML serializer nor base64. `markup5ever`
+  can serialize a subtree; base64 is twenty lines or a dependency, and this
+  crate must keep building for wasm32 with no C library.
+- The writer side already round-trips a `data:` URL as an image, so only
+  the reader is missing.
+
+**Iterate: yes** — silent content loss, which is the condition the loop
+exists for, and `diff-html-read` cannot report *what* a user lost.
+
+### 2. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -117,7 +137,7 @@ version is still visible, so it needs an owner's go-ahead.
 
 **Iterate: no.** Nothing to review; it is a decision.
 
-### 2. PDF output — as a separate crate, not in the binary
+### 3. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -132,7 +152,7 @@ work; not next.
 **Iterate: yes, per phase** — a new crate with a new output format has no gate
 at all until one is built, which is the condition the loop exists for.
 
-### 3. Python and Node bindings — blocked on evidence
+### 4. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.
@@ -159,10 +179,6 @@ None of these need a loop: each is a single rule with a gate that scores it.
   if someone needs the structure more than the grid.
 - A regression fixture for *every* mismatch ever found. The recent ones have
   them; older ones live only in `.iterate/` verdicts.
-- An inline `<svg>` is dropped, where pandoc serializes it into a
-  `data:image/svg+xml;base64,…` image — a chart written inline in a page is
-  lost. Needs an XML serializer and base64 in `ferrodoc-html`, neither of
-  which it has; the only silent-loss family left in the HTML reader.
 - Pandoc counts `<output>`, `<canvas>` and `<textarea>` block-level and
   splits a paragraph around them into `Plain` fragments; this reader keeps
   them inline, because all three are phrasing content. And a `<template>`
