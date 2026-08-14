@@ -43,33 +43,21 @@ behind them.
 | Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
 | Verifiability | CI on three platforms against pinned pandoc, wasm32 build, 500k-mutation fuzz per run, `COMPATIBILITY.md` |
 | Packaging | licences, crate metadata, tag-driven static binaries — everything except the irreversible steps |
+| Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
+| DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
 
 Performance, measured with `bench-sizes` at 10 KB / 1 MB / 10 MB: markdown →
-AST 0.39 ms / 59 ms / 780 ms; AST → HTML 12 µs / 4.0 ms / 43 ms; AST → docx
-0.52 ms / 56 ms / 645 ms; docx → AST 2.2 ms / 334 ms / 9.8 s. Peak RSS for
-docx → markdown: 8 MB / 365 MB / **3.5 GB**.
+AST 0.78 ms / 103 ms / 709 ms; AST → HTML 25 µs / 6.7 ms / 39 ms; AST → docx
+1.4 ms / 108 ms / 1.24 s; docx → AST 4.1 ms / 472 ms / 16.6 s. Peak RSS for
+docx → markdown: 6 MB / **152 MB** / **1.34 GB** — what remains is the AST
+and the source, not the XML tree. (Absolute figures drift ~2× between
+sittings on this machine; only interleaved ratios are comparable.)
 
 ---
 
 ## Next, in order
 
-### 1. Bounded-memory DOCX reading
-
-3.5 GB of peak RSS for a 4.3 MB `.docx` — roughly 800× the input, because the
-whole XML tree and the whole AST are live at once. Fine on a laptop, fatal in
-a 256 MB container, and the one number that makes ferrodoc unusable somewhere
-pandoc is usable.
-
-- Map paragraphs as they stream out of `quick-xml` instead of materializing
-  the tree first, or drop each subtree once its blocks are built.
-- Target: peak proportional to the largest *paragraph*, not the document.
-- `bench-sizes` plus `/usr/bin/time` is the check; it must not cost more than
-  ~10% latency.
-
-Second-order, same area: `HTML → AST` is also superlinear (93 ms → 2.3 s
-across a 10× input). Worth a look once the DOCX path is done.
-
-### 2. `--standalone` HTML output
+### 1. `--standalone` HTML output
 
 The writer emits fragments. Anyone converting a document *for the web* — the
 obvious reason to want HTML — has to hand-write `<html>`, `<head>`, a charset
@@ -78,7 +66,7 @@ and a title around it. Pandoc's `--standalone` is one flag.
 - `<!doctype>`, `<html lang>`, charset, `<title>` from document metadata.
 - Optional CSS by path; no template language (that is a declared non-goal).
 
-### 3. Publish 0.1 — blocked on a decision, not on work
+### 2. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -87,7 +75,7 @@ version is still visible, so it needs an owner's go-ahead.
   `ferrodoc`.
 - Tag `v0.1.0` — the tag is what triggers the release build.
 
-### 4. PDF output — as a separate crate, not in the binary
+### 3. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -99,7 +87,7 @@ So: a separate `ferrodoc-pdf` crate, or a default-off feature shipping a
 second binary. Nobody who wants a small converter pays for a typesetter. Large
 work; not next.
 
-### 5. Python and Node bindings — blocked on evidence
+### 4. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.
@@ -112,6 +100,8 @@ Wait for a user.
   blocks flatten to one line, the caption becomes a following paragraph.
   Pandoc falls back to a raw HTML `<table>` instead. Worth revisiting only
   if someone needs the structure more than the grid.
+- `HTML → AST` is superlinear (1.25 ms / 168 ms / 4.12 s across 10 KB / 1 MB
+  / 10 MB), the same shape the DOCX reader had before its body was streamed.
 - The HTML reader keeps whitespace inside an inline element where pandoc
   hoists it out: `<em> b</em>` is `Space` + `Emph[b]` for pandoc and
   `Emph[Space, b]` here. Found by making `corpus/inline-elements.html`

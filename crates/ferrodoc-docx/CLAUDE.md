@@ -3,6 +3,19 @@
 Reads and writes OOXML word processing documents. Gated by `diff-docx`
 (reader) and `diff-write` (writer) — see the root `CLAUDE.md`.
 
+- The body is **streamed**: `xml::body_children` yields one `w:p`/`w:tbl`
+  subtree at a time and `blocks_inner` consumes an iterator with one
+  element of lookahead, so `document.xml`'s tree never exists in full. It
+  cost about twenty times the XML. Do not reintroduce a whole-body
+  `xml::parse`, and keep the scan forward-only with at most one lookahead.
+- Streaming moves errors from before the walk to during it, so both ends
+  need guarding: a malformed prologue, a missing body and an unclosed
+  element at EOF are all `Err`, never a short document. Pinned by
+  `a_malformed_body_is_refused_not_truncated`.
+- The body's `w:sectPr` is its *last* child and text width is needed
+  first, so `body_section` takes the last one in the source and parses it
+  alone. A `sectPr` inside a `w:pPr` is a section break and always
+  precedes it.
 - Style matching is by *name* through `styles.xml` (case-insensitive,
   whitespace-exact), never by id — ids are localized and may be absent.
   Captions and heading classes use the paragraph's OWN name; block semantics

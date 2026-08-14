@@ -225,10 +225,15 @@ only where matching would mean reproducing a parse failure*:
 Measured with `ferrodoc-harness bench-sizes` and `/usr/bin/time`; the full
 table is in `TODO.md`. The one to plan around:
 
-**`docx → markdown` peaks at ~3.5 GB of RSS for a 4.3 MB `.docx`** — the
-whole XML tree and the whole AST are live at once. Fine on a laptop, fatal
-in a small container. Bounded-memory DOCX reading is on the roadmap for
-exactly this reason.
+**`docx → markdown` peaks at ~1.34 GB of RSS for a 10 MB source document.**
+The body is read one part at a time, so its XML tree never exists in full —
+what is left is the AST, which is the answer, and the part being decompressed.
+Streaming it cut peak RSS 2.7× and was ~12% *faster*, measured interleaved
+against a baseline build; pandoc needs 12× more on the same input.
+
+An image part is read only when the output can embed it, so a `.docx`
+carrying a part that inflates a thousandfold costs 5 MB through
+`-t markdown` and 840 MB through `-o out.docx`, which has to hold it.
 
 ## How to check any of this yourself
 

@@ -181,8 +181,10 @@ fn read(bytes: &[u8], want_media: bool) -> Result<(Pandoc, Media), Error> {
     let endnote_rels = part("word/_rels/endnotes.xml.rels");
     let styles = part("word/styles.xml");
 
-    let document = xml::parse(&document)?;
-    let body = document.child("body").ok_or(Error::MissingPart("w:body"))?;
+    // The body is streamed, not parsed into a tree: see `xml::body_children`.
+    // Its section properties are the last thing in it and the conversion
+    // needs them first, so that one element is parsed on its own.
+    let section = body_section(&document).map(|s| xml::parse(&s)).transpose()?;
     let rels = rels.as_deref().map(xml::parse).transpose()?;
     let footnote_rels = footnote_rels.as_deref().map(xml::parse).transpose()?;
     let endnote_rels = endnote_rels.as_deref().map(xml::parse).transpose()?;
@@ -207,10 +209,33 @@ fn read(bytes: &[u8], want_media: bool) -> Result<(Pandoc, Media), Error> {
             .as_ref()
             .map(parse_styles)
             .unwrap_or_default(),
-        text_width: text_width(body),
+        text_width: text_width(section.as_ref()),
     };
     let mut state = State::default();
-    let doc = ctx.document(body, &mut state);
+    // A malformed part stops the stream and is reported, never returned
+    // as a truncated document.
+    let mut failure: Option<Error> = None;
+    let body = xml::body_children(&document)?;
+    let doc = {
+        let failure = &mut failure;
+        let parts = body
+            .map_while(move |child| match child {
+                Ok(node) => Some(node),
+                Err(e) => {
+                    *failure = Some(e);
+                    None
+                }
+            })
+            .flat_map(|node| {
+                let mut parts = Vec::new();
+                collect_parts(node, &mut parts, 0);
+                parts
+            });
+        ctx.document(parts, &mut state)
+    };
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
 
     let mut media = Media::new();
     if want_media {
@@ -393,12 +418,52 @@ fn parse_styles(styles: &Node) -> HashMap<String, (String, Option<String>)> {
 
 /// The section's text width in twips: page width minus left/right margins
 /// and gutter, defaulting to [`DEFAULT_TEXT_WIDTH`].
-fn text_width(body: &Node) -> f64 {
-    let sect = body.child("sectPr");
+/// The body's own `<w:sectPr>`, as a standalone document.
+///
+/// It is the body's last child and the conversion needs it before the
+/// first, which is the one thing a forward stream cannot supply. Taking
+/// the last one in the source finds it: a `sectPr` inside a `w:pPr` is a
+/// section *break*, and every one of those precedes the body's own.
+fn body_section(xml: &str) -> Option<String> {
+    let open = xml.rfind("<w:sectPr")?;
+    let rest = &xml[open..];
+    // Either spelling: `<w:sectPr/>` or `<w:sectPr …>…</w:sectPr>`.
+    let end = rest.find("</w:sectPr>").map_or_else(
+        || rest.find("/>").map(|i| i + 2),
+        |i| Some(i + "</w:sectPr>".len()),
+    )?;
+    Some(rest[..end].to_owned())
+}
+
+/// The `p` and `tbl` parts a body child contributes, unwrapping the
+/// `w:sdt` content controls that may nest them.
+fn collect_parts(node: Node, out: &mut Vec<Node>, depth: usize) {
+    if depth >= MAX_NESTING {
+        return;
+    }
+    match node.name.as_str() {
+        "p" | "tbl" => out.push(node),
+        "sdt" => {
+            for child in node.children {
+                if let xml::Child::Elem(content) = child
+                    && content.name == "sdtContent"
+                {
+                    for inner in content.children {
+                        if let xml::Child::Elem(inner) = inner {
+                            collect_parts(inner, out, depth + 1);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn text_width(sect: Option<&Node>) -> f64 {
     let value = |node: Option<&Node>, attr: &str| -> Option<f64> {
         node?.attr(attr)?.parse().ok()
     };
-    let sect = sect.as_ref();
     let width = value(sect.and_then(|s| s.child("pgSz")), "w:w");
     let margins = sect.and_then(|s| s.child("pgMar"));
     let left = value(margins, "w:left");
@@ -812,20 +877,24 @@ struct RawRow {
 impl Ctx {
     /// Convert the document body: leading metadata-styled paragraphs
     /// become `meta` (pandoc's `sepBodyParts`), the rest become blocks.
-    fn document(&self, body: &Node, state: &mut State) -> Pandoc {
-        let elems = body_parts(body);
+    /// Convert the body's parts, taken one at a time so that the whole
+    /// document never exists as an XML tree.
+    fn document(&self, parts: impl IntoIterator<Item = Node>, state: &mut State) -> Pandoc {
+        let mut parts = parts.into_iter().peekable();
+        // Metadata is the leading run of styled paragraphs, so it comes
+        // off the front of the stream before the body proper begins.
         let mut fields: Vec<(&'static str, Vec<Inline>)> = Vec::new();
-        let mut rest = 0;
-        for (i, node) in elems.iter().enumerate() {
+        while let Some(node) = parts.peek() {
             if let Some(field) = self.meta_field(node) {
-                fields.push((field, self.inlines(node, state)));
+                let inlines = self.inlines(node, state);
+                fields.push((field, inlines));
             } else if !(node.name == "p" && paragraph_is_blank(node)) {
                 break;
             }
-            rest = i + 1;
+            parts.next();
         }
         let meta = build_meta(fields);
-        let mut blocks = self.blocks_of(&elems[rest..], state, true);
+        let mut blocks = self.blocks_of(parts, state, true);
         // Pandoc drops anchors that no internal link points at.
         rewrite_internal_links(&mut blocks, &state.anchors);
         let mut targets = HashSet::new();
@@ -840,11 +909,16 @@ impl Ctx {
     /// merged by pandoc's block smushing (code blocks and quotes coalesce).
     fn blocks(&self, parent: &Node, state: &mut State, lists: bool) -> Vec<Block> {
         let elems = body_parts(parent);
-        self.blocks_of(&elems, state, lists)
+        self.blocks_of(elems, state, lists)
     }
 
     /// Convert an already-collected run of body parts.
-    fn blocks_of(&self, elems: &[&Node], state: &mut State, lists: bool) -> Vec<Block> {
+    fn blocks_of<N: std::borrow::Borrow<Node>>(
+        &self,
+        elems: impl IntoIterator<Item = N>,
+        state: &mut State,
+        lists: bool,
+    ) -> Vec<Block> {
         if state.depth >= MAX_NESTING {
             return Vec::new();
         }
@@ -854,14 +928,27 @@ impl Ctx {
         blocks
     }
 
-    fn blocks_inner(&self, elems: &[&Node], state: &mut State, lists: bool) -> Vec<Block> {
+    /// Convert a run of body parts, one element at a time.
+    ///
+    /// The scan only ever looks one element ahead — a caption pairs with
+    /// the part beside it — so it holds two at a time and never the
+    /// whole body. That is what lets a `.docx` be read without its XML
+    /// tree ever existing in full.
+    fn blocks_inner<N: std::borrow::Borrow<Node>>(
+        &self,
+        elems: impl IntoIterator<Item = N>,
+        state: &mut State,
+        lists: bool,
+    ) -> Vec<Block> {
         let mut segments: Vec<Vec<Block>> = Vec::new();
         let mut list: Vec<ListItem> = Vec::new();
         let mut definitions: Vec<(Vec<Inline>, Vec<Vec<Block>>)> = Vec::new();
-        let mut i = 0;
-        while i < elems.len() {
-            let node = elems[i];
-            let next = elems.get(i + 1).copied();
+        let mut elems = elems.into_iter();
+        let mut lookahead = elems.next();
+        while let Some(current) = lookahead.take() {
+            lookahead = elems.next();
+            let node: &Node = current.borrow();
+            let next: Option<&Node> = lookahead.as_ref().map(std::borrow::Borrow::borrow);
             // Caption before body, or body before caption (the latter only
             // when the caption paragraph does not keep with the next one).
             // A numbered paragraph belongs to its list, so it neither
@@ -891,7 +978,8 @@ impl Ctx {
                 Self::flush_list(&mut segments, &mut list);
                 flush_definitions(&mut segments, &mut definitions);
                 segments.push(self.captioned(caption, body, state));
-                i += 2;
+                // Both were consumed, so the lookahead advances again.
+                lookahead = elems.next();
                 continue;
             }
             match node.name.as_str() {
@@ -936,7 +1024,6 @@ impl Ctx {
                     }
                 }
             }
-            i += 1;
         }
         Self::flush_list(&mut segments, &mut list);
         flush_definitions(&mut segments, &mut definitions);
@@ -2269,6 +2356,59 @@ mod tests {
         ]
     }
 
+    /// The body is streamed, so a part that fails to parse fails *during*
+    /// the walk rather than before it. It must still be reported: a
+    /// truncated document is a wrong answer where an error is a true one.
+    #[test]
+    fn a_malformed_body_is_refused_not_truncated() {
+        let good = write_docx(&Pandoc::new(vec![
+            Block::Para(vec![Inline::Str("first".to_owned())]),
+            Block::Para(vec![Inline::Str("second".to_owned())]),
+        ]))
+        .expect("writable");
+        assert_eq!(read_docx(&good).expect("readable").blocks.len(), 2);
+
+        for (name, break_it) in [
+            // Truncated after the first paragraph.
+            ("truncated", (|xml: &str| {
+                let at = xml.find("second").expect("the second paragraph");
+                xml[..at].to_owned()
+            }) as fn(&str) -> String),
+            // An entity nothing defines, in the middle of the body.
+            ("bad entity", |xml: &str| xml.replace("second", "&nope;")),
+            // Malformed before the body ever starts.
+            ("bad prologue", |xml: &str| xml.replace("<w:body>", "<w:body attr=>")),
+            // No body at all.
+            ("no body", |xml: &str| xml.replace("w:body", "w:elsewhere")),
+        ] {
+            let broken = rebuild(&good, |part, content| {
+                Some(if part == "word/document.xml" {
+                    break_it(&String::from_utf8_lossy(content)).into_bytes()
+                } else {
+                    content.to_vec()
+                })
+            });
+            assert!(read_docx(&broken).is_err(), "{name} was not refused");
+        }
+    }
+
+    #[test]
+    fn the_section_properties_are_the_body_s_own() {
+        // `sectPr` inside a `pPr` is a section *break*, and every one of
+        // those precedes the body's own — which is what sets text width,
+        // and so every table's column widths.
+        let section = "<w:sectPr><w:pgSz w:w=\"12240\"/><w:pgMar w:left=\"1\" w:right=\"2\" w:gutter=\"3\"/></w:sectPr>";
+        let xml = format!("<w:body><w:p><w:pPr><w:sectPr><w:pgSz w:w=\"1\"/></w:sectPr></w:pPr></w:p>{section}</w:body>");
+        let found = body_section(&xml).expect("a section");
+        assert_eq!(found, section);
+        let parsed = xml::parse(&found).expect("parsable");
+        assert!((text_width(Some(&parsed)) - (12240.0 - 6.0)).abs() < f64::EPSILON);
+        // Both spellings, and none at all.
+        assert_eq!(body_section("<w:body><w:sectPr/></w:body>").as_deref(), Some("<w:sectPr/>"));
+        assert_eq!(body_section("<w:body/>"), None);
+        assert!((text_width(None) - DEFAULT_TEXT_WIDTH).abs() < f64::EPSILON);
+    }
+
     #[test]
     fn every_legal_spelling_of_a_target_names_the_same_part() {
         // All four are what Word and pandoc actually write.
@@ -2542,3 +2682,4 @@ mod tests {
         assert_eq!(state.list_number("1", 0, 1), 3);
     }
 }
+
