@@ -1723,7 +1723,14 @@ impl Ctx {
 
     fn image(&self, drawing: &Node, state: &State) -> Option<Inline> {
         let blip = find_descendant(drawing, "blip")?;
-        let target = self.rels(state).get(blip.attr("r:embed")?)?;
+        // Word keeps an SVG in an extension of the blip and puts a raster
+        // fallback on the blip itself; pandoc writes only the extension.
+        // The fallback is preferred where there is one — every reader can
+        // show it — but a blip with nothing on it is not an empty picture.
+        let id = blip
+            .attr("r:embed")
+            .or_else(|| find_descendant(blip, "svgBlip").and_then(|svg| svg.attr("r:embed")))?;
+        let target = self.rels(state).get(id)?;
         let docpr = find_descendant(drawing, "docPr");
         let alt = docpr.and_then(|d| d.attr("descr")).unwrap_or_default();
         let title = docpr.and_then(|d| d.attr("title")).unwrap_or_default();
@@ -2227,6 +2234,40 @@ fn trim_paragraph(mut inlines: Vec<Inline>) -> Vec<Inline> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `docx -> docx` has to keep every format, not just the three it
+    /// started with. An SVG is the one that can fail silently: Word and
+    /// pandoc both keep its relationship id inside an extension of the
+    /// blip rather than on the blip itself, so a reader that looks only
+    /// at the blip drops the picture while the package still opens.
+    #[test]
+    fn every_embeddable_format_survives_docx_to_docx() {
+        for (extension, bytes) in crate::media::samples() {
+            let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
+                Attr::default(),
+                vec![Inline::Str("alt".to_owned())],
+                Target { url: format!("pic.{extension}"), title: String::new() },
+            )])]);
+            let package = write_docx_with_media(&doc, &|_| Some(bytes.clone())).expect("writable");
+
+            let (back, media) = read_docx_with_media(&package).expect("readable");
+            let url = image_url(&back)
+                .unwrap_or_else(|| panic!("a {extension} came back as alt text"));
+            assert_eq!(
+                media.get(&url).map(Vec::as_slice),
+                Some(&bytes[..]),
+                "a {extension} lost its bytes, keyed by {url}"
+            );
+
+            let again = write_docx_with_media(&back, &|u| media.get(u).cloned()).expect("writable");
+            let (_, still) = read_docx_with_media(&again).expect("readable");
+            assert_eq!(
+                still.values().next().map(Vec::as_slice),
+                Some(&bytes[..]),
+                "a {extension} was lost on the second pass"
+            );
+        }
+    }
 
     /// A one-pixel PNG, embedded and read back out.
     #[test]

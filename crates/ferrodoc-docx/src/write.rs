@@ -580,21 +580,39 @@ impl Writer<'_> {
         let existing = self.relations.iter().position(|relation| {
             matches!(relation, Relation::Image { url, .. } if *url == target.url)
         });
-        let (id, image) = if let Some(index) = existing {
+        // The image is identified first and its part registered last, so
+        // that giving up in between leaves no media part behind for
+        // nothing to point at.
+        let (image, fresh) = if let Some(index) = existing {
             let Relation::Image { image, .. } = &self.relations[index] else {
                 unreachable!("the position predicate matched an image")
             };
-            (format!("rId{}", RELS_BASE + index + 1), *image)
+            (*image, None)
         } else {
             let bytes = (self.media)(&target.url)?;
-            let image = media::inspect(&bytes)?;
-            let url = target.url.clone();
-            (self.relate(Relation::Image { url, image, bytes }), image)
+            (media::inspect(&bytes)?, Some(bytes))
         };
-        // The document's own size wins; failing that the image's own,
-        // which pandoc reads at one pixel per point.
-        let width = emu(attr, "width").unwrap_or_else(|| i64::from(image.width) * EMU_PER_POINT);
-        let height = emu(attr, "height").unwrap_or_else(|| i64::from(image.height) * EMU_PER_POINT);
+
+        // The document's own size wins; failing that the image's own.
+        let width = emu(attr, "width").unwrap_or_else(|| intrinsic(image.size.width, image.size.dpi_x));
+        let height =
+            emu(attr, "height").unwrap_or_else(|| intrinsic(image.size.height, image.size.dpi_y));
+        // A drawing outside OOXML's coordinate range is one Word refuses
+        // and LibreOffice opens with the picture silently missing, so a
+        // header claiming four billion pixels becomes alt text. The bottom
+        // of the range matters as much: a resolution absurd enough rounds
+        // the extent down to nothing, which is an invisible picture rather
+        // than a visible failure.
+        if !(1..=MAX_EMU).contains(&width) || !(1..=MAX_EMU).contains(&height) {
+            return None;
+        }
+
+        let id = if let Some(bytes) = fresh {
+            self.relate(Relation::Image { url: target.url.clone(), image, bytes })
+        } else {
+            let index = existing.expect("no fresh bytes means a part already exists");
+            format!("rId{}", RELS_BASE + index + 1)
+        };
         let (alt, title) = (escape_attribute(alt), escape_attribute(&target.title));
         Some(format!(
             concat!(
@@ -602,7 +620,7 @@ impl Writer<'_> {
                 r#"<wp:docPr id="1" name="Picture" descr="{alt}" title="{title}"/>"#,
                 r#"<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">"#,
                 r#"<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Picture" descr="{alt}"/><pic:cNvPicPr/></pic:nvPicPr>"#,
-                r#"<pic:blipFill><a:blip r:embed="{id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"#,
+                r#"<pic:blipFill>{blip}<a:stretch><a:fillRect/></a:stretch></pic:blipFill>"#,
                 r#"<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{width}" cy="{height}"/></a:xfrm>"#,
                 r#"<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>"#,
                 r#"</a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"#
@@ -611,7 +629,7 @@ impl Writer<'_> {
             height = height,
             alt = alt,
             title = title,
-            id = id
+            blip = blip(&id, image.extension)
         ))
     }
 
@@ -938,6 +956,33 @@ fn plain_text(inlines: &[Inline]) -> String {
     out
 }
 
+/// The picture reference inside a `pic:blipFill`.
+///
+/// An SVG does not go where every other format goes. Word keeps one in an
+/// extension of the blip, with a raster fallback on the blip itself;
+/// pandoc writes the extension alone and reads it back, so this matches
+/// pandoc rather than invent a fallback there is no raster image for.
+fn blip(id: &str, extension: &str) -> String {
+    if extension != "svg" {
+        return format!(r#"<a:blip r:embed="{id}"/>"#);
+    }
+    format!(
+        concat!(
+            r#"<a:blip><a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}">"#,
+            r#"<asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main""#,
+            r#" r:embed="{id}"/></a:ext></a:extLst></a:blip>"#
+        ),
+        id = id
+    )
+}
+
+/// An image's own size in EMU, at the resolution it is counted in.
+/// Pandoc truncates here, so seven pixels of the 299 dpi a 300-dpi PNG
+/// reports is 21407 EMU rather than the 21336 that 300 would give.
+fn intrinsic(pixels: u32, dpi: u32) -> i64 {
+    i64::from(pixels) * EMU_PER_INCH / i64::from(dpi)
+}
+
 /// A dimension attribute (`width`, `height`) in EMU, if the document
 /// states one. Understands the units pandoc's readers produce.
 fn emu(attr: &Attr, name: &str) -> Option<i64> {
@@ -958,7 +1003,12 @@ fn emu(attr: &Attr, name: &str) -> Option<i64> {
         _ => return None,
     };
     #[expect(clippy::cast_possible_truncation, reason = "EMU are whole units")]
-    Some((number * per_unit) as i64)
+    let emu = (number * per_unit) as i64;
+    // A stated size of nothing is not a size. Pandoc writes `cx="0"` for
+    // a percentage-sized SVG, our reader reads that back as `width="0in"`
+    // faithfully, and taking it literally turns a picture pandoc wrote
+    // into alt text one hop later.
+    (emu > 0).then_some(emu)
 }
 
 /// The values of a metadata field, one per paragraph to write for it.
@@ -986,8 +1036,11 @@ const CONTINUATION_NUM: usize = 1000;
 const CONTINUATION_ABSTRACT: usize = 900;
 const FOOTNOTE_BASE: usize = 2;
 
-/// One EMU is 1/914400 inch; one point is 1/72 inch.
-const EMU_PER_POINT: i64 = 12_700;
+/// One EMU is 1/914400 inch.
+const EMU_PER_INCH: i64 = 914_400;
+/// The largest coordinate OOXML allows (`ST_PositiveCoordinate`): 1224
+/// inches, or a 34-metre picture.
+const MAX_EMU: i64 = 27_273_042_316_900;
 
 const CONTENT_TYPES_HEAD: &str = concat!(
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
@@ -1164,6 +1217,162 @@ mod tests {
                 assert!(declared.contains(&id), "{part} uses {id}, which its rels do not declare");
             }
         }
+    }
+
+    /// A media part with no content type is a package Word refuses to
+    /// open, and nothing else here would notice: the document is
+    /// well-formed, the relationship resolves, and a round trip through
+    /// our own reader is perfect. Every format has to be checked, because
+    /// each brings an extension of its own.
+    #[test]
+    fn every_media_part_the_package_holds_has_a_content_type() {
+        for (extension, bytes) in crate::media::samples() {
+            let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
+                Attr::default(),
+                vec![Inline::Str("alt".to_owned())],
+                Target { url: format!("pic.{extension}"), title: String::new() },
+            )])]);
+            let package = write_docx_with_media(&doc, &|_| Some(bytes.clone())).expect("writable");
+
+            let parts = media_parts(&package);
+            assert_eq!(parts.len(), 1, "a {extension} was not embedded at all");
+            let types = entry(&package, "[Content_Types].xml");
+            for part in parts {
+                let found = part.rsplit('.').next().expect("a part name has an extension");
+                assert!(
+                    types.contains(&format!(r#"<Default Extension="{found}""#)),
+                    "{part} has no content type, so Word will not open the package"
+                );
+            }
+            // ...and the drawing has to point at it. An SVG carries its
+            // id inside an extension of the blip rather than on it, so
+            // this is the one that can come out referencing nothing.
+            let document = entry(&package, "word/document.xml");
+            assert!(
+                !ids(&document, "r:embed=\"").is_empty(),
+                "the {extension} drawing references no picture"
+            );
+        }
+    }
+
+    /// Pandoc and Word both keep an SVG in an extension of the blip, and
+    /// pandoc's reader looks nowhere else. Written as the plain
+    /// `<a:blip r:embed>` every other format uses, the round trip through
+    /// our own reader still looks perfect and pandoc reads no picture at
+    /// all — so only the literal output can hold this.
+    #[test]
+    fn an_svg_is_referenced_the_way_pandoc_reads_it() {
+        let document = |extension: &str, bytes: Vec<u8>| {
+            let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
+                Attr::default(),
+                Vec::new(),
+                Target { url: format!("pic.{extension}"), title: String::new() },
+            )])]);
+            entry(
+                &write_docx_with_media(&doc, &|_| Some(bytes.clone())).expect("writable"),
+                "word/document.xml",
+            )
+        };
+        let samples = crate::media::samples();
+        let of = |wanted: &str| {
+            let (extension, bytes) = samples
+                .iter()
+                .find(|(extension, _)| *extension == wanted)
+                .expect("a sample of every format");
+            document(extension, bytes.clone())
+        };
+        assert!(of("svg").contains(concat!(
+            r#"<a:blip><a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}">"#,
+            r#"<asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main""#,
+            r#" r:embed="rId4"/></a:ext></a:extLst></a:blip>"#
+        )));
+        // Nothing else is written that way: a raster picture in an
+        // extension is one Word shows an empty frame for.
+        assert!(of("png").contains(r#"<a:blip r:embed="rId4"/>"#));
+    }
+
+    /// A drawing has to fit OOXML's coordinate range. Outside it the
+    /// package still opens and the picture is silently missing — worse
+    /// than the alt text, because nothing is left to read. And a media
+    /// part must not be registered for a picture that is then given up
+    /// on, or the package carries bytes nothing points at.
+    #[test]
+    fn a_picture_too_large_to_place_is_alt_text_and_leaves_no_part_behind() {
+        let attribute = |value: &str| vec![("width".to_owned(), value.to_owned())];
+
+        // A four-billion-pixel header, which is 55 metres of page.
+        let mut huge = b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR".to_vec();
+        huge.extend_from_slice(&4_000_000_000u32.to_be_bytes());
+        huge.extend_from_slice(&4_000_000_000u32.to_be_bytes());
+        huge.extend_from_slice(&[0; 9]);
+        assert_eq!(picture(Vec::new(), &huge), (false, 0));
+
+        // A stated size just as absurd.
+        let ok = crate::media::samples()
+            .into_iter()
+            .find(|(extension, _)| *extension == "png")
+            .expect("a png sample")
+            .1;
+        assert_eq!(picture(attribute("1e30"), &ok), (false, 0));
+        // A resolution absurd enough rounds the extent down to nothing.
+        let mut invisible = ok.clone();
+        invisible.extend_from_slice(&9u32.to_be_bytes());
+        invisible.extend_from_slice(b"pHYs");
+        invisible.extend_from_slice(&u32::MAX.to_be_bytes());
+        invisible.extend_from_slice(&u32::MAX.to_be_bytes());
+        invisible.push(1);
+        assert_eq!(picture(Vec::new(), &invisible), (false, 0));
+
+        // ...and an ordinary picture is still placed.
+        assert_eq!(picture(Vec::new(), &ok), (true, 1));
+    }
+
+    /// Pandoc writes `cx="0"` for an SVG it cannot size, and the reader
+    /// reads that back faithfully as `width="0in"`. Taking it literally
+    /// refused the drawing and turned a picture pandoc itself had written
+    /// into alt text one hop later.
+    #[test]
+    fn a_stated_size_of_nothing_is_no_size_at_all() {
+        let png = crate::media::samples()
+            .into_iter()
+            .find(|(extension, _)| *extension == "png")
+            .expect("a png sample")
+            .1;
+        for stated in ["0in", "0.0in", "0", "-3in"] {
+            let attributes = vec![
+                ("width".to_owned(), stated.to_owned()),
+                ("height".to_owned(), stated.to_owned()),
+            ];
+            assert_eq!(
+                picture(attributes, &png),
+                (true, 1),
+                "a stated {stated} should leave the image its own size"
+            );
+        }
+    }
+
+    /// Whether a drawing was written for this image, and how many media
+    /// parts the package ended up holding.
+    fn picture(attributes: Vec<(String, String)>, bytes: &[u8]) -> (bool, usize) {
+        let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
+            Attr { attributes, ..Attr::default() },
+            vec![Inline::Str("alt".to_owned())],
+            Target { url: "pic.png".to_owned(), title: String::new() },
+        )])]);
+        let package = write_docx_with_media(&doc, &|_| Some(bytes.to_vec())).expect("writable");
+        let document = entry(&package, "word/document.xml");
+        (document.contains("<w:drawing>"), media_parts(&package).len())
+    }
+
+    /// Every part under `word/media/`.
+    fn media_parts(bytes: &[u8]) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        (0..archive.len())
+            .filter_map(|i| {
+                let name = archive.by_index(i).ok()?.name().to_owned();
+                name.starts_with("word/media/").then_some(name)
+            })
+            .collect()
     }
 
     /// Every XML part in the package, rels included.

@@ -50,6 +50,49 @@ Reads and writes OOXML word processing documents. Gated by `diff-docx`
   names is in `styles.xml`. Both caught real breakage: `footnotes.xml`
   declared only `xmlns:w`, so a picture in a note made the package
   unopenable, and `CaptionedFigure` was used before it was declared.
+- `media::inspect` reports a pixel count **and the resolution it is
+  counted at**, never a bare size. Half the formats have no pixels: an EMF
+  is hundredths of a millimetre at 2540 to the inch, a WMF is whatever its
+  header says. A 300-dpi PNG placed at 72 is four times too wide.
+- A JPEG states its resolution in **two** places and they do not tie:
+  JFIF in APP0 and Exif in APP1. Exif wins where it names a resolution
+  *and* the unit it is in; otherwise JFIF answers. Both halves measured,
+  and both are four-fold errors when wrong: reading JFIF alone mis-sizes
+  every scanner JPEG, and preferring Exif unconditionally mis-sizes every
+  file whose Exif carries no resolution tags — which is most of them. A
+  resolution with no `ResolutionUnit` beside it does not count, for a TIFF
+  either. `directory()` reads the Exif IFD and the TIFF one, which are the
+  same structure with the same three tags.
+- **Probe with real files.** A hand-built minimal JPEG or TIFF is one
+  pandoc cannot parse at all: it falls back to 300x200 pt and every
+  comparison against it is meaningless. Build them with ImageMagick or
+  Pillow, and splice a crafted header into a real file rather than
+  synthesising a whole one. Two wrong rules were measured off synthetic
+  files before this was understood.
+- Offsets in a TIFF or Exif directory come straight out of `u32` fields,
+  so the arithmetic on them must be checked: on wasm32 `usize` is 32 bits
+  and a crafted offset aborts instead of being refused. The byte readers
+  are all `checked_add`, and a chunk length that overflows ends a scan
+  rather than failing it — failing would refuse on 32-bit a file 64-bit
+  embeds.
+- An SVG is recognized by its **root element**, never by searching for
+  `<svg`: that sized a picture from a commented-out element and embedded
+  an HTML page containing an icon as an `image/svg+xml` part.
+- An extent outside `ST_PositiveCoordinate` (1..=27273042316900) makes a
+  package Word refuses and LibreOffice opens with the picture silently
+  gone. `picture()` gives up before registering the part, so a refused
+  image leaves no orphan media part behind.
+- An **SVG does not go in the blip**. Word and pandoc both put its
+  relationship id in an `asvg:svgBlip` inside `a:blip`'s `extLst`, with the
+  raster fallback on the blip itself, and pandoc's reader looks nowhere
+  else. Written the ordinary way the round trip here is still perfect and
+  pandoc reads no picture at all, so only
+  `an_svg_is_referenced_the_way_pandoc_reads_it` holds it.
+- Pandoc's EMF size comes from the header's `szlDevice`/`szlMillimeters` —
+  the monitor of the machine that recorded the file — and quantises the
+  drawing onto that pixel grid, differently per axis. That is not a rule to
+  follow; the frame is the size. Same for a WMF, which pandoc cannot size
+  at all and gives its 300x200 point default.
 - A `Figure` writes its content with the `CaptionedFigure` style. Pandoc's
   reader keys the pair on it: written any other way pandoc drops the
   picture, even though our own round trip looks fine.

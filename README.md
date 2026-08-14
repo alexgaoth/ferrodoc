@@ -162,7 +162,8 @@ The table above is not the whole picture, and pretending otherwise would make
 the rest less believable. Pandoc supports ~40 formats to ferrodoc's four, plus
 citations, templates, Lua filters, PDF output and fifteen years of edge cases.
 Our DOCX writer still drops raw blocks, which have no OOXML equivalent, and
-embeds only PNG, JPEG and GIF images. The HTML reader parses to the HTML5
+embeds eight image formats — PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF —
+where anything else becomes alt text. The HTML reader parses to the HTML5
 spec, via `html5ever`, where pandoc uses `tagsoup`; on malformed markup — an
 unclosed `<a>`, a tag with no closing `>`, a `<pre>` inside a `<tr>` — the
 two build different trees, and that is what most of the 26 unmatched

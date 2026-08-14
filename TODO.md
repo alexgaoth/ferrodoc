@@ -37,10 +37,11 @@ behind them.
 | HTML writer | 652/652 identical |
 | Markdown writer | 652/652 round-trip fidelity — **pandoc manages 593/652** |
 | DOCX reader | 36/37 corpus documents identical |
-| DOCX writer | 643/652, with embedded PNG/JPEG/GIF and document metadata |
+| DOCX writer | 643/652, with embedded images and document metadata |
 | HTML reader | 631/657 identical; closes the Markdown ↔ AST ↔ HTML ↔ DOCX square |
 | GFM | reader 654/655 identical; writer 655/655 round-trip fidelity — **pandoc manages 589/655**. `docx → gfm` keeps its tables |
 | Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
+| Image formats | PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF embed, each at the size and resolution its own header states — Exif and JFIF, `pHYs`, TIFF rationals, an EMF frame. All eight open in LibreOffice; ten measured divergences from pandoc, all in `COMPATIBILITY.md` |
 | Verifiability | CI on three platforms against pinned pandoc, wasm32 build, 500k-mutation fuzz per run, `COMPATIBILITY.md` |
 | Packaging | licences, crate metadata, tag-driven static binaries — everything except the irreversible steps |
 | DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
@@ -76,6 +77,8 @@ where the expensive bugs have been:
 | `docx → markdown` at 840 MB for 5 MB of use | no gate measures memory |
 | a threshold that tolerated five failures | the gate itself was the defect |
 | a fixture inert for two rounds | it passed, because it could not fail |
+| every scanner JPEG 4x too wide | no gate reads an image header |
+| an offset overflow that aborts on wasm32 | every gate runs on x86-64 |
 
 So: **iterate** a change that writes a file another program must open, that
 touches memory or the CLI surface, that adds a gate, or that can lose content
@@ -92,27 +95,7 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. The image formats Word actually writes — `/iterate`
-
-`docx → docx` keeps its pictures, except when it does not: `media::inspect`
-recognizes PNG, JPEG and GIF, and everything else falls back to alt text. A
-Word document with a pasted chart (EMF/WMF), a modern icon (SVG) or a
-photo saved from the web (WebP) loses it — and the media bag now carries the
-bytes all the way to a writer that refuses them, which is the most annoying
-possible place to stop.
-
-- Extend `media::inspect` with the header parsing each needs for its
-  dimensions: WebP (`RIFF`/`VP8X`), EMF (its bounds record), TIFF (IFD tags
-  256/257), and SVG (`width`/`height`, or `viewBox` when they are relative).
-- Content types must be declared per extension or Word rejects the package.
-- Anything still unrecognized must keep falling back to alt text, never
-  produce a package that will not open.
-
-**Iterate: yes.** Silent content loss, and the failure — a package Word
-refuses — is exactly what no gate can see. That combination has now produced
-a BLOCKER twice.
-
-### 2. `HTML → AST` is superlinear — probably no `/iterate`
+### 1. `HTML → AST` is superlinear — probably no `/iterate`
 
 1.25 ms / 168 ms / **4.12 s** across 10 KB / 1 MB / 10 MB: the same shape the
 DOCX reader had before its body was streamed, and there is now a playbook for
@@ -128,7 +111,7 @@ a reviewer. But if it changes *how* the reader walks — as streaming did for
 DOCX — the truncation and error-path questions come back, and those are worth
 a round.
 
-### 3. Raw passthrough in the HTML reader — `/iterate`
+### 2. Raw passthrough in the HTML reader — `/iterate`
 
 An element the reader does not know contributes its children and loses its own
 tag, so `<video>`, `<iframe>`, `<figure>` and every custom element quietly
@@ -137,10 +120,10 @@ become their contents. Pandoc emits `RawBlock`/`RawInline` and keeps them.
 This is the last silent-loss family left in a reader, which is what makes it
 worth doing before the polish items below.
 
-**Iterate: yes** — the same reason as item 1. `diff-html-read` would score it,
+**Iterate: yes** — the same reason the image formats did. `diff-html-read` would score it,
 but "what did the user lose" is not a number that gate reports.
 
-### 4. Publish 0.1 — blocked on a decision, not on work
+### 3. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -151,7 +134,7 @@ version is still visible, so it needs an owner's go-ahead.
 
 **Iterate: no.** Nothing to review; it is a decision.
 
-### 5. PDF output — as a separate crate, not in the binary
+### 4. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -166,7 +149,7 @@ work; not next.
 **Iterate: yes, per phase** — a new crate with a new output format has no gate
 at all until one is built, which is the condition the loop exists for.
 
-### 6. Python and Node bindings — blocked on evidence
+### 5. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.
@@ -193,6 +176,12 @@ None of these need a loop: each is a single rule with a gate that scores it.
   if someone needs the structure more than the grid.
 - A regression fixture for *every* mismatch ever found. The recent ones have
   them; older ones live only in `.iterate/` verdicts.
+- A **stated** image size is read differently from pandoc, both measured
+  while adding the image formats: `{width=100px}` is 100 points here and 75
+  for pandoc, which counts a CSS pixel at 96 dpi; and giving only a width
+  leaves the height at the image's own, where pandoc scales it to keep the
+  aspect ratio. Intrinsic size — what the file itself says — already
+  matches. `emu()` in `write.rs` is the whole of it.
 - `restore_verbatim_newline` scans the source for `<pre>` without knowing
   whether that `<` sits inside another tag's attribute value.
 

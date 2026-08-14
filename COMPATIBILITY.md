@@ -76,8 +76,66 @@ reader flattens.
 - `corpus/nested-structures.md`: a quotation nested in a way the round trip
   does not preserve.
 - **Raw blocks** are dropped: OOXML has no equivalent.
-- **Images** embed as PNG, JPEG and GIF only. SVG, WebP, TIFF and EMF fall
-  back to alt text rather than produce a package Word would reject.
+- **Images** embed as PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF. A
+  format not in that list — BMP among them — falls back to alt text rather
+  than produce a package Word would reject. Every one of those eight opens
+  in LibreOffice with its picture intact, which is the check no gate here
+  makes.
+
+An image is placed at the size the file itself states, resolution
+included: a 300-dpi PNG is a quarter the width of a 72-dpi one with the
+same pixel count. A JPEG states its resolution in two places that do not
+tie — JFIF in APP0 and Exif in APP1 — and the rule, pandoc's, is Exif
+where it names a resolution *and* the unit it is in, JFIF otherwise. A
+scanner writes Exif and frequently no JFIF density; most Exif segments
+name no resolution at all. Reading either one alone is a four-fold error
+on exactly the files that bothered to record one.
+
+Ten places diverge from pandoc deliberately, every row below measured
+against the 3.8.2.1 binary on a real file of that format:
+
+| | pandoc | ferrodoc |
+|---|---|---|
+| lossless WebP, 7x11 | 1x6 — it mis-reads the VP8L header | 7x11 |
+| big-endian TIFF or Exif, 300 dpi | 44 dpi — it reads the rationals in the wrong byte order | 300 dpi |
+| JPEG with neither JFIF nor Exif | 300 x 200 pt — no size at all | the frame header's 7x11 |
+| EMF, frame 185x291 | 4.5 x 8.25 pt | 5.244 x 8.248 pt |
+| WMF, any | 300 x 200 pt | the placeable header's own size |
+| SVG behind a comment or doctype with no XML declaration | 300 x 200 pt | the root's own 7x11 |
+| SVG, `width="50%"` with a `viewBox` | width 0 — an invisible picture | the view box, 40 x 20 px |
+| SVG, only percentage lengths, no `viewBox` | 0 x 0 — invisible | 300 x 200 pt |
+| SVG, `viewBox="0 0 40.9 20.5"` or `viewBox="0,0,40,20"` | 300 x 200 pt | 40 x 20 px |
+| SVG, `width="10em"` | 123.75 x 247.5 pt | 300 x 200 pt |
+
+They fall into three kinds. **Six** — rows 3 and 5 through 9 — are pandoc
+producing a size nobody chose: a zero extent, or the 300 x 200 point
+fallback it uses for an image it cannot size at all. (An `<svg>` that
+states no size *and* no view box is not among them: pandoc's fallback is
+what ferrodoc writes too, so the two agree.) **Two** — the lossless WebP
+and the byte-swapped rationals — are pandoc reading a header wrongly.
+The remaining **two**, the EMF and the `em` length, are pandoc computing
+a size correctly from a rule this declines to follow.
+
+The EMF row is the substantive divergence, because it is the one where
+pandoc parses everything correctly and still disagrees. Pandoc quantises
+the frame onto the pixel grid of the machine that *recorded* the
+metafile, taking a resolution from the header's device fields — so the
+same drawing is 4.5 pt wide when they claim a 96-dpi monitor and 4.875 pt
+when they claim 192. Reproduce any row with
+`printf '![](x.svg)' | pandoc -f markdown -t docx -o o.docx` and read
+`wp:extent` out of `word/document.xml`.
+
+An image whose stated or intrinsic size falls outside OOXML's coordinate
+range — a header claiming four billion pixels, a resolution so large the
+extent rounds to nothing — is alt text rather than a drawing. Word rejects
+such a package and LibreOffice opens it with the picture silently gone,
+which is worse than the alt text, because nothing is left to read.
+
+Two limits in the same area that are *not* deliberate, both measured:
+a stated `{width=100px}` is 100 points here and 100 pixels at 96 dpi
+(75 points) for pandoc; and giving only one of width and height leaves the
+other at the image's own size, where pandoc scales it to keep the aspect
+ratio.
 
 `docx → docx` keeps its pictures. The bytes go through unchanged; only the
 part name is renumbered. Media is read **only when the output can embed it**,
