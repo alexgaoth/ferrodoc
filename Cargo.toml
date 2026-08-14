@@ -23,11 +23,14 @@ keywords = ["pandoc", "markdown", "docx", "html", "converter"]
 categories = ["text-processing", "parser-implementations", "command-line-utilities"]
 
 [workspace.dependencies]
-ferrodoc-ast = { path = "crates/ferrodoc-ast" }
-ferrodoc-markdown = { path = "crates/ferrodoc-markdown" }
-ferrodoc-html = { path = "crates/ferrodoc-html" }
-ferrodoc-text = { path = "crates/ferrodoc-text" }
-ferrodoc-docx = { path = "crates/ferrodoc-docx" }
+# The version is what a published crate depends on; the path is what this
+# workspace builds against. `cargo publish` refuses a path-only dependency,
+# so without both, every crate above ferrodoc-ast is unpublishable.
+ferrodoc-ast = { path = "crates/ferrodoc-ast", version = "0.1.0" }
+ferrodoc-markdown = { path = "crates/ferrodoc-markdown", version = "0.1.0" }
+ferrodoc-html = { path = "crates/ferrodoc-html", version = "0.1.0" }
+ferrodoc-text = { path = "crates/ferrodoc-text", version = "0.1.0" }
+ferrodoc-docx = { path = "crates/ferrodoc-docx", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip makes parsed doubles bit-identical to their source text,
 # so comparing our AST against pandoc's JSON never reports a phantom
