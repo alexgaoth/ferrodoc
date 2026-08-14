@@ -34,6 +34,10 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
   `scripting_enabled: false`, which makes a `<noscript>` hold markup rather
   than the raw text a browser leaves unparsed; pandoc has no notion of
   scripting, so that is also what it reads. Both were losing every word.
+- `flatten()` takes `template_contents` as well as children. The content
+  hangs off the element by a second link, so taking children alone leaves
+  that chain for the recursive `Rc` drop to walk — the one thing the
+  function exists to prevent.
 - A `<q>` is a quotation, not its children: read as its children the text
   no longer says the words are someone else's. The marks alternate with
   nesting (double, then single), and `Quoted` carries no attributes — the

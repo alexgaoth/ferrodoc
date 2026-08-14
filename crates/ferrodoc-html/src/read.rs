@@ -1270,6 +1270,15 @@ fn synthetic_tbody(rows: Vec<Handle>) -> Handle {
 fn flatten(root: Handle) {
     let mut pending = vec![root];
     while let Some(node) = pending.pop() {
+        // A `<template>`'s content hangs off the element by a second
+        // link, not off its children, so taking children alone would
+        // leave that chain for the recursive `Rc` drop to walk — the
+        // one thing this function exists to prevent.
+        if let NodeData::Element { template_contents, .. } = &node.data
+            && let Some(contents) = template_contents.borrow_mut().take()
+        {
+            pending.push(contents);
+        }
         let kids = std::mem::take(&mut *node.children.borrow_mut());
         pending.extend(kids);
     }
