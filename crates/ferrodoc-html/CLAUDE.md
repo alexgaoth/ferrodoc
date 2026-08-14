@@ -27,6 +27,28 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
   flatten a `MetaList`, because `author` is routinely a list. CSS is
   inlined verbatim (escaping it would break every `>` selector), so
   `</style` is the one sequence neutralized.
+- **Content a browser hides is still content.** `html5ever` parses a
+  `<template>`'s content into a fragment of its own rather than into the
+  element's children, so `children()` reads `template_contents` — walking
+  children alone returned nothing at all. And the parser is asked for
+  `scripting_enabled: false`, which makes a `<noscript>` hold markup rather
+  than the raw text a browser leaves unparsed; pandoc has no notion of
+  scripting, so that is also what it reads. Both were losing every word.
+- A `<q>` is a quotation, not its children: read as its children the text
+  no longer says the words are someone else's. The marks alternate with
+  nesting (double, then single), and `Quoted` carries no attributes — the
+  element's are dropped, here and in pandoc.
+- The span-with-a-class family is `abbr`, `dfn`, `kbd`, `mark`, `small`.
+  Measured one element at a time; it cannot be guessed from what the tags
+  mean, which is why `cite` is not in it and `var`/`samp` are code instead.
+- Pandoc counts `<output>`, `<canvas>` and `<textarea>` block-level and
+  splits a paragraph around them. This reader does not: all three are
+  phrasing content. Deliberate, and in `COMPATIBILITY.md`.
+- **Sweep the element vocabulary in a context where each element is
+  valid.** Testing every tag inside a `<p>` mostly measures how two
+  parsers recover from invalid markup: 35 tags "differed" that way, of
+  which 12 survived being retested in a valid position and only 5 were
+  real. `<td>` outside a table proves nothing.
 - An HTML fixture containing `<main>` tests **only what is inside it**: both
   readers select that element as the document. A `<main>` block at the end of
   `corpus/inline-elements.html` silently disabled the other 49 lines of it

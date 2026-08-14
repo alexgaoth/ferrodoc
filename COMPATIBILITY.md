@@ -48,7 +48,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
-| `diff-html-read` | HTML reader produces pandoc's AST | **631/657** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **632/658** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -242,7 +242,7 @@ delimiter and two runs that meet make a tilde code fence:
   emits the four tildes instead, and its own output then re-reads as a
   code block that swallows the rest of the document.
 
-### HTML reader — 26 of 657
+### HTML reader — 26 of 658
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
 pandoc parses with `tagsoup`, which does not.** On malformed markup the two
@@ -265,6 +265,23 @@ only where matching would mean reproducing a parse failure*:
 - A newline immediately after `<pre>` is **kept**, matching pandoc rather
   than the HTML spec, because a code block silently losing its first line is
   worse than disagreeing about an invisible character.
+- `<output>`, `<canvas>` and `<textarea>` stay **inline**. Pandoc counts
+  them block-level and splits the paragraph around them into `Plain`
+  fragments; all three are phrasing content, so a paragraph that mentions
+  one is one paragraph. Measured: `<p>x <canvas>t</canvas> y</p>` is three
+  blocks to pandoc and one `Para` here.
+
+One case is neither: a `<template>` that is the **first thing in a
+document** with no `<body>` around it. A conforming parser puts it in the
+head, which this reader does not read, and tagsoup has no head to put it
+in — so pandoc sees the content and ferrodoc does not. Anywhere else, a
+template's content is read and spliced where the element stood.
+
+Content a browser may never display is content, and is read: a
+`<template>`'s (which `html5ever` parses into a fragment of its own rather
+than into the element's children) and a `<noscript>`'s (which the reader
+asks for as markup, by parsing with scripting disabled, because pandoc has
+no notion of scripting at all). Both were silently returning nothing.
 
 ## Where ferrodoc behaves differently on purpose
 

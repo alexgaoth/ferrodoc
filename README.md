@@ -58,7 +58,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
-| `ferrodoc-html` reader | **631/657** HTML documents produce identical ASTs |
+| `ferrodoc-html` reader | **632/658** HTML documents produce identical ASTs |
 
 ```sh
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100

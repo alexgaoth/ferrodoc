@@ -1,0 +1,14 @@
+<p>Content a browser may never display is still content, and dropping it
+loses words no other part of the document repeats.</p>
+
+<div><template>A template's content is parsed into a fragment of its own
+rather than into its children, so a walk that reads children alone finds
+the element empty.</template></div>
+
+<p>A template <template>spliced mid-paragraph</template> joins the text
+around it.</p>
+
+<noscript><p>A noscript holds what the page says to a reader who will never
+run the script, which is markup, not raw text.</p></noscript>
+
+<p>Inline <noscript>fallback</noscript> content counts too.</p>

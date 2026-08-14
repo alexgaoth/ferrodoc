@@ -41,6 +41,14 @@ repo-wide.
 
 ## Rules
 
+- **A roadmap item's premise is a claim like any other: measure it before
+  building on it.** Two in `TODO.md` were false. "`HTML -> AST` is
+  superlinear" was the harness timing a document the reader *refuses*; the
+  reader is linear. "Pandoc emits `RawBlock` for elements it does not know"
+  is backwards — pandoc drops the tag exactly as this does, and the real
+  losses were in the opposite direction, in `<template>`, `<noscript>` and
+  `<q>`. Both items were written from a plausible reading rather than a
+  measurement, and both would have been days of work on the wrong thing.
 - Never guess pandoc behavior — probe it first
   (`printf '...' | pandoc -f commonmark -t json`), then encode the probed rule
   with a comment. Every quirk in ferrodoc-markdown was derived this way.

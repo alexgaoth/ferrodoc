@@ -38,7 +38,7 @@ behind them.
 | Markdown writer | 652/652 round-trip fidelity — **pandoc manages 593/652** |
 | DOCX reader | 36/37 corpus documents identical |
 | DOCX writer | 643/652, with embedded images and document metadata |
-| HTML reader | 631/657 identical; closes the Markdown ↔ AST ↔ HTML ↔ DOCX square |
+| HTML reader | 632/658 identical; closes the Markdown ↔ AST ↔ HTML ↔ DOCX square. Content a browser hides — `<template>`, `<noscript>` — is read rather than dropped |
 | GFM | reader 654/655 identical; writer 655/655 round-trip fidelity — **pandoc manages 589/655**. `docx → gfm` keeps its tables |
 | Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
 | Image formats | PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF embed, each at the size and resolution its own header states — Exif and JFIF, `pHYs`, TIFF rationals, an EMF frame. All eight open in LibreOffice; ten measured divergences from pandoc, all in `COMPATIBILITY.md` |
@@ -106,19 +106,7 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. Raw passthrough in the HTML reader — `/iterate`
-
-An element the reader does not know contributes its children and loses its own
-tag, so `<video>`, `<iframe>`, `<figure>` and every custom element quietly
-become their contents. Pandoc emits `RawBlock`/`RawInline` and keeps them.
-
-This is the last silent-loss family left in a reader, which is what makes it
-worth doing before the polish items below.
-
-**Iterate: yes** — the same reason the image formats did. `diff-html-read` would score it,
-but "what did the user lose" is not a number that gate reports.
-
-### 2. Publish 0.1 — blocked on a decision, not on work
+### 1. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -129,7 +117,7 @@ version is still visible, so it needs an owner's go-ahead.
 
 **Iterate: no.** Nothing to review; it is a decision.
 
-### 3. PDF output — as a separate crate, not in the binary
+### 2. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -144,7 +132,7 @@ work; not next.
 **Iterate: yes, per phase** — a new crate with a new output format has no gate
 at all until one is built, which is the condition the loop exists for.
 
-### 4. Python and Node bindings — blocked on evidence
+### 3. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.
@@ -171,6 +159,12 @@ None of these need a loop: each is a single rule with a gate that scores it.
   if someone needs the structure more than the grid.
 - A regression fixture for *every* mismatch ever found. The recent ones have
   them; older ones live only in `.iterate/` verdicts.
+- Pandoc counts `<output>`, `<canvas>` and `<textarea>` block-level and
+  splits a paragraph around them into `Plain` fragments; this reader keeps
+  them inline, because all three are phrasing content. And a `<template>`
+  that is the *first* thing in a document goes into the head, which this
+  reader does not read, so its content is lost where pandoc keeps it —
+  the one position where a template still loses anything.
 - A **stated** image size is read differently from pandoc, both measured
   while adding the image formats: `{width=100px}` is 100 points here and 75
   for pandoc, which counts a CSS pixel at 96 dpi; and giving only a width

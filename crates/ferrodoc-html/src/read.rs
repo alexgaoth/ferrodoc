@@ -12,7 +12,8 @@
 use crate::Error;
 use ferrodoc_ast::{
     Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Inline, ListAttributes,
-    ListNumberDelim, ListNumberStyle, Pandoc, Row, Table, TableBody, TableFoot, TableHead, Target,
+    ListNumberDelim, ListNumberStyle, Pandoc, QuoteType, Row, Table, TableBody, TableFoot,
+    TableHead, Target,
 };
 use html5ever::tendril::TendrilSink as _;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
@@ -34,7 +35,18 @@ pub const MAX_NESTING: usize = 200;
 /// way a browser repairs it.
 pub fn read_html(input: &str) -> Result<Pandoc, Error> {
     let source = restore_verbatim_newline(&expand_tabs(input));
-    let dom = html5ever::parse_document(RcDom::default(), html5ever::ParseOpts::default())
+    // Scripting off, so a `<noscript>` holds markup rather than the raw
+    // text a browser would leave unparsed. Its content is content — it is
+    // what the page says to a reader who will never run the script — and
+    // pandoc, which has no notion of scripting at all, reads it that way.
+    let options = html5ever::ParseOpts {
+        tree_builder: html5ever::tree_builder::TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let dom = html5ever::parse_document(RcDom::default(), options)
         .from_utf8()
         .one(source.as_bytes());
     let mut reader = Reader::default();
@@ -55,6 +67,9 @@ pub fn read_html(input: &str) -> Result<Pandoc, Error> {
 #[derive(Default)]
 struct Reader {
     depth: usize,
+    /// How many `<q>` elements enclose the one being read. The marks
+    /// alternate with it, the way nested quotations do in prose.
+    quotes: usize,
     /// Identifiers already handed out, so generated ones stay unique.
     used_idents: HashSet<String>,
     /// The next suffix to try for a base identifier already handed out.
@@ -353,9 +368,11 @@ impl Reader {
         // these was measured against the binary; they are not a family
         // that can be guessed from what the tags mean.
         if let Some(class) = match tag {
+            "abbr" => Some("abbr"),
             "dfn" => Some("dfn"),
             "kbd" => Some("kbd"),
             "mark" => Some("mark"),
+            "small" => Some("small"),
             _ => None,
         } {
             let mut attr = attributes(node);
@@ -418,6 +435,22 @@ impl Reader {
                 out.push(Inline::Image(attr, alt, target));
             }
             "span" => out.push(Inline::Span(attributes(node), self.inlines(kids)?)),
+            // A quotation, whose marks are the element. Dropping it to its
+            // children loses the quoting entirely — nothing in the text
+            // says any more that the words are someone else's. The marks
+            // alternate with nesting, and the element's attributes have
+            // nowhere to go: `Quoted` carries none, here or in pandoc.
+            "q" => {
+                self.quotes += 1;
+                let inner = self.inlines(kids);
+                self.quotes -= 1;
+                let quote = if self.quotes % 2 == 0 {
+                    QuoteType::DoubleQuote
+                } else {
+                    QuoteType::SingleQuote
+                };
+                out.push(Inline::Quoted(quote, inner?));
+            }
             // Never content, however it is nested. A `<textarea>` holds
             // a form's default value, not the document's text.
             "script" | "style" | "head" | "title" | "meta" | "link" | "textarea" => {}
@@ -628,6 +661,15 @@ impl Reader {
 // --- tree helpers ---
 
 fn children(node: &Handle) -> Vec<Handle> {
+    // A `<template>`'s content is parsed into a fragment of its own rather
+    // than into its children, so a walk that reads children alone finds
+    // the element empty and loses every word inside it. Pandoc reads that
+    // content and splices it where the element stood.
+    if let NodeData::Element { template_contents, .. } = &node.data
+        && let Some(contents) = template_contents.borrow().as_ref()
+    {
+        return contents.children.borrow().clone();
+    }
     node.children.borrow().clone()
 }
 
@@ -1349,5 +1391,69 @@ mod tests {
             doc.blocks,
             vec![Block::CodeBlock(Attr::default(), "x".to_owned())]
         );
+    }
+
+    /// Content a browser may never display is still content. A
+    /// `<template>` keeps its own in a separate fragment and a
+    /// `<noscript>` keeps its as raw text when scripting is on, so both
+    /// came back as nothing at all — words no other part of the document
+    /// repeats, gone with no sign that they had been there.
+    #[test]
+    fn content_a_browser_hides_is_still_read() {
+        assert_eq!(
+            blocks("<div><template>held</template></div>"),
+            vec![Block::Div(
+                Attr::default(),
+                vec![Block::Plain(vec![Inline::Str("held".to_owned())])]
+            )]
+        );
+        assert_eq!(
+            blocks("<noscript><p>held</p></noscript>"),
+            vec![Block::Para(vec![Inline::Str("held".to_owned())])]
+        );
+        // Spliced where the element stood, not appended after it.
+        assert_eq!(
+            blocks("<div>a<template>b</template>c</div>"),
+            vec![Block::Div(
+                Attr::default(),
+                vec![Block::Plain(vec![Inline::Str("abc".to_owned())])]
+            )]
+        );
+    }
+
+    /// A quotation is its marks: read as its children alone, nothing in
+    /// the text says any longer that the words are someone else's. The
+    /// marks alternate with nesting, which is what pandoc writes.
+    #[test]
+    fn a_quotation_keeps_its_marks_and_alternates_them() {
+        assert_eq!(
+            blocks("<p><q>outer <q>inner</q></q></p>"),
+            vec![Block::Para(vec![Inline::Quoted(
+                QuoteType::DoubleQuote,
+                vec![
+                    Inline::Str("outer".to_owned()),
+                    Inline::Space,
+                    Inline::Quoted(
+                        QuoteType::SingleQuote,
+                        vec![Inline::Str("inner".to_owned())]
+                    ),
+                ]
+            )])]
+        );
+    }
+
+    /// `<abbr>` and `<small>` join the family that becomes a span with
+    /// the tag as a class. Measured one element at a time against the
+    /// binary; the family cannot be guessed from what the tags mean.
+    #[test]
+    fn an_abbreviation_and_small_print_keep_their_tag_as_a_class() {
+        let span = |class: &str, text: &str| {
+            Block::Para(vec![Inline::Span(
+                Attr { classes: vec![class.to_owned()], ..Attr::default() },
+                vec![Inline::Str(text.to_owned())],
+            )])
+        };
+        assert_eq!(blocks("<p><abbr>WHO</abbr></p>"), vec![span("abbr", "WHO")]);
+        assert_eq!(blocks("<p><small>print</small></p>"), vec![span("small", "print")]);
     }
 }
