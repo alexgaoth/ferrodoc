@@ -14,7 +14,7 @@ published sources describe a later pandoc than this binary.
 |---|---|---|
 | CommonMark | yes | yes (no tables — see below) |
 | GFM | yes (the five spec extensions) | yes |
-| HTML | yes | yes (fragments; no `--standalone`) |
+| HTML | yes | yes (fragment, or `-s` for a whole page) |
 | DOCX | yes | yes |
 | pandoc JSON AST | yes | yes |
 | plain text | — | yes |

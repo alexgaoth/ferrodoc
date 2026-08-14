@@ -21,6 +21,12 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
   hoists whitespace out of an inline element first, which this reader does
   NOT — `<em> b</em>` is `Space`+`Emph[b]` for pandoc, `Emph[Space, b]` here.
   OPEN.
+- `write_html_standalone` frames what `write_html` emits — one writer,
+  two framings, asserted by the test comparing the body against
+  `write_html`. Metadata reaches the head as *text*: escape it, and
+  flatten a `MetaList`, because `author` is routinely a list. CSS is
+  inlined verbatim (escaping it would break every `>` selector), so
+  `</style` is the one sequence neutralized.
 - An HTML fixture containing `<main>` tests **only what is inside it**: both
   readers select that element as the document. A `<main>` block at the end of
   `corpus/inline-elements.html` silently disabled the other 49 lines of it

@@ -45,6 +45,7 @@ behind them.
 | Packaging | licences, crate metadata, tag-driven static binaries — everything except the irreversible steps |
 | Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
 | DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
+| Standalone HTML | `-s` writes a whole page — doctype, charset, `lang`, title, authors — and `--css` inlines a stylesheet |
 
 Performance, measured with `bench-sizes` at 10 KB / 1 MB / 10 MB: markdown →
 AST 0.78 ms / 103 ms / 709 ms; AST → HTML 25 µs / 6.7 ms / 39 ms; AST → docx
@@ -57,16 +58,7 @@ sittings on this machine; only interleaved ratios are comparable.)
 
 ## Next, in order
 
-### 1. `--standalone` HTML output
-
-The writer emits fragments. Anyone converting a document *for the web* — the
-obvious reason to want HTML — has to hand-write `<html>`, `<head>`, a charset
-and a title around it. Pandoc's `--standalone` is one flag.
-
-- `<!doctype>`, `<html lang>`, charset, `<title>` from document metadata.
-- Optional CSS by path; no template language (that is a declared non-goal).
-
-### 2. Publish 0.1 — blocked on a decision, not on work
+### 1. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -75,7 +67,7 @@ version is still visible, so it needs an owner's go-ahead.
   `ferrodoc`.
 - Tag `v0.1.0` — the tag is what triggers the release build.
 
-### 3. PDF output — as a separate crate, not in the binary
+### 2. PDF output — as a separate crate, not in the binary
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -87,7 +79,7 @@ So: a separate `ferrodoc-pdf` crate, or a default-off feature shipping a
 second binary. Nobody who wants a small converter pays for a typesetter. Large
 work; not next.
 
-### 4. Python and Node bindings — blocked on evidence
+### 3. Python and Node bindings — blocked on evidence
 
 Bindings are the adoption vector, but guessing the wrong one costs months.
 Wait for a user.

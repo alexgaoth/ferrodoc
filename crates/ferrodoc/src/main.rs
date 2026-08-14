@@ -18,6 +18,8 @@ OPTIONS:
     -f, --from <FORMAT>     Input format   [inferred from INPUT's extension]
     -t, --to <FORMAT>       Output format  [inferred from --output's extension]
     -o, --output <FILE>     Write to FILE instead of standard output
+    -s, --standalone        Wrap HTML output in a complete page
+        --css <FILE>        Inline a stylesheet into that page
     -h, --help              Print this help
     -V, --version           Print the version
 
@@ -32,6 +34,8 @@ FORMATS:
 
 EXAMPLES:
     ferrodoc README.md -o readme.html
+    ferrodoc README.md -s -o readme.html    # a page a browser can open
+    ferrodoc notes.md -s --css site.css -o notes.html
     ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out
     ferrodoc report.docx -t markdown        # DOCX in, CommonMark out
     ferrodoc page.html -t markdown          # HTML in, markdown out
@@ -56,6 +60,8 @@ fn run() -> Result<(), String> {
     let mut output: Option<PathBuf> = None;
     let mut input: Option<PathBuf> = None;
     let mut stdin_requested = false;
+    let mut standalone = false;
+    let mut css: Option<PathBuf> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -84,6 +90,8 @@ fn run() -> Result<(), String> {
                 to = Some(format(&name)?);
             }
             "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
+            "-s" | "--standalone" => standalone = true,
+            "--css" => css = Some(PathBuf::from(value("--css")?)),
             // An explicit "-" means stdin, and cannot be combined with a
             // named file — silently ignoring one of them would convert the
             // wrong document.
@@ -120,15 +128,7 @@ fn run() -> Result<(), String> {
         );
     };
 
-    let bytes = if let Some(path) = &input {
-        std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?
-    } else {
-        let mut bytes = Vec::new();
-        std::io::stdin()
-            .read_to_end(&mut bytes)
-            .map_err(|e| format!("cannot read standard input: {e}"))?;
-        bytes
-    };
+    let bytes = read_input(input.as_deref())?;
 
     // Image paths in a document are relative to the document, the way
     // every editor that wrote one meant them.
@@ -145,18 +145,59 @@ fn run() -> Result<(), String> {
     } else {
         (ferrodoc::parse(&bytes, from).map_err(|e| e.to_string())?, ferrodoc::Media::new())
     };
-    let converted = ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
-        .map_err(|e| e.to_string())?;
-
-    if let Some(path) = &output {
-        std::fs::write(path, &converted)
-            .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    let converted = if standalone {
+        render_page(&doc, to, css.as_deref())?
     } else {
-        std::io::stdout()
-            .write_all(&converted)
-            .map_err(|e| format!("cannot write to standard output: {e}"))?;
+        if css.is_some() {
+            return Err("--css needs --standalone: a fragment has no <head>".to_owned());
+        }
+        ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
+            .map_err(|e| e.to_string())?
+    };
+
+    write_output(output.as_deref(), &converted)
+}
+
+/// The document's bytes, from a named file or standard input.
+fn read_input(input: Option<&std::path::Path>) -> Result<Vec<u8>, String> {
+    let Some(path) = input else {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("cannot read standard input: {e}"))?;
+        return Ok(bytes);
+    };
+    std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))
+}
+
+fn write_output(output: Option<&std::path::Path>, bytes: &[u8]) -> Result<(), String> {
+    let Some(path) = output else {
+        return std::io::stdout()
+            .write_all(bytes)
+            .map_err(|e| format!("cannot write to standard output: {e}"));
+    };
+    std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// A complete HTML page, with `css` inlined if a file was named.
+///
+/// Only HTML has a page to stand alone in; saying so beats writing the
+/// fragment the flag was meant to prevent.
+fn render_page(
+    doc: &ferrodoc::Pandoc,
+    to: Format,
+    css: Option<&std::path::Path>,
+) -> Result<Vec<u8>, String> {
+    if to != Format::Html {
+        return Err(format!("--standalone applies to html output, not {to}"));
     }
-    Ok(())
+    let css = css
+        .map(|path| {
+            std::fs::read_to_string(path)
+                .map_err(|e| format!("cannot read {}: {e}", path.display()))
+        })
+        .transpose()?;
+    Ok(ferrodoc::render_html_standalone(doc, css.as_deref()))
 }
 
 /// Where an image's bytes come from: the input package first, then a file

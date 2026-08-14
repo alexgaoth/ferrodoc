@@ -245,6 +245,16 @@ pub fn render_with_media(
     }
 }
 
+/// Render a document as a complete HTML page rather than a fragment.
+///
+/// [`render`] to [`Format::Html`] emits the body only, which is what a
+/// template engine wants and what a browser does not. `css`, if given, is
+/// inlined into a `<style>` element; reading it from a file is the
+/// caller's job, because no crate below this one does IO.
+pub fn render_html_standalone(doc: &Pandoc, css: Option<&str>) -> Vec<u8> {
+    ferrodoc_html::write_html_standalone(doc, css).into_bytes()
+}
+
 /// Convert a document from one format to another.
 ///
 /// Images the input embeds are carried through, so `docx → docx` keeps

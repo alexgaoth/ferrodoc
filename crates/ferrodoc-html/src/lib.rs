@@ -56,6 +56,88 @@ pub fn write_html(doc: &Pandoc) -> String {
     out
 }
 
+/// Render a document as a complete HTML page rather than a fragment.
+///
+/// [`write_html`] emits the body only, which is what a template engine or
+/// a CMS wants. A file meant to be opened in a browser needs a doctype, a
+/// charset and a title around it, and writing those by hand is the tax
+/// that made "convert this for the web" a two-step job.
+///
+/// `css` is inlined into a `<style>` element. It is a string, not a path,
+/// because this crate does no IO — which is what keeps it building for
+/// `wasm32`. The caller reads the file.
+///
+/// The head carries what the document actually knows: `title` and
+/// `author` from its metadata, and `lang` on the root element. Nothing is
+/// invented, and a document with no metadata still produces a valid page.
+pub fn write_html_standalone(doc: &Pandoc, css: Option<&str>) -> String {
+    let mut out = String::from("<!DOCTYPE html>\n<html");
+    if let Some(lang) = meta_text(doc, "lang") {
+        out.push_str(" lang=\"");
+        escape_attribute(&mut out, &lang);
+        out.push('"');
+    }
+    out.push_str(">\n<head>\n<meta charset=\"utf-8\" />\n");
+    out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n");
+    for author in meta_texts(doc, "author") {
+        out.push_str("<meta name=\"author\" content=\"");
+        escape_attribute(&mut out, &author);
+        out.push_str("\" />\n");
+    }
+    // Always present: a page without a title shows its file name, and
+    // the element is required.
+    out.push_str("<title>");
+    escape_text(&mut out, meta_text(doc, "title").as_deref().unwrap_or(""));
+    out.push_str("</title>\n");
+    if let Some(css) = css {
+        // Inlined verbatim: it is a stylesheet the caller chose, and
+        // escaping it would break every `>` selector in it. `</style`
+        // is the one sequence that could end the element early.
+        out.push_str("<style>\n");
+        out.push_str(&css.replace("</style", "<\\/style"));
+        out.push_str("\n</style>\n");
+    }
+    out.push_str("</head>\n<body>\n");
+    out.push_str(&write_html(doc));
+    out.push_str("</body>\n</html>\n");
+    out
+}
+
+/// A metadata value as plain text, however it was spelled.
+fn meta_text(doc: &Pandoc, key: &str) -> Option<String> {
+    meta_texts(doc, key).into_iter().next()
+}
+
+/// Every value under `key`: a metadata field may be one value or a list,
+/// and `author` routinely is a list.
+fn meta_texts(doc: &Pandoc, key: &str) -> Vec<String> {
+    fn flatten(value: &ferrodoc_ast::MetaValue, out: &mut Vec<String>) {
+        match value {
+            ferrodoc_ast::MetaValue::MetaString(s) => out.push(s.clone()),
+            ferrodoc_ast::MetaValue::MetaInlines(inlines) => out.push(plain_text(inlines)),
+            ferrodoc_ast::MetaValue::MetaBlocks(blocks) => {
+                for block in blocks {
+                    if let Block::Plain(inlines) | Block::Para(inlines) = block {
+                        out.push(plain_text(inlines));
+                    }
+                }
+            }
+            ferrodoc_ast::MetaValue::MetaList(values) => {
+                for value in values {
+                    flatten(value, out);
+                }
+            }
+            ferrodoc_ast::MetaValue::MetaBool(_) | ferrodoc_ast::MetaValue::MetaMap(_) => {}
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(value) = doc.meta.get(key) {
+        flatten(value, &mut out);
+    }
+    out.retain(|text| !text.is_empty());
+    out
+}
+
 fn write_blocks(out: &mut String, blocks: &[Block]) {
     for block in blocks {
         write_block(out, block);
@@ -473,6 +555,61 @@ mod tests {
 
     fn html(md: &str) -> String {
         write_html(&ferrodoc_markdown::read_commonmark(md).expect("convertible"))
+    }
+
+    #[test]
+    fn a_standalone_page_frames_the_fragment() {
+        use ferrodoc_ast::MetaValue;
+        let mut doc = ferrodoc_markdown::read_commonmark("text\n").expect("convertible");
+        doc.meta.insert(
+            "title".to_owned(),
+            MetaValue::MetaInlines(vec![Inline::Str("My <Doc>".to_owned())]),
+        );
+        doc.meta.insert("lang".to_owned(), MetaValue::MetaString("fr".to_owned()));
+        doc.meta.insert(
+            "author".to_owned(),
+            MetaValue::MetaList(vec![
+                MetaValue::MetaString("Ada".to_owned()),
+                MetaValue::MetaInlines(vec![Inline::Str("Grace".to_owned())]),
+            ]),
+        );
+        let page = write_html_standalone(&doc, Some("body { color: red }"));
+
+        // The body is the fragment, unchanged: one writer, two framings.
+        assert!(page.contains(&format!("<body>\n{}</body>", write_html(&doc))), "{page}");
+        assert!(page.starts_with("<!DOCTYPE html>\n<html lang=\"fr\">\n"), "{page}");
+        assert!(page.contains("<meta charset=\"utf-8\" />"), "{page}");
+        // Metadata is text, and text in a document can contain markup.
+        assert!(page.contains("<title>My &lt;Doc&gt;</title>"), "{page}");
+        // A field may be one value or a list, however it was spelled.
+        assert!(page.contains("content=\"Ada\""), "{page}");
+        assert!(page.contains("content=\"Grace\""), "{page}");
+        assert!(page.contains("body { color: red }"), "{page}");
+    }
+
+    #[test]
+    fn a_page_without_metadata_is_still_a_page() {
+        let doc = ferrodoc_markdown::read_commonmark("text\n").expect("convertible");
+        let page = write_html_standalone(&doc, None);
+        // No `lang`, no `<style>`, but the required title element is
+        // there: leaving it out makes the browser show the file name.
+        assert!(page.starts_with("<!DOCTYPE html>\n<html>\n"), "{page}");
+        assert!(page.contains("<title></title>"), "{page}");
+        assert!(!page.contains("<style>"), "{page}");
+        assert!(!page.contains("author"), "{page}");
+    }
+
+    #[test]
+    fn a_stylesheet_cannot_close_its_own_element() {
+        // CSS is inlined verbatim — escaping it would break every `>`
+        // selector — so the one sequence that could end the element early
+        // is the one thing neutralized.
+        let doc = ferrodoc_markdown::read_commonmark("t\n").expect("convertible");
+        let page = write_html_standalone(&doc, Some("a{}</style><script>evil()</script>"));
+        // Exactly one `</style>`: the writer's own. The injected text is
+        // still there and still inside the element, which is inert.
+        assert_eq!(page.matches("</style>").count(), 1, "{page}");
+        assert!(page.contains("a{}<\\/style>"), "{page}");
     }
 
     #[test]

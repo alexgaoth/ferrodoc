@@ -96,7 +96,8 @@ cargo install --path crates/ferrodoc     # installs the `ferrodoc` binary
 ```
 
 ```sh
-ferrodoc README.md -o readme.html        # formats inferred from extensions
+ferrodoc README.md -o readme.html        # an HTML fragment
+ferrodoc README.md -s -o readme.html     # a page a browser can open        # formats inferred from extensions
 ferrodoc report.docx -o copy.docx        # DOCX in, DOCX out — keeps its images
 ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out — keeps tables
 ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table syntax
@@ -106,7 +107,10 @@ ferrodoc --help                          # every option and format
 ```
 
 Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `json` (the
-pandoc AST). Outputs: those plus `plain`.
+pandoc AST). Outputs: those plus `plain`. `-s`/`--standalone` wraps HTML
+output in a complete page — doctype, charset, `lang`, and the title and
+authors the document carries — and `--css FILE` inlines a stylesheet into
+it.
 
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
 no table syntax, so a table degrades to one paragraph per cell there.
