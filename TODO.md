@@ -46,6 +46,7 @@ behind them.
 | Packaging | licences, crate metadata, tag-driven static binaries — everything except the irreversible steps |
 | DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
 | Benchmarks | every path measured on fixtures `corpus/bench/generate.sh` writes, and `bench-sizes` now fails when a read errors instead of timing the refusal |
+| Inline `<svg>` | a picture written into the page is carried as a `data:` URL, and a `data:` URL now reaches the DOCX writer — HTML with an inline chart converts to a `.docx` LibreOffice opens with the picture |
 | Standalone HTML | `-s` writes a whole page — doctype, charset, `lang`, title, authors — and `--css` inlines a stylesheet |
 
 Performance at 10 KB / 1 MB / 10 MB, one sitting, on fixtures
@@ -60,10 +61,13 @@ Performance at 10 KB / 1 MB / 10 MB, one sitting, on fixtures
 | docx → AST | 4.4 ms | 491 ms | 11.1 s |
 | HTML → AST | 381 µs | 53.6 ms | 644 ms |
 
-Every path is linear in its input. Peak RSS for docx → markdown: 6 MB /
-117 MB / **1.12 GB** — what remains is the AST and the source, not the XML
-tree. (Absolute figures drift ~2× between sittings on this machine; only
-interleaved ratios are comparable.)
+Five of the six paths are linear in their input. **`docx → AST` is not**:
+0.38 s per MB at 1 MB and 0.64 at 10 MB, 16.9× the time for 10× the input.
+It is the one path where size costs more than proportionally, and the only
+one worth measuring again if a big document feels slow. Peak RSS for
+docx → markdown: 6 MB / 117 MB / **1.12 GB** — what remains is the AST and
+the source, not the XML tree. (Absolute figures drift ~2× between sittings
+on this machine; only interleaved ratios are comparable.)
 
 ---
 
@@ -106,27 +110,7 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. Inline `<svg>` is dropped — `/iterate`
-
-The last silent-loss family left in a reader. A chart or an icon written
-inline in a page — `<svg>…</svg>` rather than `<img src>` — becomes nothing
-at all here. Pandoc serializes the element back to text and emits it as an
-`Image` with a `data:image/svg+xml;base64,…` URL, which is why the picture
-survives a conversion through pandoc and not through this.
-
-Found by sweeping the element vocabulary in valid contexts, after the two
-losses that sweep was looking for had already been fixed.
-
-- `ferrodoc-html` has neither an XML serializer nor base64. `markup5ever`
-  can serialize a subtree; base64 is twenty lines or a dependency, and this
-  crate must keep building for wasm32 with no C library.
-- The writer side already round-trips a `data:` URL as an image, so only
-  the reader is missing.
-
-**Iterate: yes** — silent content loss, which is the condition the loop
-exists for, and `diff-html-read` cannot report *what* a user lost.
-
-### 2. Publish 0.1 — blocked on a decision, not on work
+### 1. Publish 0.1 — blocked on a decision, not on work
 
 Everything reversible is done. Publishing cannot be undone and a yanked
 version is still visible, so it needs an owner's go-ahead.
@@ -137,7 +121,35 @@ version is still visible, so it needs an owner's go-ahead.
 
 **Iterate: no.** Nothing to review; it is a decision.
 
-### 3. PDF output — as a separate crate, not in the binary
+### 2. Learn from real documents and users
+
+After 0.1, do not widen the format surface on speculation. The project has
+its intended conversion square; the next useful work is a corpus failure from
+a real document, a measured resource problem, or a workflow a user cannot
+complete. Pin every such finding as a regression fixture before fixing it.
+
+The currently named small gaps belong here: the remaining markdown-reader
+divergences, `spec-09.docx`, the nested quotation DOCX writer case, stated
+image dimensions, and the HTML reader's valid-input mismatches. They are
+repairs, not a reason to delay the first release.
+
+### 3. Add one binding only when usage chooses it
+
+The CLI and Rust crates are the first adoption surface. Do not build Python
+and Node bindings in parallel, and do not guess which community matters more.
+
+- Build a **Python wheel** when the users are ingestion, RAG, ETL, notebook,
+  or Python-backend teams. It should be a thin native binding over this core,
+  not a Python rewrite.
+- Build an **npm package** when the users are browser, edge, or CMS teams.
+  The current WASM release artefact is not that package yet: it needs a
+  JavaScript-facing wrapper and a bytes/string conversion API.
+
+Either binding is a product commitment: document its supported platforms,
+test installation in CI, and keep its public surface as small as the Rust
+facade. Until evidence selects one, neither is the next task.
+
+### Later, only when demand justifies it: PDF output
 
 The original case was "a single ~3 MB binary that renders markdown to PDF with
 no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
@@ -147,15 +159,10 @@ would grow by an order of magnitude.
 
 So: a separate `ferrodoc-pdf` crate, or a default-off feature shipping a
 second binary. Nobody who wants a small converter pays for a typesetter. Large
-work; not next.
+work; do it only for a demonstrated use case.
 
 **Iterate: yes, per phase** — a new crate with a new output format has no gate
 at all until one is built, which is the condition the loop exists for.
-
-### 4. Python and Node bindings — blocked on evidence
-
-Bindings are the adoption vector, but guessing the wrong one costs months.
-Wait for a user.
 
 ---
 
@@ -191,6 +198,9 @@ None of these need a loop: each is a single rule with a gate that scores it.
   leaves the height at the image's own, where pandoc scales it to keep the
   aspect ratio. Intrinsic size — what the file itself says — already
   matches. `emu()` in `write.rs` is the whole of it.
+- `docx → AST` is the one superlinear path: 16.9× the time for 10× the
+  input. Ablate before optimizing, and remember the last time this was
+  claimed of the HTML reader it was the benchmark timing a rejection.
 - `restore_verbatim_newline` scans the source for `<pre>` without knowing
   whether that `<` sits inside another tag's attribute value.
 

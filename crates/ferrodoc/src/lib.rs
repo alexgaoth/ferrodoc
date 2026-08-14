@@ -207,6 +207,66 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
     }
 }
 
+/// The bytes a `data:` URL carries, or `None` if it is not one.
+///
+/// Both spellings, because both appear in real pages: base64, which is
+/// what this crate's own HTML reader writes for an inline `<svg>`, and
+/// percent-encoded, which is what a hand-written SVG data URL usually is.
+fn data_url(url: &str) -> Option<Vec<u8>> {
+    let rest = url.strip_prefix("data:")?;
+    let (media_type, data) = rest.split_once(',')?;
+    if media_type.rsplit(';').next() == Some("base64") {
+        return base64(data);
+    }
+    percent_decode(data)
+}
+
+/// Standard base64 with or without padding. Any character outside the
+/// alphabet — including the whitespace a long URL may be wrapped with —
+/// makes the whole thing not an image, because a picture decoded from
+/// half a stream is worse than no picture.
+fn base64(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let (mut bits, mut held) = (0u32, 0u32);
+    for byte in text.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => u32::from(byte - b'A'),
+            b'a'..=b'z' => u32::from(byte - b'a') + 26,
+            b'0'..=b'9' => u32::from(byte - b'0') + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => return None,
+        };
+        bits = bits << 6 | value;
+        held += 6;
+        if held >= 8 {
+            held -= 8;
+            out.push(u8::try_from(bits >> held & 0xff).ok()?);
+        }
+    }
+    Some(out)
+}
+
+/// Percent-decoding, for a `data:` URL that spells its payload out.
+fn percent_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len());
+    let mut bytes = text.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let mut digits = [0u8; 2];
+            for digit in &mut digits {
+                *digit = bytes.next()?;
+            }
+            let text = std::str::from_utf8(&digits).ok()?;
+            out.push(u8::from_str_radix(text, 16).ok()?);
+        } else {
+            out.push(byte);
+        }
+    }
+    Some(out)
+}
+
 /// Write a document. Images are not embedded; see [`render_with_media`].
 pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
     render_with_media(doc, to, &|_| None)
@@ -229,7 +289,13 @@ pub fn render_with_media(
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         Format::Plain => Ok(ferrodoc_text::write_text(doc).into_bytes()),
         Format::Docx => {
-            ferrodoc_docx::write_docx_with_media(doc, media).map_err(|e| Error::Invalid {
+            // A `data:` URL carries its own bytes, so it is answered here
+            // rather than passed to a resolver that would look for a file
+            // of that name. Without this an inline `<svg>`, or any image
+            // a page embeds rather than links, reaches the DOCX writer as
+            // a URL nothing can resolve and comes out as alt text.
+            let resolve = |url: &str| data_url(url).or_else(|| media(url));
+            ferrodoc_docx::write_docx_with_media(doc, &resolve).map_err(|e| Error::Invalid {
                 format: to,
                 detail: e.to_string(),
             })
@@ -370,6 +436,33 @@ mod tests {
         // A reader with nothing to carry hands back an empty bag rather
         // than making the caller ask which formats have one.
         assert!(parse_with_media(b"# t\n", Format::Markdown).unwrap().1.is_empty());
+    }
+
+    /// A picture a page carries rather than links has no file behind it,
+    /// so a resolver has nothing to look up and the DOCX writer used to
+    /// fall back to alt text. It is the whole reason an inline `<svg>`
+    /// reaches a `.docx` at all.
+    #[test]
+    fn a_data_url_carries_its_own_picture_into_a_package() {
+        let html = concat!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9">"#,
+            r#"<circle cx="4" cy="4" r="4"></circle></svg>"#,
+        );
+        // Nothing resolves a URL here: the bytes are in the document.
+        let docx = convert(html.as_bytes(), Format::Html, Format::Docx).unwrap();
+        let (_, media) = parse_with_media(&docx, Format::Docx).unwrap();
+        let bytes = media.values().next().expect("the package holds the picture");
+        assert_eq!(String::from_utf8_lossy(bytes), html);
+    }
+
+    #[test]
+    fn a_data_url_is_read_in_both_spellings() {
+        assert_eq!(data_url("data:image/svg+xml;base64,Zm9vYmFy").as_deref(), Some(&b"foobar"[..]));
+        assert_eq!(data_url("data:text/plain,a%20b%2Fc").as_deref(), Some(&b"a b/c"[..]));
+        // Not a data URL, and a data URL whose payload is not base64.
+        assert_eq!(data_url("pic.png"), None);
+        assert_eq!(data_url("data:image/png;base64,not base64!"), None);
+        assert_eq!(data_url("data:image/png;base64"), None);
     }
 
     #[test]

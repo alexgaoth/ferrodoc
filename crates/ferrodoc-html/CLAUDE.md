@@ -38,6 +38,18 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
   hangs off the element by a second link, so taking children alone leaves
   that chain for the recursive `Rc` drop to walk — the one thing the
   function exists to prevent.
+- An inline `<svg>` is a picture, and is serialized back to markup and
+  carried as a `data:` URL — the only way a picture with no file behind it
+  survives into another format. Two things this must not do: lowercase the
+  attribute names (pandoc does, and `viewBox` is case-sensitive, so its
+  payload renders `31x31` where the correct one renders `61x41`), and grow
+  a base64 dependency (twenty lines, because every crate below the facade
+  builds for wasm32 with no C library).
+- Decoding a `data:` URL back to bytes lives in the **facade**, not here:
+  `render_with_media` answers one before consulting the caller's resolver,
+  because a resolver would look for a file of that name and find nothing.
+  Without it an inline `<svg>` reaches the DOCX writer as an unresolvable
+  URL and comes out as alt text — the reader alone is not enough.
 - A `<q>` is a quotation, not its children: read as its children the text
   no longer says the words are someone else's. The marks alternate with
   nesting (double, then single), and `Quoted` carries no attributes — the

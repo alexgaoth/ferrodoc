@@ -48,7 +48,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
-| `diff-html-read` | HTML reader produces pandoc's AST | **632/658** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **633/659** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -242,7 +242,7 @@ delimiter and two runs that meet make a tilde code fence:
   emits the four tildes instead, and its own output then re-reads as a
   code block that swallows the rest of the document.
 
-### HTML reader — 26 of 658
+### HTML reader — 26 of 659
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
 pandoc parses with `tagsoup`, which does not.** On malformed markup the two
@@ -276,11 +276,26 @@ inside a `<template>` stays a table row here (tagsoup has no notion of a
 template, so pandoc flattens the table to a `Plain`), and a `<bdo>` keeps
 the `dir` attribute that is its whole point.
 
-One is the other way and is a real gap: an **inline `<svg>`** is dropped
-here, where pandoc serializes it into a `data:image/svg+xml;base64,…`
-image. A chart written inline in a page is lost. Also `<xmp>`, an obsolete
-raw-text element, is read as raw text here (which is what the HTML spec
-says it is) and as markup by pandoc.
+An **inline `<svg>`** is carried as its own bytes, in a
+`data:image/svg+xml;base64,…` URL, the same shape pandoc uses — and a
+`data:` URL now reaches the DOCX writer, so a chart written into a page
+converts all the way to a `.docx` that opens with the picture. Two details
+of the serialization differ, both measured:
+
+- **Attribute case is kept.** Pandoc lowercases SVG attribute names, so
+  `viewBox` — case-sensitive, and the only thing that gives a
+  `viewBox`-only SVG a size — becomes `viewbox` and is ignored. The same
+  drawing renders 61x41 pixels through LibreOffice with the correct
+  spelling and **31x31** with pandoc's. Matching would mean shipping a
+  broken picture.
+- **`<rect>`, `<path>` and `<use>`** are written `<rect></rect>` here and
+  `<rect />` by pandoc, which treats those three as void. Every other SVG
+  element agrees exactly — `circle`, `ellipse`, `line`, `polygon`,
+  `polyline`, `g`, `text`, `title`, `desc`, `defs`, `image` — and both
+  spellings render identically.
+
+Also `<xmp>`, an obsolete raw-text element, is read as raw text here (which
+is what the HTML spec says it is) and as markup by pandoc.
 
 One case is neither: a `<template>` that is the **first thing in a
 document** with no `<body>` around it. A conforming parser puts it in the

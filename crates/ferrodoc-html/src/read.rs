@@ -16,7 +16,7 @@ use ferrodoc_ast::{
     TableHead, Target,
 };
 use html5ever::tendril::TendrilSink as _;
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 use std::collections::{HashMap, HashSet};
 
 /// How deep an element tree may nest before the reader refuses it.
@@ -437,22 +437,19 @@ impl Reader {
             // `<bdo>` is a span whose whole point is its `dir`
             // attribute: read as its children, the override is gone.
             "span" | "bdo" => out.push(Inline::Span(attributes(node), self.inlines(kids)?)),
+            // An inline `<svg>` is a picture. Read as its children it
+            // becomes nothing at all — a chart written into the page
+            // rather than linked from it simply disappears. Pandoc
+            // serializes the element back to text and carries it as a
+            // `data:` URL, which is the only way a picture with no file
+            // behind it survives into another format.
+            "svg" => out.extend(svg_image(node)),
             // A quotation, whose marks are the element. Dropping it to its
             // children loses the quoting entirely — nothing in the text
             // says any more that the words are someone else's. The marks
             // alternate with nesting, and the element's attributes have
             // nowhere to go: `Quoted` carries none, here or in pandoc.
-            "q" => {
-                self.quotes += 1;
-                let inner = self.inlines(kids);
-                self.quotes -= 1;
-                let quote = if self.quotes % 2 == 0 {
-                    QuoteType::DoubleQuote
-                } else {
-                    QuoteType::SingleQuote
-                };
-                out.push(Inline::Quoted(quote, inner?));
-            }
+            "q" => out.push(self.quotation(kids)?),
             // Never content, however it is nested. A `<textarea>` holds
             // a form's default value, not the document's text.
             "script" | "style" | "head" | "title" | "meta" | "link" | "textarea" => {}
@@ -651,6 +648,21 @@ impl Reader {
 
     /// Enter one level of nesting, refusing input that is too deep. Every
     /// caller pairs this with a matching decrement.
+    /// A `<q>`, whose marks alternate with how many enclose it. The
+    /// counter is put back before the `?` so that a failure inside one
+    /// cannot leave a later sibling with the wrong mark.
+    fn quotation(&mut self, kids: &[Handle]) -> Result<Inline, Error> {
+        self.quotes += 1;
+        let inner = self.inlines(kids);
+        self.quotes -= 1;
+        let quote = if self.quotes % 2 == 0 {
+            QuoteType::DoubleQuote
+        } else {
+            QuoteType::SingleQuote
+        };
+        Ok(Inline::Quoted(quote, inner?))
+    }
+
     fn deeper(&mut self) -> Result<(), Error> {
         if self.depth >= MAX_NESTING {
             return Err(Error::TooDeep);
@@ -928,6 +940,60 @@ fn is_block(name: &str) -> bool {
             | "main"
             | "nav"
     )
+}
+
+/// The picture an `<svg>` element is, carried as its own bytes.
+fn svg_image(node: &Handle) -> Option<Inline> {
+    Some(Inline::Image(
+        Attr::default(),
+        Vec::new(),
+        Target { url: svg_data_url(node)?, title: String::new() },
+    ))
+}
+
+/// An `<svg>` element serialized back to markup and wrapped in the `data:`
+/// URL that carries it, or `None` if it cannot be serialized.
+///
+/// The bytes are this reader's own serialization, not the source text: the
+/// source is not available here, and the parsed form is the one that has
+/// been through entity decoding and attribute-name repair. That repair is
+/// the reason this diverges from pandoc — see `svg_attribute_case_is_kept`.
+fn svg_data_url(node: &Handle) -> Option<String> {
+    let mut markup = Vec::new();
+    let handle: SerializableHandle = node.clone().into();
+    html5ever::serialize::serialize(
+        &mut markup,
+        &handle,
+        html5ever::serialize::SerializeOpts {
+            traversal_scope: html5ever::serialize::TraversalScope::IncludeNode,
+            ..html5ever::serialize::SerializeOpts::default()
+        },
+    )
+    .ok()?;
+    Some(format!("data:image/svg+xml;base64,{}", base64(&markup)))
+}
+
+/// Base64, standard alphabet with padding, which is the spelling a `data:`
+/// URL uses. Written out rather than taken as a dependency: every crate
+/// below the facade has to keep building for wasm32 with no C library.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let bits = u32::from(chunk[0]) << 16
+            | u32::from(chunk.get(1).copied().unwrap_or(0)) << 8
+            | u32::from(chunk.get(2).copied().unwrap_or(0));
+        for slot in 0..4usize {
+            if slot <= chunk.len() {
+                let index = usize::try_from((bits >> (18 - 6 * slot)) & 0x3f).unwrap_or(0);
+                out.push(char::from(ALPHABET[index]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 /// The text an element encloses, with no markup interpretation at all.
@@ -1484,6 +1550,81 @@ mod tests {
             .flat_map(|cell| &cell.blocks)
             .collect();
         assert_eq!(cells, vec![&Block::Plain(vec![Inline::Str("cell".to_owned())])]);
+    }
+
+    /// A picture with no file behind it survives only as its own bytes.
+    /// Read as its children an inline `<svg>` becomes nothing at all.
+    #[test]
+    fn an_inline_svg_becomes_the_picture_it_is() {
+        let blocks = blocks(r#"<svg width="9" height="9"><circle r="4"></circle></svg>"#);
+        let [Block::Plain(inlines)] = blocks.as_slice() else {
+            panic!("expected one plain, got {blocks:?}")
+        };
+        let [Inline::Image(attr, alt, target)] = inlines.as_slice() else {
+            panic!("expected one image, got {inlines:?}")
+        };
+        assert_eq!((attr, alt), (&Attr::default(), &Vec::new()));
+        assert_eq!(target.url, format!(
+            "data:image/svg+xml;base64,{}",
+            base64(br#"<svg width="9" height="9"><circle r="4"></circle></svg>"#)
+        ));
+    }
+
+    /// Pandoc lowercases an SVG attribute name, so `viewBox` — which is
+    /// case-sensitive, and the only thing that gives a `viewBox`-only SVG
+    /// a size — comes back as `viewbox` and is ignored by whatever
+    /// renders it. The same drawing is `61x41` pixels through `LibreOffice`
+    /// with the correct spelling and `31x31` with pandoc's. Matching would
+    /// mean shipping a broken picture, so this keeps the case.
+    #[test]
+    fn svg_attribute_case_is_kept() {
+        let blocks = blocks(r#"<svg viewBox="0 0 60 40"><circle r="4"></circle></svg>"#);
+        let [Block::Plain(inlines)] = blocks.as_slice() else {
+            panic!("expected one plain, got {blocks:?}")
+        };
+        let [Inline::Image(_, _, target)] = inlines.as_slice() else {
+            panic!("expected one image, got {inlines:?}")
+        };
+        let payload = target.url.split_once(',').expect("a data url").1;
+        assert!(
+            decoded(payload).contains(r#"viewBox="0 0 60 40""#),
+            "the view box lost its case: {}",
+            decoded(payload)
+        );
+    }
+
+    /// Every length of tail, because the padding is where a hand-written
+    /// encoder goes wrong. The vectors are RFC 4648's own.
+    #[test]
+    fn base64_pads_every_tail() {
+        for (input, encoded) in [
+            (&b""[..], ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ] {
+            assert_eq!(base64(input), encoded, "encoding {input:?}");
+        }
+    }
+
+    /// Decode, for the tests above only — the reader never decodes.
+    fn decoded(text: &str) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let (mut bits, mut held, mut out) = (0u32, 0u32, Vec::new());
+        for byte in text.bytes().take_while(|byte| *byte != b'=') {
+            let value = ALPHABET.iter().position(|c| *c == byte).expect("base64");
+            bits = bits << 6 | u32::try_from(value).expect("six bits");
+            held += 6;
+            if held >= 8 {
+                held -= 8;
+                out.push(u8::try_from(bits >> held & 0xff).expect("a byte"));
+            }
+        }
+        String::from_utf8(out).expect("utf-8")
     }
 
     /// A `<bdo>` exists to state a direction, and reading it as its
