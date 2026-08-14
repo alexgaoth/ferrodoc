@@ -41,10 +41,12 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
 - An inline `<svg>` is a picture, and is serialized back to markup and
   carried as a `data:` URL — the only way a picture with no file behind it
   survives into another format. Two things this must not do: lowercase the
-  attribute names (pandoc does, and `viewBox` is case-sensitive, so its
-  payload renders `31x31` where the correct one renders `61x41`), and grow
-  a base64 dependency (twenty lines, because every crate below the facade
-  builds for wasm32 with no C library).
+  names (pandoc lowercases element *and* attribute names, and SVG is
+  case-sensitive — `viewBox` becomes `viewbox` and renders `31x31` where
+  the correct one renders `61x41`, and `<linearGradient>` becomes an
+  element that does not exist), and grow a base64 dependency (twenty
+  lines, because every crate below the facade builds for wasm32 with no C
+  library).
 - Decoding a `data:` URL back to bytes lives in the **facade**, not here:
   `render_with_media` answers one before consulting the caller's resolver,
   because a resolver would look for a file of that name and find nothing.

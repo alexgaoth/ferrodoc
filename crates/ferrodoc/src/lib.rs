@@ -215,16 +215,30 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
 fn data_url(url: &str) -> Option<Vec<u8>> {
     let rest = url.strip_prefix("data:")?;
     let (media_type, data) = rest.split_once(',')?;
-    if media_type.rsplit(';').next() == Some("base64") {
+    // The token is case-insensitive; RFC 2397 spells it lowercase and
+    // real pages do not always agree.
+    if media_type
+        .rsplit(';')
+        .next()
+        .is_some_and(|token| token.eq_ignore_ascii_case("base64"))
+    {
         return base64(data);
     }
     percent_decode(data)
 }
 
-/// Standard base64 with or without padding. Any character outside the
-/// alphabet — including the whitespace a long URL may be wrapped with —
-/// makes the whole thing not an image, because a picture decoded from
-/// half a stream is worse than no picture.
+/// Standard base64, with or without padding.
+///
+/// ASCII whitespace is skipped rather than refused: a `data:` URL long
+/// enough to hold a picture is routinely wrapped across lines, a newline
+/// inside an attribute value is legal HTML, and both the WHATWG's
+/// "forgiving base64" and RFC 2397 strip it before decoding. Refusing it
+/// lost the picture on exactly the generated pages this is for.
+///
+/// Any *other* character outside the alphabet makes the whole thing not an
+/// image. A payload that simply stops early still yields what it held, as
+/// it does for pandoc — there is no way to tell a truncated picture from a
+/// short one.
 fn base64(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() / 4 * 3);
     let (mut bits, mut held) = (0u32, 0u32);
@@ -236,6 +250,7 @@ fn base64(text: &str) -> Option<Vec<u8>> {
             b'+' => 62,
             b'/' => 63,
             b'=' => break,
+            byte if byte.is_ascii_whitespace() => continue,
             _ => return None,
         };
         bits = bits << 6 | value;
@@ -257,6 +272,11 @@ fn percent_decode(text: &str) -> Option<Vec<u8>> {
             let mut digits = [0u8; 2];
             for digit in &mut digits {
                 *digit = bytes.next()?;
+            }
+            // `from_str_radix` would take a leading `+`, turning the
+            // malformed `%+1` into a byte rather than a refusal.
+            if !digits.iter().all(u8::is_ascii_hexdigit) {
+                return None;
             }
             let text = std::str::from_utf8(&digits).ok()?;
             out.push(u8::from_str_radix(text, 16).ok()?);
@@ -459,10 +479,23 @@ mod tests {
     fn a_data_url_is_read_in_both_spellings() {
         assert_eq!(data_url("data:image/svg+xml;base64,Zm9vYmFy").as_deref(), Some(&b"foobar"[..]));
         assert_eq!(data_url("data:text/plain,a%20b%2Fc").as_deref(), Some(&b"a b/c"[..]));
-        // Not a data URL, and a data URL whose payload is not base64.
+        // The token is case-insensitive, and padding is optional.
+        assert_eq!(data_url("data:image/png;BASE64,Zm9vYmE=").as_deref(), Some(&b"fooba"[..]));
+        assert_eq!(data_url("data:image/png;base64,Zm9vYmE").as_deref(), Some(&b"fooba"[..]));
+        // A URL long enough to hold a picture is routinely wrapped, and a
+        // newline inside an attribute value is legal HTML. Refusing it
+        // lost the picture on exactly the pages this is for.
+        assert_eq!(
+            data_url("data:image/png;base64,Zm9v\n  YmFy").as_deref(),
+            Some(&b"foobar"[..])
+        );
+        // Not a data URL, a payload that is not base64 at all, no comma,
+        // and a percent escape that is not one.
         assert_eq!(data_url("pic.png"), None);
-        assert_eq!(data_url("data:image/png;base64,not base64!"), None);
+        assert_eq!(data_url("data:image/png;base64,not_base64!"), None);
         assert_eq!(data_url("data:image/png;base64"), None);
+        assert_eq!(data_url("data:text/plain,a%+1b"), None);
+        assert_eq!(data_url("data:text/plain,a%2"), None);
     }
 
     #[test]

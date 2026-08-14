@@ -282,17 +282,24 @@ An **inline `<svg>`** is carried as its own bytes, in a
 converts all the way to a `.docx` that opens with the picture. Two details
 of the serialization differ, both measured:
 
-- **Attribute case is kept.** Pandoc lowercases SVG attribute names, so
-  `viewBox` — case-sensitive, and the only thing that gives a
-  `viewBox`-only SVG a size — becomes `viewbox` and is ignored. The same
-  drawing renders 61x41 pixels through LibreOffice with the correct
-  spelling and **31x31** with pandoc's. Matching would mean shipping a
-  broken picture.
+- **Case is kept, in element and attribute names alike.** Pandoc
+  lowercases both, and SVG is case-sensitive, so its payload for anything
+  with a capital in it is not the picture that went in: `viewBox` becomes
+  `viewbox` and is ignored, and `<linearGradient>`, `<clipPath>`,
+  `<textPath>`, `<foreignObject>` and the whole `<feGaussianBlur>` filter
+  family become elements that do not exist. A gradient or a clip path is
+  in most real charts. Measured: the same drawing renders 61x41 pixels
+  through LibreOffice with `viewBox` and **31x31** with `viewbox`.
+  Matching pandoc would mean shipping a broken picture.
 - **`<rect>`, `<path>` and `<use>`** are written `<rect></rect>` here and
   `<rect />` by pandoc, which treats those three as void. Every other SVG
-  element agrees exactly — `circle`, `ellipse`, `line`, `polygon`,
-  `polyline`, `g`, `text`, `title`, `desc`, `defs`, `image` — and both
-  spellings render identically.
+  element whose name is already lowercase agrees exactly — `circle`,
+  `ellipse`, `line`, `polygon`, `polyline`, `g`, `text`, `title`, `desc`,
+  `defs`, `image` among them — and both spellings render identically.
+- **A wrapped `data:` URL is decoded**, not refused: ASCII whitespace is
+  stripped first, the way the WHATWG's "forgiving base64" and RFC 2397
+  both specify, because a URL long enough to hold a picture is routinely
+  broken across lines.
 
 Also `<xmp>`, an obsolete raw-text element, is read as raw text here (which
 is what the HTML spec says it is) and as markup by pandoc.
