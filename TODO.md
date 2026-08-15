@@ -126,14 +126,22 @@ Two things this machine does not have:
   release build is triggered by the tag arriving at GitHub, so until the
   tag is pushed nothing is built.
 
-Then, in this order, waiting for each to appear on the index before the
-next — a crate cannot be verified until the ones below it exist:
+Then one command, which works out the order and waits for each crate to
+reach the index before the next needs it:
 
 ```sh
-for c in ferrodoc-ast ferrodoc-markdown ferrodoc-html ferrodoc-text ferrodoc-docx ferrodoc; do
-    cargo publish -p "$c"
-done
+cargo publish --workspace
 ```
+
+Not a loop over `cargo publish -p`. A loop keeps going after a failure, so
+one real error becomes six — five of them the meaningless "no matching
+package named `ferrodoc-ast` found", because the crate below never got
+published. `cargo publish --workspace --dry-run` validates all six through
+to the upload step in one go; a loop cannot, since each crate needs the one
+below it to exist first.
+
+`ferrodoc-harness` is marked `publish = false`: it shells out to pandoc and
+reads the corpus, so it means nothing outside this repository.
 
 Publishing cannot be undone and a yanked version stays visible, which is
 why the two commands above are the owner's to run.

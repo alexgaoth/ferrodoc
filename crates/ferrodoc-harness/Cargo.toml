@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# Never goes to crates.io: it shells out to pandoc and reads the corpus, so
+# it is only meaningful inside this repository. Without this, `cargo publish
+# --workspace` tries to publish it and fails on the whole workspace.
+publish = false
 
 [dependencies]
 comrak = { workspace = true }
@@ -13,7 +17,7 @@ ferrodoc-ast = { workspace = true }
 ferrodoc-markdown = { workspace = true }
 ferrodoc-html = { workspace = true }
 ferrodoc-text = { workspace = true }
-ferrodoc-docx = { path = "../ferrodoc-docx" }
+ferrodoc-docx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
