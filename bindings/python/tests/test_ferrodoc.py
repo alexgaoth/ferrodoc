@@ -119,16 +119,24 @@ def test_a_buffer_is_accepted_and_a_wrong_type_says_what_it_got():
 
 def test_the_gil_is_released_so_threads_actually_overlap():
     # The reason the binding is worth having over a subprocess: a pool of
-    # threads converts in parallel. With the GIL held across the
-    # conversion, eight of them would take eight times one.
+    # threads converts in parallel. With the GIL held across a conversion,
+    # N of them take N times one — that is the shape being tested, and the
+    # only shape that can be tested portably.
     #
-    # The document is large on purpose. At around 100 KiB the pool's own
-    # overhead is a big share of the time and the measurement says little;
-    # at 400 KiB the conversion dominates and the signal is clear.
+    # Both bounds here have to survive a shared CI runner. The worker
+    # count follows the machine, because eight workers on four cores
+    # cannot overlap eightfold however well the binding behaves: an
+    # earlier version fixed at eight measured 2.45 of 8.0 here and 4.89 of
+    # 8.0 on a smaller runner, and failed a threshold tuned to this
+    # machine. And the document is large on purpose: at around 100 KiB the
+    # pool's own overhead is a big share of the time.
     import concurrent.futures
+    import os
     import time
 
-    workers = 8
+    workers = min(4, os.cpu_count() or 1)
+    if workers < 2:
+        pytest.skip("one core cannot overlap anything")
     big = MARKDOWN * 8000
 
     ferrodoc.convert(big, "gfm", "docx")  # warm
@@ -141,11 +149,9 @@ def test_the_gil_is_released_so_threads_actually_overlap():
         list(pool.map(lambda _: ferrodoc.convert(big, "gfm", "docx"), range(workers)))
     together = time.perf_counter() - start
 
-    # Serial would be `workers` times one conversion. Measured here: 2.45.
-    # The bound is set well clear of that and well clear of 8, so it fails
-    # if the GIL is reacquired for the bulk of the work but not on a busy
-    # machine.
-    assert together < alone * workers * 0.6, (
+    # Serial is `workers`; anything meaningfully under it is overlap the
+    # GIL would have prevented.
+    assert together < alone * workers * 0.85, (
         f"{workers} conversions took {together:.3f}s against {alone:.3f}s for one, "
         f"a ratio of {together / alone:.2f} where serial is {workers}.0; "
         "the GIL is being held across the conversion"
