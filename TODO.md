@@ -2,14 +2,16 @@
 
 ## What this project is
 
-Convert ordinary editorial documents — Markdown, HTML and DOCX — semantically,
-quickly, locally and predictably, from inside a program rather than by shelling
-out.
+Convert ordinary editorial documents — Markdown, HTML, DOCX, and the office
+and publishing formats beside them — semantically, quickly, locally and
+predictably, from inside a program rather than by shelling out.
 
-The boundary is deliberate. Pandoc's long tail (presentations, LaTeX, citation
-processing, template languages, ~36 further formats) is not a goal, and
-matching it is not the measure of success. Semantic conversion of the common
-path is.
+The boundary is deliberate, and it is a *square*, not a count: the
+conversions people actually perform between the documents they actually
+hold. Pandoc's long tail — presentations, citation processing, template
+languages, bibliographic databases, the wikis with a handful of users each —
+is not a goal, and matching pandoc's ~40 formats is not the measure of
+success. `## What "pan" would mean here` says where the edge is and why.
 
 ## Two principles that keep settling arguments
 
@@ -47,6 +49,8 @@ behind them.
 | DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
 | Benchmarks | every path measured on fixtures `corpus/bench/generate.sh` writes, and `bench-sizes` now fails when a read errors instead of timing the refusal |
 | Inline `<svg>` | a picture written into the page is carried as a `data:` URL, and a `data:` URL now reaches the DOCX writer — HTML with an inline chart converts to a `.docx` LibreOffice opens with the picture |
+| Python | `pip install ferrodoc` — one typed function, abi3 wheels for 3.9+ on Linux, macOS and Windows, GIL released so a thread pool overlaps. **72× a pandoc subprocess** per document |
+| Independent corpus | 7/8 documents *LibreOffice* wrote read identically to pandoc — the first evidence the DOCX reader generalises beyond pandoc's own output |
 | Standalone HTML | `-s` writes a whole page — doctype, charset, `lang`, title, authors — and `--css` inlines a stylesheet |
 
 Performance at 10 KB / 1 MB / 10 MB, one sitting, on fixtures
@@ -108,50 +112,173 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ---
 
+## What "pan" would mean here
+
+Pandoc reads about 40 formats and writes about 60. Matching that count is
+not the goal and never was — but "convert ordinary editorial documents" is
+a wider square than four formats, and the architecture is already the one
+that widens cheaply. Four rules decide what to add and in what order.
+
+**Count the square, not the formats.** N readers and N writers give N²
+conversions, and every new reader immediately gains every writer already
+written. Adding ODT reading is not one feature; it is ODT → markdown, →
+GFM, → HTML, → DOCX and → plain, on the day it lands. Rank by how much of
+the square a spoke closes, not by how popular the format sounds.
+
+**The AST is the ceiling.** ferrodoc's AST *is* pandoc's, proven by
+`diff-ast` round-tripping any `pandoc -t json` document. Anything pandoc's
+AST cannot express, ferrodoc cannot carry either — slide layouts, tracked
+changes, bibliographic databases. "Pan" here means the formats that
+pandoc's AST already describes, and the non-goals below are mostly the
+formats it does not.
+
+**No format ships without a differential gate.** What makes this project
+worth choosing is not the number of formats, it is that every one of them
+is checked against pandoc document by document. A format added faster than
+its gate spends the only thing the project has. This is cheap to honour:
+pandoc reads `odt`, `epub`, `rst`, `latex` and `rtf` and writes all of
+them, so a new spoke can be gated on the day it is started, with the
+harness that already exists.
+
+**Writers are bounded; readers are not.** A writer walks a finite AST and
+emits text — the work is escaping and a rule per node, and it is done. A
+reader must handle everything anyone has ever written in that format, plus
+malformed input, forever. So coverage is far cheaper on the writer side,
+and a reader is only worth it for a format people already *have documents
+in*.
+
+## How a format gets added
+
+The same five steps every time, which is what makes this repeatable rather
+than a research project:
+
+1. A reader and/or writer crate, or a module beside an existing one.
+2. A variant in `Format`, wired into `parse`/`render` and the `--help`
+   text in `main.rs` — until then it is unreachable by users.
+3. A `diff-<format>` gate in `ferrodoc-harness` comparing against pandoc,
+   added to the root `CLAUDE.md` list and to `.github/workflows/ci.yml`.
+4. A corpus: documents *another program wrote*, not our own output.
+   `corpus/docx-libreoffice/generate.sh` is the pattern.
+5. A row in `COMPATIBILITY.md` with its number and every deliberate
+   divergence.
+
+---
+
 ## Next, in order
 
-### 1. Learn from real documents and users
+### 1. ODT, read and write — `/iterate`
 
-After 0.1, do not widen the format surface on speculation. The project has
-its intended conversion square; the next useful work is a corpus failure from
-a real document, a measured resource problem, or a workflow a user cannot
-complete. Pin every such finding as a regression fixture before fixing it.
+The largest gain per line of new code in the project, because it is the
+DOCX crate's own machinery pointed at a sibling format. Measured on a
+LibreOffice-written file: an `.odt` is a zip whose `content.xml` holds
+`<office:body><office:text>`, which is the same shape as
+`word/document.xml`'s `<w:body>` — so the streaming `body_children`
+pattern transfers directly, `media.rs` transfers whole, and the zip layer
+is the dependency already in use.
 
-The currently named small gaps belong here: the remaining markdown-reader
+It also finishes the office square. Today ferrodoc converts what Word
+wrote; with ODT it converts what LibreOffice, OpenOffice, Google Docs
+export and every European public-sector template wrote, in both
+directions.
+
+- Gate: `diff-odt` against `pandoc -f odt`, plus a corpus of documents
+  LibreOffice wrote — `corpus/docx-libreoffice/generate.sh` already
+  produces `.odt` on the way to `.docx` and needs one argument changed.
+- Watch for: ODT keeps styles in a separate `styles.xml` with inheritance,
+  the way DOCX does, and the same "match by name, never by id" rule will
+  apply. Lists carry their level in the element rather than in a numbering
+  part, which is simpler than DOCX, not harder.
+- **Compare against pandoc-on-ODT, never against the DOCX of the same
+  document.** They are not the same target. Converting one HTML file to
+  both and reading each with pandoc gives `[Para, Para, Header, …]` from
+  the `.odt` and `[Header, Para, Header, …]` from the `.docx` — the
+  heading survives one path and not the other. A gate built on "the ODT
+  should read like the DOCX" would be chasing pandoc's own disagreement
+  with itself.
+
+**Iterate: yes.** A new reader *and* writer, a package another program
+must open, and a new gate — three of the four conditions the loop exists
+for, in one item.
+
+### 2. EPUB, read then write — `/iterate`
+
+A zip whose content is XHTML, which means the reader that does the work
+already exists. Reading is: `META-INF/container.xml` names the `.opf`, the
+`.opf` gives a manifest and a spine, each spine item goes through
+`read_html`, and the results concatenate in spine order. Writing is the
+HTML writer plus a manifest, a spine and a nav document. Images come from
+the media bag that `docx → docx` already uses.
+
+After PDF, this is the format most often asked of a converter, and it is
+the one publishing pipelines need. Read first: people have EPUBs they want
+as markdown far more often than the reverse.
+
+- Gate: `diff-epub` against pandoc, both directions.
+- Watch for: the spine is the reading order and it is not the file order;
+  a chapter is a document boundary, not a `<div>`; and `epub2` and `epub3`
+  differ in the manifest, not in the content.
+
+**Iterate: yes** — a package another program must open, and silent loss is
+one wrong spine entry away.
+
+### 3. A LaTeX writer, and deliberately no LaTeX reader
+
+This is the honest road to PDF, and it costs nothing.
+
+Writing LaTeX is bounded work: escape the ten special characters, map each
+AST node to a macro, and stop. *Reading* LaTeX means expanding arbitrary
+user-defined macros — that is interpreting a language, not parsing a
+format, and it is where a converter goes to die.
+
+And a LaTeX writer *is* PDF output, for everyone who has a TeX
+installation: `ferrodoc report.docx -t latex | pdflatex`. The binary does
+not grow by a single crate, which is exactly what the PDF item below could
+not manage.
+
+- Gate: `diff-latex`, round trip — write LaTeX, have **pandoc** read it
+  back, require the AST to survive. The same shape as `diff-write`.
+
+### 4. Writers for reStructuredText and AsciiDoc, when a pipeline asks
+
+Both are bounded writer work and both unlock a documentation toolchain
+(Sphinx, Antora) that currently shells out to pandoc. Neither is worth a
+reader: people write these by hand in editors that already understand
+them, and convert *out* of them far more often than in.
+
+### 5. Learn from real documents and users
+
+Do not widen the surface on speculation beyond the square above. A corpus
+failure from a real document, a measured resource problem, or a workflow
+someone cannot complete outranks every format on this page. Pin each
+finding as a regression fixture before fixing it.
+
+The named small gaps belong here: the remaining markdown-reader
 divergences, `spec-09.docx`, the nested quotation DOCX writer case, stated
-image dimensions, and the HTML reader's valid-input mismatches. They are
-repairs, not a reason to delay the first release.
+image dimensions, and the HTML reader's valid-input mismatches.
 
-### 2. Add one binding only when usage chooses it
+### 6. An npm package, if the evidence points there
 
-The CLI and Rust crates are the first adoption surface. Do not build Python
-and Node bindings in parallel, and do not guess which community matters more.
+The Python wheel shipped and is the adoption surface to watch. Build an
+npm package when the users turn out to be browser, edge or CMS teams — the
+wasm32 release artefact is not that package yet, and needs a
+JavaScript-facing wrapper and a bytes/string API. Do not build it in
+parallel with anything; one binding at a time, each a product commitment
+with its platforms documented and its installation tested in CI.
 
-- Build a **Python wheel** when the users are ingestion, RAG, ETL, notebook,
-  or Python-backend teams. It should be a thin native binding over this core,
-  not a Python rewrite.
-- Build an **npm package** when the users are browser, edge, or CMS teams.
-  The current WASM release artefact is not that package yet: it needs a
-  JavaScript-facing wrapper and a bytes/string conversion API.
+### Later, and only for a demonstrated need: PDF without a TeX installation
 
-Either binding is a product commitment: document its supported platforms,
-test installation in CI, and keep its public surface as small as the Rust
-facade. Until evidence selects one, neither is the next task.
-
-### Later, only when demand justifies it: PDF output
-
-The original case was "a single ~3 MB binary that renders markdown to PDF with
-no system dependencies". Right idea, wrong arithmetic: `typst` + `typst-pdf`
-takes the dependency tree from **63 crates to 283**, before the fonts and ICU
-data Typst needs, and the binary whose 34× smallness is a published claim
-would grow by an order of magnitude.
+Item 3 gives PDF to anyone who has TeX, at no cost. What remains is PDF
+for someone who has nothing installed at all, and that is where the
+arithmetic bites: `typst` + `typst-pdf` takes the dependency tree from
+**63 crates to 283**, before the fonts and ICU data Typst needs, and the
+binary whose 33× smallness is a published claim would grow by an order of
+magnitude.
 
 So: a separate `ferrodoc-pdf` crate, or a default-off feature shipping a
-second binary. Nobody who wants a small converter pays for a typesetter. Large
-work; do it only for a demonstrated use case.
+second binary. Nobody who wants a small converter pays for a typesetter.
 
-**Iterate: yes, per phase** — a new crate with a new output format has no gate
-at all until one is built, which is the condition the loop exists for.
+**Iterate: yes, per phase** — a new crate with a new output format has no
+gate at all until one is built.
 
 ---
 
@@ -206,3 +333,9 @@ Declared, not deferred — so nobody has to re-litigate them:
 - **PDF *reading***. That is an ML problem (layout analysis, OCR), owned by
   Docling and Marker. Interoperate with them; do not compete.
 - Citations, templates, Lua filters, presentation formats.
+- **LaTeX *reading***. A `.tex` file expands user-defined macros, so reading
+  it means interpreting a language rather than parsing a format. Writing
+  LaTeX is planned and bounded; reading it is not on the list at any point.
+- Wiki dialects, DocBook, JATS, FB2, man, Textile and the rest of the long
+  tail — one reader each, for audiences a converter in Rust will not reach.
+  Reconsider only against a real document someone cannot convert.
