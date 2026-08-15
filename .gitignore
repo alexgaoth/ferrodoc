@@ -1,3 +1,9 @@
 target/
 .iterate/
 corpus/docx/src/logo.png
+
+# The Python binding builds outside the cargo workspace.
+bindings/python/target/
+bindings/python/dist/
+__pycache__/
+*.pyc

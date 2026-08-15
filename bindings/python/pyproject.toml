@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "ferrodoc"
+description = "Convert documents between markdown, HTML and DOCX — in process, without shelling out to pandoc"
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+readme = "README.md"
+keywords = ["pandoc", "docx", "markdown", "html", "converter"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Text Processing :: Markup",
+    "Typing :: Typed",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/alexgaoth/ferrodoc"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+# A mixed layout: the compiled module is an implementation detail behind a
+# Python package that carries the type stubs.
+python-source = "python"
+module-name = "ferrodoc._ferrodoc"

@@ -1,0 +1,86 @@
+name: Wheels
+
+# The binding is a product commitment, so the wheels are built and
+# *installed and tested* on every platform claimed, on every push that
+# touches them — not only at release. A wheel that builds but does not
+# import is the failure mode this exists to catch.
+on:
+  push:
+    branches: [main]
+    paths: ["bindings/python/**", ".github/workflows/wheels.yml"]
+  pull_request:
+    paths: ["bindings/python/**", ".github/workflows/wheels.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    name: ${{ matrix.platform.name }}
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { name: linux-x86_64, runner: ubuntu-latest, target: x86_64 }
+          - { name: macos-arm64, runner: macos-latest, target: aarch64 }
+          - { name: macos-x86_64, runner: macos-13, target: x86_64 }
+          - { name: windows-x86_64, runner: windows-latest, target: x64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/python
+          target: ${{ matrix.platform.target }}
+          args: --release --out dist
+          # manylinux so the wheel installs on distributions older than
+          # the runner, which is most of them.
+          manylinux: auto
+
+      - name: Install it and run the tests against the installed wheel
+        working-directory: bindings/python
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+          python -m pip install --find-links dist --force-reinstall ferrodoc
+          # Run from a directory that is not the source, so the import
+          # resolves to the installed wheel rather than to `python/`.
+          cd "$(mktemp -d)"
+          python -c "import ferrodoc; print(ferrodoc.__version__, ferrodoc.formats())"
+          python -m pytest "$GITHUB_WORKSPACE/bindings/python/tests" -q
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform.name }}
+          path: bindings/python/dist/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the source distribution
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/python
+          command: sdist
+          args: --out dist
+      # The sdist contains only `bindings/python`, which is why the crate
+      # depends on `ferrodoc` from crates.io rather than by path. Building
+      # it here is what proves that.
+      - name: Build from the source distribution alone
+        working-directory: bindings/python
+        run: |
+          python -m pip install --upgrade pip
+          cd "$(mktemp -d)"
+          python -m pip install "$GITHUB_WORKSPACE"/bindings/python/dist/*.tar.gz
+          python -c "import ferrodoc; print('sdist builds:', ferrodoc.__version__)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: bindings/python/dist/*.tar.gz

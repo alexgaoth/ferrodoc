@@ -1,0 +1,26 @@
+[package]
+name = "ferrodoc-python"
+description = "Python bindings for ferrodoc, a pandoc-compatible document converter"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alexgaoth/ferrodoc"
+# Distributed as a wheel on PyPI, never as a crate.
+publish = false
+
+[lib]
+name = "_ferrodoc"
+crate-type = ["cdylib"]
+
+[dependencies]
+# From crates.io, not by path: maturin's source distribution contains only
+# this directory, so a path dependency would not resolve for anyone
+# building the sdist.
+ferrodoc = "0.1"
+# abi3 means one wheel per platform serves every Python from 3.9 up,
+# rather than one wheel per interpreter version.
+pyo3 = { version = "0.26", features = ["abi3-py39", "extension-module"] }
+
+[profile.release]
+strip = true

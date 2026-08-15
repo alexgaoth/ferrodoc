@@ -9,6 +9,12 @@ members = [
     "crates/ferrodoc-harness",
     "crates/ferrodoc-docx",
 ]
+# The Python binding is built by maturin, not by cargo, and it depends on
+# `ferrodoc` from crates.io so that maturin's source distribution — which
+# contains only that directory — resolves for anyone building it. Keeping
+# it out of the workspace also keeps `cargo test --workspace` from needing
+# Python development headers.
+exclude = ["bindings/python"]
 
 [workspace.package]
 version = "0.1.0"
