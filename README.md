@@ -1,42 +1,88 @@
 # ferrodoc
 
-A universal document converter in Rust — markdown (CommonMark and GFM),
-HTML and DOCX — that produces the same output as pandoc, and produces it
-far faster.
+Convert documents — markdown (CommonMark and GFM), HTML and DOCX —
+semantically and in your own process, with output checked against pandoc
+document by document.
 
-## ferrodoc vs pandoc
+```sh
+pip install ferrodoc          # Python
+cargo add ferrodoc            # Rust
+cargo install ferrodoc        # or the CLI
+```
 
-Every row measured on this machine in one sitting (Linux x86-64, pandoc
-3.8.2.1, release build), reproducible with the commands below.
+## Why you would switch
+
+Say you have ten thousand Word documents to put into a search index.
+
+Today that means pandoc, which is a 153 MB binary you spawn **once per
+file**. The conversion is fast; the process is not. You pay it ten
+thousand times.
+
+```python
+# pandoc: one subprocess per document          374 s
+subprocess.run(["pandoc", "-f", "docx", "-t", "gfm"], input=doc)
+
+# ferrodoc: a function call                      5 s
+ferrodoc.convert(doc, "docx", "gfm")
+```
+
+**37.41 ms per document against 0.52 ms — 72×** — measured over 20 rounds
+of the eight LibreOffice-authored documents in `corpus/docx-libreoffice`,
+which is the comparison a Python pipeline actually faces, because
+`pypandoc` and every hand-rolled equivalent shell out exactly like that.
+
+On a single document none of this matters. It starts mattering at the
+point where a conversion job is something you schedule rather than
+something you run, and it keeps mattering afterwards:
 
 | | pandoc | ferrodoc | |
 |---|---|---|---|
-| **Convert 16 KB markdown → HTML** | 110 ms | **1.4 ms** | **77× faster** |
-| **Convert 0.6 KB markdown → HTML** | 21 ms | **46 µs** | **462× faster** |
-| **Startup** (one tiny document) | 13 ms | **2 ms** | **6× faster** |
-| **Peak memory**, 0.6 KB document | 65 MB | **3.8 MB** | **17× less** |
-| **Peak memory**, 16 KB document | 207 MB | **4.7 MB** | **44× less** |
-| **Binary on disk** | 153 MB | **4.5 MB** | **34× smaller** |
+| **10,000 DOCX → markdown** | 374 s | **5.2 s** | **72× faster** |
+| **Binary / dependency on disk** | 152.9 MB | **4.6 MB** | **33× smaller** |
+| **Peak memory**, 10 KB document | 115 MB | **5.2 MB** | **22× less** |
 | **Malformed DOCX** (self-referential footnote) | hangs, killed at 60 s | **handled in 12 ms** | — |
 | **Same document written twice** | different bytes | **identical bytes** | — |
 | **Runs in a browser / edge worker** | no | **yes** (wasm32) | — |
+| **Callable without a subprocess** | no | **yes** (Rust, Python) | — |
 
-DOCX, in process: writes the 16 KB document in 1.7 ms and reads it back in
-5.0 ms (0.22 ms / 0.34 ms for the small one) — a path pandoc can only offer
-through a subprocess.
+Deterministic output is worth a line of its own: pandoc embeds a timestamp,
+so the same input gives different bytes every run, and content-addressed
+caching and "did this actually change?" both stop working. ferrodoc writes
+the same bytes every time.
 
-The throughput rows compare an in-process library call against a `pandoc`
-subprocess, because that is the choice a real pipeline makes: pandoc is a
-binary, so calling it from a program *means* spawning a process per document.
-The small-document ratio is dominated by that startup — precisely the cost
-document pipelines pay on every file today.
+Single-document figures, for completeness, on the 10 KB fixture the script
+below writes: markdown → AST 569 µs and AST → HTML 49 µs in process; DOCX
+written in 1.42 ms and read back in 4.37 ms. Whole-binary against
+whole-binary on the same file — the fairest comparison there is, both
+paying their own startup — ferrodoc is 4.6 ms to pandoc's 88 ms.
+
+Every figure on this page was measured on one machine in one sitting
+(Linux x86-64, pandoc 3.8.2.1, release build) and is reproducible:
 
 ```sh
-python3 -c "import json; print('\n\n'.join(e['markdown'] for e in json.load(open('corpus/commonmark-spec-0.31.2.json'))))" > /tmp/bigdoc.md
-cargo build --release
-./target/release/ferrodoc-harness bench      /tmp/bigdoc.md corpus/readme-style.md --iters 300
-./target/release/ferrodoc-harness bench-docx /tmp/bigdoc.md corpus/readme-style.md --iters 200
+bash corpus/bench/generate.sh
+cargo run --release -p ferrodoc-harness -- bench-sizes ~/.cache/ferrodoc-bench/small.md
+cargo run --release -p ferrodoc-harness -- bench-docx  ~/.cache/ferrodoc-bench/small.md --iters 200
 cargo run -p ferrodoc-harness --example determinism corpus/readme-style.md
+```
+
+The 72× figure is the one worth reproducing yourself, because it is the one
+that decides anything:
+
+```sh
+pip install ferrodoc
+python3 - <<'EOF'
+import ferrodoc, subprocess, time, pathlib
+docs = [p.read_bytes() for p in pathlib.Path("corpus/docx-libreoffice").glob("*.docx")]
+def bench(fn, rounds):
+    fn()
+    start = time.perf_counter()
+    for _ in range(rounds): fn()
+    return (time.perf_counter() - start) / rounds / len(docs) * 1000
+print("ferrodoc %.2f ms/doc" % bench(lambda: [ferrodoc.convert(d, "docx", "gfm") for d in docs], 20))
+print("pandoc   %.2f ms/doc" % bench(lambda: [subprocess.run(
+    ["pandoc", "-f", "docx", "-t", "gfm"], input=d, capture_output=True) for d in docs], 3))
+EOF
 ```
 
 Absolute timings move with CPU state; the ratios hold. Compare interleaved
@@ -91,6 +137,30 @@ The remaining gaps are limits of CommonMark itself and are listed in
 `crates/ferrodoc-markdown/src/write.rs`.
 
 ## Install and use
+
+### Python
+
+```sh
+pip install ferrodoc
+```
+
+```python
+import ferrodoc
+
+with open("report.docx", "rb") as f:
+    markdown = ferrodoc.convert(f.read(), "docx", "gfm")   # str
+
+docx = ferrodoc.convert("# Title\n\nHello.\n", "gfm", "docx")   # bytes
+```
+
+One function. `convert` takes `str` or `bytes` and returns `str` for a text
+format and `bytes` for DOCX. The pandoc AST is the `json` format, so
+`json.loads(ferrodoc.convert(doc, "docx", "json"))` gives you the tree
+without a second API. The GIL is released around the conversion, so a
+thread pool converts in parallel. Wheels are `abi3` for Python 3.9 and up,
+on Linux, macOS (both architectures) and Windows.
+
+### Rust and the command line
 
 ```sh
 cargo install ferrodoc                   # installs the `ferrodoc` binary
