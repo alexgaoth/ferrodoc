@@ -26,3 +26,6 @@ features = ["pyo3/extension-module"]
 # Python package that carries the type stubs.
 python-source = "python"
 module-name = "ferrodoc._ferrodoc"
+# Or a source distribution built after a wheel carries that wheel inside
+# it — a stale binary of itself, uploaded to PyPI.
+exclude = ["dist/**", "target/**"]

@@ -95,24 +95,58 @@ def test_formats_are_the_ones_convert_accepts():
         ferrodoc.convert("x", "markdown", name)
 
 
+def test_the_error_survives_a_process_boundary():
+    # The audience for this binding runs a pool over a directory. If the
+    # exception cannot be pickled, one corrupt document does not raise —
+    # it breaks the pool, and the batch dies instead of skipping a file.
+    import pickle
+
+    revived = pickle.loads(pickle.dumps(ferrodoc.ConversionError("boom")))
+    assert isinstance(revived, ferrodoc.ConversionError)
+    assert ferrodoc.ConversionError.__module__ == "ferrodoc", (
+        "the class has to name an importable module or pickle cannot find it"
+    )
+
+
+def test_a_buffer_is_accepted_and_a_wrong_type_says_what_it_got():
+    # An mmap or a socket read is a memoryview, and a caller should not
+    # have to copy it first to satisfy a rule with no reason behind it.
+    for data in (b"# T\n", bytearray(b"# T\n"), memoryview(b"# T\n")):
+        assert ferrodoc.convert(data, "markdown", "html") == "<h1>T</h1>\n"
+    with pytest.raises(ValueError, match="not int"):
+        ferrodoc.convert(42, "markdown", "html")
+
+
 def test_the_gil_is_released_so_threads_actually_overlap():
     # The reason the binding is worth having over a subprocess: a pool of
-    # threads converts in parallel. If the GIL were held, wall-clock time
-    # would be the sum rather than the max.
+    # threads converts in parallel. With the GIL held across the
+    # conversion, eight of them would take eight times one.
+    #
+    # The document is large on purpose. At around 100 KiB the pool's own
+    # overhead is a big share of the time and the measurement says little;
+    # at 400 KiB the conversion dominates and the signal is clear.
     import concurrent.futures
     import time
 
-    big = MARKDOWN * 2000
+    workers = 8
+    big = MARKDOWN * 8000
+
+    ferrodoc.convert(big, "gfm", "docx")  # warm
     start = time.perf_counter()
     ferrodoc.convert(big, "gfm", "docx")
     alone = time.perf_counter() - start
 
     start = time.perf_counter()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        list(pool.map(lambda _: ferrodoc.convert(big, "gfm", "docx"), range(4)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(lambda _: ferrodoc.convert(big, "gfm", "docx"), range(workers)))
     together = time.perf_counter() - start
 
-    assert together < alone * 3.5, (
-        f"four conversions took {together:.3f}s against {alone:.3f}s for one; "
-        "that is serial, so the GIL is being held across the conversion"
+    # Serial would be `workers` times one conversion. Measured here: 2.45.
+    # The bound is set well clear of that and well clear of 8, so it fails
+    # if the GIL is reacquired for the bulk of the work but not on a busy
+    # machine.
+    assert together < alone * workers * 0.6, (
+        f"{workers} conversions took {together:.3f}s against {alone:.3f}s for one, "
+        f"a ratio of {together / alone:.2f} where serial is {workers}.0; "
+        "the GIL is being held across the conversion"
     )

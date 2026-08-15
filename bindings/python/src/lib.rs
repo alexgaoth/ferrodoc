@@ -11,8 +11,14 @@ use pyo3::types::{PyBytes, PyString};
 
 // The exception's own docstring is the fourth argument below; a `///`
 // here would be attached to the macro call and dropped.
+//
+// Named for the `ferrodoc` package rather than the `_ferrodoc` extension
+// inside it, because that name has to be importable: pickle resolves an
+// exception by `__module__` and `__qualname__`, and a batch running over
+// a `ProcessPoolExecutor` can only receive this error if it pickles. One
+// corrupt document would otherwise break the pool rather than raise.
 pyo3::create_exception!(
-    _ferrodoc,
+    ferrodoc,
     ConversionError,
     PyValueError,
     "A document could not be read as the format it was said to be, or \
@@ -49,16 +55,25 @@ fn convert<'py>(
     let from = format(from_format, "input")?;
     let to = format(to_format, "output")?;
 
-    let owned;
+    // `bytearray` and `memoryview` are what a caller holding an mmap or a
+    // socket read has, and asking them to copy first would be a rule with
+    // no reason behind it.
+    let owned_text;
+    let owned_bytes;
     let bytes: &[u8] = if let Ok(text) = data.downcast::<PyString>() {
-        owned = text.to_cow()?.into_owned();
-        owned.as_bytes()
+        owned_text = text.to_cow()?.into_owned();
+        owned_text.as_bytes()
     } else if let Ok(buffer) = data.downcast::<PyBytes>() {
         buffer.as_bytes()
+    } else if let Ok(copied) = data.extract::<Vec<u8>>() {
+        owned_bytes = copied;
+        &owned_bytes
     } else {
-        return Err(PyValueError::new_err(
-            "data must be str or bytes; a DOCX document has to be bytes",
-        ));
+        return Err(PyValueError::new_err(format!(
+            "data must be str, bytes, bytearray or a buffer, not {}; \
+             a DOCX document has to be bytes",
+            data.get_type().name()?,
+        )));
     };
 
     // The conversion is pure computation on bytes we already hold, so the

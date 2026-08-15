@@ -49,7 +49,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
-| `diff-html-read` | HTML reader produces pandoc's AST | **633/659** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **632/658** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -259,7 +259,7 @@ delimiter and two runs that meet make a tilde code fence:
   emits the four tildes instead, and its own output then re-reads as a
   code block that swallows the rest of the document.
 
-### HTML reader — 26 of 659
+### HTML reader — 26 of 658
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
 pandoc parses with `tagsoup`, which does not.** On malformed markup the two

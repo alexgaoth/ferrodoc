@@ -22,5 +22,10 @@ ferrodoc = "0.1"
 # rather than one wheel per interpreter version.
 pyo3 = { version = "0.26", features = ["abi3-py39", "extension-module"] }
 
+[lints.rust]
+# The same guarantee the workspace makes, made here too: this crate is
+# outside the workspace, so it does not inherit the lint.
+unsafe_code = "forbid"
+
 [profile.release]
 strip = true

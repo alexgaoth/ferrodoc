@@ -464,6 +464,15 @@ fn collect_html_files(path: &Path, cases: &mut Vec<Case>) -> Result<()> {
             .collect::<std::io::Result<_>>()?;
         entries.sort();
         for entry in entries {
+            // A `src/` directory holds the inputs another corpus's
+            // generator converts — `corpus/docx-libreoffice/src` is HTML
+            // that becomes `.docx`. Walking into it would score those as
+            // HTML-reader fixtures, so this gate's scope would widen
+            // every time someone added a DOCX case, and drop for a reason
+            // that has nothing to do with the HTML reader.
+            if entry.file_name().is_some_and(|name| name == "src") {
+                continue;
+            }
             if entry.is_dir() || entry.extension().is_some_and(|e| e == "html") {
                 collect_html_files(&entry, cases)?;
             }
