@@ -92,7 +92,17 @@ The remaining gaps are limits of CommonMark itself and are listed in
 ## Install and use
 
 ```sh
-cargo install --path crates/ferrodoc     # installs the `ferrodoc` binary
+cargo install ferrodoc                   # installs the `ferrodoc` binary
+```
+
+Or take a prebuilt binary from the
+[latest release](https://github.com/alexgaoth/ferrodoc/releases/latest) —
+Linux (musl), macOS (Intel and Apple silicon), Windows, and a wasm32
+package — or add the library to a project:
+
+```toml
+[dependencies]
+ferrodoc = "0.1"
 ```
 
 ```sh

@@ -43,7 +43,7 @@ behind them.
 | Media | `docx → docx` keeps its images, byte for byte; `read_docx_with_media` and `parse_with_media` expose the bag |
 | Image formats | PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF embed, each at the size and resolution its own header states — Exif and JFIF, `pHYs`, TIFF rationals, an EMF frame. All eight open in LibreOffice; ten measured divergences from pandoc, all in `COMPATIBILITY.md` |
 | Verifiability | CI on three platforms against pinned pandoc, wasm32 build, 500k-mutation fuzz per run, `COMPATIBILITY.md` |
-| Packaging | licences, crate metadata, tag-driven static binaries, and internal dependencies carrying a **version** as well as a path — without which `cargo publish` refuses every crate above `ferrodoc-ast`. All six names are free on crates.io; `ferrodoc-ast` passes `cargo publish --dry-run` |
+| Released | **0.1.0 is on crates.io** — all six crates — and `v0.1.0` is tagged on GitHub with binaries for Linux musl, both macOS architectures, Windows and wasm32. CI runs green on the pushed branch |
 | DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
 | Benchmarks | every path measured on fixtures `corpus/bench/generate.sh` writes, and `bench-sizes` now fails when a read errors instead of timing the refusal |
 | Inline `<svg>` | a picture written into the page is carried as a `data:` URL, and a `data:` URL now reaches the DOCX writer — HTML with an inline chart converts to a `.docx` LibreOffice opens with the picture |
@@ -110,45 +110,7 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ## Next, in order
 
-### 1. Publish 0.1 — two credentialed commands away
-
-Everything that can be done without credentials is done: the six crate
-names are free on crates.io, internal dependencies now carry a version as
-well as a path (without which `cargo publish` refuses every crate above
-`ferrodoc-ast`), `cargo publish --dry-run -p ferrodoc-ast` reaches the
-upload step, and **`v0.1.0` is tagged on `master`**.
-
-Two things this machine does not have:
-
-- **A crates.io token.** `cargo login` first; `cargo publish` prompts and
-  fails without one.
-- **A git remote.** `git remote add origin …` then `git push --tags`; the
-  release build is triggered by the tag arriving at GitHub, so until the
-  tag is pushed nothing is built.
-
-Then one command, which works out the order and waits for each crate to
-reach the index before the next needs it:
-
-```sh
-cargo publish --workspace
-```
-
-Not a loop over `cargo publish -p`. A loop keeps going after a failure, so
-one real error becomes six — five of them the meaningless "no matching
-package named `ferrodoc-ast` found", because the crate below never got
-published. `cargo publish --workspace --dry-run` validates all six through
-to the upload step in one go; a loop cannot, since each crate needs the one
-below it to exist first.
-
-`ferrodoc-harness` is marked `publish = false`: it shells out to pandoc and
-reads the corpus, so it means nothing outside this repository.
-
-Publishing cannot be undone and a yanked version stays visible, which is
-why the two commands above are the owner's to run.
-
-**Iterate: no.** Nothing to review; it is a decision.
-
-### 2. Learn from real documents and users
+### 1. Learn from real documents and users
 
 After 0.1, do not widen the format surface on speculation. The project has
 its intended conversion square; the next useful work is a corpus failure from
@@ -160,7 +122,7 @@ divergences, `spec-09.docx`, the nested quotation DOCX writer case, stated
 image dimensions, and the HTML reader's valid-input mismatches. They are
 repairs, not a reason to delay the first release.
 
-### 3. Add one binding only when usage chooses it
+### 2. Add one binding only when usage chooses it
 
 The CLI and Rust crates are the first adoption surface. Do not build Python
 and Node bindings in parallel, and do not guess which community matters more.
