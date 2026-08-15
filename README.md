@@ -54,7 +54,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **654/655** documents produce identical ASTs |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
-| `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs |
+| `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
@@ -65,6 +65,7 @@ cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json -
 cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
+cargo run -p ferrodoc-harness -- diff-docx  corpus/docx-libreoffice --fail-under 87
 cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
 cargo run -p ferrodoc-harness -- diff-md    corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm    corpus/gfm --fail-under 100

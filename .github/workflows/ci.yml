@@ -67,6 +67,8 @@ jobs:
         run: ./target/release/ferrodoc-harness diff-html corpus/commonmark-spec-0.31.2.json --fail-under 100
       - name: DOCX reader
         run: ./target/release/ferrodoc-harness diff-docx corpus/docx --fail-under 96
+      - name: DOCX reader, documents LibreOffice wrote
+        run: ./target/release/ferrodoc-harness diff-docx corpus/docx-libreoffice --fail-under 87
       - name: DOCX writer
         run: ./target/release/ferrodoc-harness diff-write corpus --fail-under 90
       - name: markdown writer

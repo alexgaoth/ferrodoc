@@ -21,6 +21,7 @@ repo-wide.
   `cargo run -q -p ferrodoc-harness -- diff-ast corpus --fail-under 100`
   `cargo run -q -p ferrodoc-harness -- diff-html corpus/commonmark-spec-0.31.2.json --fail-under 100`
   `cargo run -q -p ferrodoc-harness -- diff-docx corpus/docx --fail-under 96`
+  `cargo run -q -p ferrodoc-harness -- diff-docx corpus/docx-libreoffice --fail-under 87`
   `cargo run -q -p ferrodoc-harness -- diff-write corpus --fail-under 90`
   `cargo run -q -p ferrodoc-harness -- diff-md corpus/commonmark-spec-0.31.2.json --fail-under 100`
   `cargo run -q -p ferrodoc-harness -- diff-gfm corpus/gfm --fail-under 100`
@@ -55,6 +56,12 @@ repo-wide.
 - **Pandoc's GitHub sources describe a later pandoc than the 3.8.2.1 binary**
   and disagree with it (numbering keyed on numId vs abstractNumId, ColWidth 0,
   `isRestart`). Read them for algorithm shape only; the binary decides.
+- **A corpus of your own output proves less than it looks.** `corpus/docx`
+  is pandoc's output, so `diff-docx` over it cannot fail on a structure
+  pandoc's writer never emits — which is most of what a word processor
+  emits. `corpus/docx-libreoffice` is written by LibreOffice Writer and is
+  the only evidence that the DOCX reader handles documents from anywhere
+  else. Regenerate it with `bash corpus/docx-libreoffice/generate.sh`.
 - A behavior with no corpus document that fails without it is not covered.
   Mutation-test a new rule by breaking it and confirming the corpus drops.
   Restore with a `cp` of a copy taken first, never `git checkout` — work in

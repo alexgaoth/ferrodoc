@@ -44,6 +44,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-ast` | any pandoc JSON round-trips to an equal value | **11/11** |
 | `diff-html` | HTML writer produces pandoc's HTML | **652/652** |
 | `diff-docx` | DOCX reader produces pandoc's AST | **36/37** |
+| `diff-docx` (LibreOffice) | ...on documents *another* writer produced | **7/8** |
 | `diff-write` | DOCX writer survives a round trip through pandoc | **10/11** |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
@@ -66,10 +67,26 @@ measured gap with a reason.
 
 Repros: `.iterate/20260810-markdown-reader/round-3-verdict.md`.
 
-### DOCX reader — 1 corpus document
+### DOCX reader — 1 corpus document, and 1 deliberate divergence
 
 `corpus/docx/spec-09.docx`: a list nested inside a table cell in a shape the
 reader flattens.
+
+**The DOCX corpus is pandoc's own output**, which means `diff-docx` over it
+proves "ferrodoc reads what pandoc writes the way pandoc reads it" and
+cannot fail on a structure pandoc's writer never emits — `Heading1` and
+`TableContents` styles, LibreOffice's `numbering.xml`, `w:tblLayout`. So
+there is a second corpus, `corpus/docx-libreoffice`, written by LibreOffice
+Writer: eight documents covering headings, nested and mixed lists, tables
+with merged cells, an embedded image, hard breaks, inline runs split at
+arbitrary points, and entities.
+
+Seven of the eight produce an AST **identical to pandoc's**. The eighth
+differs because ferrodoc keeps something pandoc drops: LibreOffice writes a
+horizontal rule as a paragraph that is nothing but a bottom border, and
+ferrodoc reads it as `HorizontalRule` where pandoc reads nothing at all.
+The rule is narrow — the paragraph must have no content beyond that single
+border — so a paragraph merely styled with an underline is not affected.
 
 ### DOCX writer — 1 corpus document, and two categories
 
