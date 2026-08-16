@@ -112,6 +112,51 @@ The audit trail belongs in `.iterate/<date>-<slug>/`.
 
 ---
 
+## When to run `/tend`
+
+`CLAUDE.md` is read into every future session. A line there costs tokens in
+every session forever, so it earns its place only by **changing what an
+agent would do**. Deleting a stale line is worth as much as adding a good
+one, and "nothing worth adding" is a valid outcome — never pad the file.
+
+Run it in the session that did the work. The transcript is the input, so a
+fresh subagent has nothing to harvest; never delegate it.
+
+**What to harvest.** What did I learn by trial, error or grep that one line
+would have told me upfront? Where was I wrong — a failed command, a broken
+test, a user correction, a review finding? What did the user state as a
+rule? Which commands actually work where the obvious guess fails? What
+invariant does the code not announce? And which existing line did I
+misread — an instruction that failed to instruct is a bug, not a fact.
+
+**Four gates. A candidate needs all four:** non-obvious (two minutes of
+reading would not reveal it), durable (still true after the branch merges),
+behaviour-changing (a future agent acts differently), and project-scoped
+(personal preferences and secrets never go in a committed file).
+
+**Budget by governed file count**, measured with
+`git ls-files ":(top)<dir>" | wc -l`: under 100 files → 40 lines; under
+1,000 → 60; under 10,000 → 80; beyond → 100, and past that the answer is
+more nested files rather than a longer root. Spend it by **displacement**:
+at or over budget, a new line must name the weaker line it beats, and that
+line goes. If no line is weaker than the candidate, the candidate was not
+worth adding. Past double the budget, re-file rather than compress —
+package facts into nested `CLAUDE.md`, long-form detail into `docs/` behind
+a plain pointer, never an `@import`, which would load it anyway.
+
+**Five traps.** Changelog ("we just refactored X" — that is git history).
+Tour guide (narrating a tree anyone can `ls`). Wiki (restating what the
+code says plainly). Hedge ("consider", "generally" — if it is not a rule it
+does not earn a line). Trophy (recording what a session accomplished; the
+file is for the next agent, not about this one).
+
+The root file is repo-wide; a fact about one crate belongs in that crate's
+`CLAUDE.md`. Human-written rule lines are authoritative: tighten or
+relocate them, never silently drop one — if a rule looks wrong, keep it and
+say so.
+
+---
+
 ## What "pan" would mean here
 
 Pandoc reads about 40 formats and writes about 60. Matching that count is

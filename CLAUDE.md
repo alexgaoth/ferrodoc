@@ -5,8 +5,8 @@ Two contracts: output must be value-identical to pandoc's, proven
 differentially and never assumed; and every advantage claimed to a reader
 must be a number someone else can reproduce.
 
-Per-crate gotchas live in `crates/*/CLAUDE.md`; this file is what holds
-repo-wide.
+Per-crate gotchas live in `crates/*/CLAUDE.md` and
+`bindings/python/CLAUDE.md`; this file is what holds repo-wide.
 
 ## Commands
 
@@ -30,7 +30,7 @@ repo-wide.
   `cargo run -q -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95`
   plus `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`
   (pedantic + missing_docs are deny-level).
-- Never run `cargo fmt`: the repo is not fmt-clean (128 files differ), so it
+- Never run `cargo fmt`: the repo is not fmt-clean (22 files differ), so it
   buries a surgical change in unrelated reformatting. Match surrounding style
   by hand.
 - After touching a reader also run `ferrodoc-harness fuzz corpus --iters
@@ -39,17 +39,19 @@ repo-wide.
 - `crates/ferrodoc` is the entry point (facade + `ferrodoc` binary): a new
   reader or writer is unreachable by users until added to its `Format` enum,
   `parse`/`render`, and the `--help` text in `main.rs`.
+- Releasing is `cargo publish --workspace`, never a loop over
+  `cargo publish -p`: a loop keeps going after a failure, so one error
+  becomes six. Every internal dependency needs a **`version` as well as a
+  `path`** or publish refuses it, and `ferrodoc-harness` stays
+  `publish = false` — it shells out to pandoc and reads the corpus.
 
 ## Rules
 
 - **A roadmap item's premise is a claim like any other: measure it before
-  building on it.** Two in `TODO.md` were false. "`HTML -> AST` is
-  superlinear" was the harness timing a document the reader *refuses*; the
-  reader is linear. "Pandoc emits `RawBlock` for elements it does not know"
-  is backwards — pandoc drops the tag exactly as this does, and the real
-  losses were in the opposite direction, in `<template>`, `<noscript>` and
-  `<q>`. Both items were written from a plausible reading rather than a
-  measurement, and both would have been days of work on the wrong thing.
+  building on it.** Two in `TODO.md` were false — "`HTML -> AST` is
+  superlinear" (it is linear; the harness was timing a refusal) and "pandoc
+  emits `RawBlock` for unknown elements" (it drops the tag, as this does).
+  Each would have been days of work on the wrong thing.
 - Never guess pandoc behavior — probe it first
   (`printf '...' | pandoc -f commonmark -t json`), then encode the probed rule
   with a comment. Every quirk in ferrodoc-markdown was derived this way.
@@ -59,9 +61,12 @@ repo-wide.
 - **A corpus of your own output proves less than it looks.** `corpus/docx`
   is pandoc's output, so `diff-docx` over it cannot fail on a structure
   pandoc's writer never emits — which is most of what a word processor
-  emits. `corpus/docx-libreoffice` is written by LibreOffice Writer and is
-  the only evidence that the DOCX reader handles documents from anywhere
-  else. Regenerate it with `bash corpus/docx-libreoffice/generate.sh`.
+  emits. `corpus/docx-libreoffice` (`bash corpus/docx-libreoffice/generate.sh`)
+  is the only evidence the DOCX reader handles anything else.
+- Generator inputs live in `<corpus>/src/`, and the HTML collector skips
+  `src/`. `diff-html-read` walks `corpus/` for `*.html`, so without that
+  rule eight DOCX sources silently widened the HTML gate — and *passed*, so
+  the score rose and nothing looked wrong.
 - A behavior with no corpus document that fails without it is not covered.
   Mutation-test a new rule by breaking it and confirming the corpus drops.
   Restore with a `cp` of a copy taken first, never `git checkout` — work in
@@ -76,39 +81,26 @@ repo-wide.
   green while it stays unreached. Making a dormant path live — `docx → docx`
   first embedding a picture, a fixture stopping being skipped — is a change
   to verify end to end, not by its diff. Both shipped breakage that way.
-- Never compare builds by absolute timings: this machine drifts ~2× within a
-  session. Interleave against a baseline worktree and report the ratio.
-  (`bench-sizes` prints absolute per-path latency on purpose — for users
-  sizing a pipeline, not for judging a change.)
-- Benchmark inputs come from `bash corpus/bench/generate.sh`, which writes
-  them to `~/.cache/ferrodoc-bench` — **not** `/tmp`, which is tmpfs here, so
-  a fixture and its derived forms would be resident memory rather than disk.
-  A baseline `target/` there is RAM too; delete it as soon as the number is
-  taken.
-- **The fastest way to read a document is to refuse it.** A missing fixture
-  fails quietly (`bench` prints nothing, `/usr/bin/time` reports pandoc's
-  ~12 MB error path as a conversion), and so does a fixture the reader
-  rejects: `HTML -> AST` was published at 4.12 s for 10 MB, which was the
-  cost of refusing a document that nested past the 200-level bound, not of
-  reading one. `bench-sizes` now runs every read once for real and fails
-  loudly. Do not reintroduce a timing loop that discards a `Result`.
-- Tiling a corpus document to make a large fixture changes what it is:
-  `corpus/truncation-cases.md` holds unterminated HTML comments, and past the
-  first repetition each one swallows the closing tags of everything after it,
-  so the document nests without bound. Generated prose is the safer fixture.
+- **Before publishing any number, read `docs/benchmarking.md`.** The three
+  rules it exists for: never compare builds by absolute timings (this
+  machine drifts ~2× within a session — interleave against a baseline and
+  report the ratio); fixtures come from `bash corpus/bench/generate.sh`
+  into `~/.cache/ferrodoc-bench`, never `/tmp`, which is tmpfs here; and
+  **the fastest way to read a document is to refuse it** — a timing loop
+  that discards a `Result` published 4.12 s of *rejection* as throughput.
+- Measure every optimization against the code it replaces, and *ablate
+  first* to find where the cost is: deleting the DOCX tree won 5× where
+  interning its names would have won 8%. Revert what does not measure.
 - A README claim needs its reproducing command, figures from one sitting, and
   pandoc's advantages beside it — selling wins without limits is what makes a
   reader stop trusting the wins.
-- Measure every optimization against the code it replaces, and *ablate first*
-  to find where the cost is: interning names in the DOCX tree would have won
-  8% where deleting the tree won 5×. Slice-scanning escapers lost to a
-  per-character loop and `with_capacity` lost to growing. Revert what does
-  not measure.
 
 ## Gotchas
 
-- Every crate must keep compiling for `wasm32-unknown-unknown`, so no crate
-  below the facade may do IO or pull in a C library.
+- Every *workspace* crate must keep compiling for `wasm32-unknown-unknown`,
+  so no crate below the facade may do IO or pull in a C library.
+  `bindings/python` is outside the workspace and exempt — see its own
+  `CLAUDE.md`.
 - All readers bound their recursion and must return `Err`, never abort or
   truncate. Keep bounds low: a test thread gets 2 MiB, so 500 overflows the
   suite the bound exists to protect; 200 works.
