@@ -167,6 +167,16 @@ jobs:
         run: |
           cargo build --release -p ferrodoc
           mkdir -p "$RUNNER_TEMP/tex" && cd "$RUNNER_TEMP/tex"
+          # A real 1x1 PNG for every picture the *corpus* names: TeX reads
+          # the file to size the box, so a stub header will not do. Named
+          # from the source and not from the output, so a URL the writer
+          # mangled has no file and the step fails — the same rule the
+          # sphinx job uses, and there it caught a real bug.
+          png=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+          grep -ho '](\([^)]*\.\(png\|jpg\|gif\|svg\)\)' "$GITHUB_WORKSPACE"/corpus/*.md |
+            sed 's/](//' | sort -u | while read -r image; do
+              printf '%s' "$png" | base64 -d > "$image"
+            done
           for doc in "$GITHUB_WORKSPACE"/corpus/*.md; do
             name=$(basename "$doc" .md)
             "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t latex -s -o "$name.tex"
@@ -222,7 +232,10 @@ jobs:
             # inside its own paragraph, which swallowed the next sentence
             # into the file name.
             grep -ho '](\([^)]*\.\(png\|jpg\|gif\|svg\)\)' "$doc" | sed 's/](//' | sort -u |
-              while read -r image; do printf '\211PNG\r\n\032\n' > "$image"; done
+              while read -r image; do
+                printf '%s' iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg== |
+                  base64 -d > "$image"
+              done
             # -W turns every warning into an error: a malformed table or a
             # short title underline is a warning, and both mean the document
             # is wrong rather than merely untidy.
