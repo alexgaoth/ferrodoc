@@ -45,7 +45,7 @@ an exit test, so "are we there" is checkable rather than a matter of taste.
 | **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ JavaScript ✅ **C ABI ✅** (Go, JVM, C#, Ruby) — **met** |
 | **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT, EPUB in ✅ LaTeX/PDF, RST, AsciiDoc out ✅ · **EPUB out ❌** |
 | **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ peak RSS gated ✅ · **one superlinear path** |
-| **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 14 gates ✅ two independent corpora ✅ · standing work, never "done" |
+| **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 19 differential gates ✅ four independent corpora ✅ six external judges ✅ · standing work, never "done" |
 
 H1 and H2 are the reach of the thing. H3 is why anyone would embed it rather
 than shell out — and it is the horizon that quietly decays, because a
@@ -417,7 +417,7 @@ critic verdicts behind them.
 | Standalone HTML | `-s` writes a whole page — doctype, charset, `lang`, title, authors — and `--css` inlines a stylesheet |
 | **H1** Python | `pip install ferrodoc` — one typed function, abi3 wheels for 3.9+ on Linux, macOS and Windows, GIL released so a thread pool overlaps. **72× a pandoc subprocess** per document |
 | **H3** DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
-| **H4** Verifiability | 14 gates in CI on three platforms against pinned pandoc, wasm32 build, 500k-mutation fuzz per run, `COMPATIBILITY.md` |
+| **H4** Verifiability | 19 differential gates in CI on three platforms against pinned pandoc, plus a gated memory bound, a 500k-mutation fuzz run, and six judges that are not us: `pdflatex`, `sphinx-build -W`, `asciidoctor`, `epubcheck`, a headless browser and valgrind |
 | **H4** Independent corpora | 7/8 DOCX and **8/8 ODT** documents *LibreOffice* wrote read identically to pandoc — the only evidence either reader generalises beyond pandoc's own output |
 | Released | **0.1.0 is on crates.io** and `v0.1.0` is tagged on GitHub with binaries for Linux musl, both macOS architectures, Windows and wasm32 |
 

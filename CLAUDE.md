@@ -15,13 +15,14 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   Conformance claims are pinned to pandoc 3.8.2.1; a different pandoc will
   produce spurious diffs.
 - **`./scripts/verify.sh` decides whether the tree is releasable** — tests,
-  clippy, wasm32 and all 14 gates; `--fuzz` adds the 500k-mutation run a
-  reader change needs. Every threshold lives in that script and nowhere
-  else, and CI calls it, so there is one number to change. Never report a
-  gate from a piped command: `| tail` masks the exit status, which is how a
-  failing publish once read as success. `docs/gates.md` says what each gate
-  proves.
-- Never run `cargo fmt`: the repo is not fmt-clean (25 files differ), so it
+  clippy, wasm32, the memory bound and all 19 differential gates. The
+  bindings live outside the workspace and need their own runs: `--wasm`
+  (npm, including a headless browser), `--c` (the C ABI under valgrind),
+  `--fuzz` (500k mutations, after any reader change). Every threshold is in
+  that script and nowhere else, and CI calls it. Never report a gate from a
+  piped command: `| tail` masks the exit status, which is how a failing
+  publish once read as success.
+- Never run `cargo fmt`: the repo is not fmt-clean (29 files differ), so it
   buries a surgical change in unrelated reformatting. Match surrounding style
   by hand.
 - `crates/ferrodoc` is the entry point (facade + `ferrodoc` binary): a new
@@ -61,9 +62,8 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   rule eight DOCX sources silently widened the HTML gate — and *passed*, so
   the score rose and nothing looked wrong.
 - A behavior with no corpus document that fails without it is not covered.
-  Mutation-test a new rule by breaking it and confirming the corpus drops.
-  Restore with a `cp` of a copy taken first, never `git checkout` — work in
-  progress here is usually uncommitted and that deletes it.
+  Mutation-test a new rule by breaking it and confirming the corpus drops;
+  restore with a `cp` of a copy taken first, never `git checkout`.
 - A round-trip gate cannot see a rule whose two spellings read back the same
   (`- ☐ a` and `- [ ] a` are one AST). Those need a test on the literal
   output, or they ship broken with CI green.
@@ -74,10 +74,8 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   green while it stays unreached. Making a dormant path live — `docx → docx`
   first embedding a picture, a fixture stopping being skipped — is a change
   to verify end to end, not by its diff. Both shipped breakage that way.
-- **Before publishing any number, read `docs/benchmarking.md`.** Its three
-  triggers: comparing two builds, generating a fixture (never into `/tmp`,
-  which is tmpfs here), and any timing loop that discards its `Result` —
-  the fastest way to read a document is to refuse it.
+- **Before publishing any number, read `docs/benchmarking.md`** — and note
+  that a timing loop discarding its `Result` measures refusal, not work.
 - Measure every optimization against the code it replaces, and *ablate
   first* to find where the cost is: deleting the DOCX tree won 5× where
   interning its names would have won 8%. Revert what does not measure.
@@ -118,6 +116,10 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   read it, so that writer has no differential gate at all and is judged by
   `asciidoctor` in CI. Where a format's own toolchain exists, it is the
   better judge anyway: `pdflatex`, `sphinx-build -W`, `epubcheck`.
+- `unsafe` is forbidden workspace-wide, allowed **for the attribute only**
+  in `bindings/wasm` (a handle table is what avoids the blocks), and
+  allowed with real blocks in `bindings/c` alone — where each is one
+  dereference wide and a test fails the build if one spans logic.
 - A **text** writer is gated on *fidelity* (write it, read it back, require
   the original) with pandoc's score printed beside it; a **binary** writer
   is gated against pandoc's own output through pandoc's reader. The

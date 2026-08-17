@@ -69,7 +69,7 @@ await init(myArrayBuffer);         // or hand it over
 ## Fidelity
 
 Every conversion is checked against pandoc 3.8.2.1 document by document —
-14 differential gates, and two corpora per office format, one of them
+19 differential gates, and two corpora per office format, one of them
 written by LibreOffice rather than by us. The numbers, and every known
 loss, are in
 [`COMPATIBILITY.md`](https://github.com/alexgaoth/ferrodoc/blob/main/COMPATIBILITY.md).
