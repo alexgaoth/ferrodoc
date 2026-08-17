@@ -246,7 +246,52 @@ in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
        and the two halves are now a matched pair that must stay consistent.
     6. `./scripts/verify.sh` exits 0 with no threshold lowered.
 
+- [ ] **The correction to the fence comment is itself imprecise** — third
+  instance of one defect class, and the most instructive: a correction written
+  to replace a false statement about pandoc contains a subtly false statement
+  about pandoc. `crates/ferrodoc-markdown/src/write.rs:906-907` now says pandoc
+  "sizes a fence by the longest line that is **only** backticks", then offers
+  `"   ````"` and `"```` "` as examples — **neither is a line of only
+  backticks.** Measured: all three contents do get a five-backtick fence, so the
+  examples are right and the rule as worded is wrong. Pandoc trims surrounding
+  whitespace before testing the line. Someone implementing from that sentence
+  writes a narrower fence than pandoc for `"   ````"`. The conclusion the
+  comment draws — ferrodoc's fence is never narrower — is unaffected.
+  - **Eval:**
+    1. The sentence states the trimming, verified by probing `"   ````"`,
+       `"```` "`, `"````"` and a line with a tab before the run.
+    2. The six `assert_eq!`s and `longest.max(2) + 1` are byte-identical to
+       `75cd12e` — this is a comment change and nothing else, provable by
+       stripping `//` lines and diffing.
+    3. `./scripts/verify.sh` exits 0 with no threshold lowered.
+
 ## Done
+
+- [x] **Five things three critics measured stale or false** (2026-08-17) —
+  eval met: `75cd12e`, plus `36f3211` for the one line barred from every
+  worker's scope. All six criteria met; `verify.sh` exit 0 with all twenty
+  gates identical, and the diff proved behaviour-free by stripping `//` lines
+  and finding no remaining difference.
+
+  Three things came out of it that were not asked for. The worker
+  **re-measured all five claims itself and all five held** — no critic finding
+  was wrong. It **widened one**: pandoc indents an empty-`Attr` code block on
+  `-t markdown`, `-t gfm` and `-t commonmark` alike, and *unconditionally* — a
+  blank line or a backtick run in the content does not make it fence — which
+  the critic then re-probed across four content shapes and three non-empty
+  `Attr` shapes and confirmed. And it **corrected the brief it was given**: the
+  sample diff has 50 changed lines, not the 47 stated, then declined to put a
+  count in the prose at all, which is the better fix than a correct number that
+  goes stale.
+
+  It also found `TODO.md:570` genuinely stale and **reported it instead of
+  reaching for it**, that file being barred from every worker by scope. The
+  displacement it made in `crates/ferrodoc-html/CLAUDE.md` was checked and is
+  honest — the removed bullet's full content is at `COMPATIBILITY.md:497-501`
+  *with* a measurement the removed line lacked, and the critic re-measured that
+  too. **That file is at 85 lines against a 40-line budget**, and past double
+  budget the `/tend` rule calls for re-filing into nested files rather than
+  compression. That is a real item somebody should take.
 
 - [x] **The HTML writer does not render a task list** (2026-08-17) — eval met:
   `a145326`. `task_box()` recognises a box at the head of an item's first
