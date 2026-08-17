@@ -34,6 +34,11 @@ actually compiling the output — see the root `CLAUDE.md`.
   `DefaultStyle`.** Blocks are separated by a blank line and never
   followed by one, which is what `blocks()` exists to get right.
 - The preamble is deliberately minimal — `graphicx`, `longtable`,
-  `booktabs`, `ulem`, `hyperref` — because a preamble that loads more
-  fails on the minimal TeX installations this is aimed at. `hyperref`
-  loads last, as it asks.
+  `booktabs`, `hyperref` — because a preamble that loads more fails on the
+  minimal TeX installations this is aimed at. `hyperref` loads last, as it
+  asks. **`ulem` used to be in that list and is not in
+  `texlive-latex-base`**, so the first CI run that actually compiled the
+  output failed every document on a missing `ulem.sty`. `\sout` is
+  defined from kernel primitives instead. Adding a `\usepackage` here is
+  a decision to require a bigger TeX; check the package ships in base
+  first.

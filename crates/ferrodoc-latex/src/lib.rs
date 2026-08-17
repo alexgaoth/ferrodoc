@@ -53,9 +53,12 @@ pub fn write_latex(doc: &Pandoc) -> String {
 ///
 /// Deliberately small. Every package here is one the body can *need*:
 /// `graphicx` for an image, `hyperref` for a link, `longtable`/`booktabs`
-/// for a table, `ulem` for strikeout. A preamble that loaded more would
-/// fail on a machine with a minimal TeX installation, which is most of the
-/// machines this is for.
+/// for a table. A preamble that loaded more would fail on a machine with a
+/// minimal TeX installation, which is most of the machines this is for —
+/// and that is not hypothetical. `ulem` was loaded here for `\sout`, and
+/// it is *not* in `texlive-latex-base`: every document failed to compile
+/// on the first CI run that tried. Strikeout is drawn from kernel
+/// primitives instead, so the preamble needs nothing outside base LaTeX.
 pub fn write_latex_standalone(doc: &Pandoc) -> String {
     let mut out = String::from(PREAMBLE);
     if let Some(title) = doc.meta.get("title") {
@@ -82,7 +85,12 @@ const PREAMBLE: &str = concat!(
     "\\usepackage[utf8]{inputenc}\n",
     "\\usepackage{graphicx}\n",
     "\\usepackage{longtable,booktabs}\n",
-    "\\usepackage{ulem}\n",
+    // `\sout` is `ulem`'s, and `ulem` is not in a base TeX. The name is
+    // kept because it is the one a fragment pasted into someone else's
+    // document will already have; `\providecommand` yields to theirs.
+    // Box the argument, overlay a rule its width, then print it.
+    "\\providecommand{\\sout}[1]{{\\leavevmode\\setbox0=\\hbox{#1}%\n",
+    "  \\rlap{\\rule[0.5ex]{\\wd0}{0.4pt}}\\box0}}\n",
     // Loaded last, as hyperref asks.
     "\\usepackage{hyperref}\n",
 );
@@ -328,7 +336,8 @@ fn inline_to(inline: &Inline, out: &mut String) {
         Inline::Emph(inner) => wrap("emph", inner, out),
         Inline::Strong(inner) => wrap("textbf", inner, out),
         Inline::Underline(inner) => wrap("underline", inner, out),
-        // `ulem`'s, because LaTeX has no strikeout of its own.
+        // `ulem`'s name, but the preamble defines it: LaTeX has no
+        // strikeout of its own and `ulem` is not in a base TeX.
         Inline::Strikeout(inner) => wrap("sout", inner, out),
         Inline::Superscript(inner) => wrap("textsuperscript", inner, out),
         Inline::Subscript(inner) => wrap("textsubscript", inner, out),
