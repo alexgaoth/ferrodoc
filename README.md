@@ -1,6 +1,6 @@
 # ferrodoc
 
-Convert documents — markdown (CommonMark and GFM), HTML and DOCX —
+Convert documents — markdown (CommonMark and GFM), HTML, DOCX and ODT —
 semantically and in your own process, with output checked against pandoc
 document by document.
 
@@ -102,6 +102,8 @@ nothing is trusted because it looks right.
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
+| `ferrodoc-odt` reader | **32/34** corpus documents produce identical ASTs, and **8/8** documents written by LibreOffice rather than pandoc |
+| `ferrodoc-odt` writer | **640/652** spec examples survive an ODT round trip identically, with embedded images |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
 | `ferrodoc-html` reader | **632/658** HTML documents produce identical ASTs |
@@ -113,6 +115,9 @@ cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json -
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx-libreoffice --fail-under 87
 cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
+cargo run -p ferrodoc-harness -- diff-odt   corpus/odt --fail-under 94
+cargo run -p ferrodoc-harness -- diff-odt   corpus/odt-libreoffice --fail-under 100
+cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-md    corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm    corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm    corpus/commonmark-spec-0.31.2.json --fail-under 99.8
@@ -120,8 +125,9 @@ cargo run -p ferrodoc-harness -- diff-gfm-md corpus/gfm corpus/commonmark-spec-0
 cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
 ```
 
-`diff-write` is the DOCX writer's oracle: both engines write the same AST to
-a `.docx`, pandoc reads both back, and the two documents must match.
+`diff-write` and `diff-odt-write` are the office writers' oracle: both
+engines write the same AST to a `.docx` (or `.odt`), pandoc reads both back,
+and the two documents must match.
 Comparing zip bytes would be meaningless; comparing what the format
 preserves is the real contract.
 
@@ -183,11 +189,12 @@ ferrodoc report.docx -o copy.docx        # DOCX in, DOCX out — keeps its image
 ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out — keeps tables
 ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table syntax
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
+ferrodoc minutes.odt -t gfm              # LibreOffice in, GitHub markdown out
 cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
-Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `json` (the
+Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `json` (the
 pandoc AST). Outputs: those plus `plain`. `-s`/`--standalone` wraps HTML
 output in a complete page — doctype, charset, `lang`, and the title and
 authors the document carries — and `--css FILE` inlines a stylesheet into
@@ -222,29 +229,33 @@ let without_headings = render(&doc, Format::Html)?;
 - **Deterministic output.** The same AST always produces the same `.docx`
   bytes, which makes content-addressed caching and "did this change?" work.
   Pandoc embeds timestamps, so its output differs run to run.
-- **Portable.** All five library crates, including the DOCX reader and writer,
-  compile to `wasm32-unknown-unknown` — conversion in a browser tab or an edge
-  worker, with no document leaving the client.
+- **Portable.** Every library crate, including the DOCX and ODT readers and
+  writers, compiles to `wasm32-unknown-unknown` — conversion in a browser
+  tab or an edge worker, with no document leaving the client.
 
 ```sh
 cargo build --release --target wasm32-unknown-unknown \
-  -p ferrodoc-ast -p ferrodoc-markdown -p ferrodoc-html -p ferrodoc-text -p ferrodoc-docx
+  -p ferrodoc-ast -p ferrodoc-markdown -p ferrodoc-html -p ferrodoc-text \
+  -p ferrodoc-docx -p ferrodoc-odt
 ```
 
 Every gate, every known loss and every deliberate divergence is listed one
 by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
-produces it. CI runs all nine against a pinned pandoc, and builds and tests on
+produces it. CI runs all fourteen against a pinned pandoc, and builds and tests on
 Linux, macOS and Windows, plus a wasm32 build and a 500,000-mutation fuzz
 campaign.
 
 ## Where pandoc is still ahead
 
 The table above is not the whole picture, and pretending otherwise would make
-the rest less believable. Pandoc supports ~40 formats to ferrodoc's four, plus
+the rest less believable. Pandoc supports ~40 formats to ferrodoc's five, plus
 citations, templates, Lua filters, PDF output and fifteen years of edge cases.
 Our DOCX writer still drops raw blocks, which have no OOXML equivalent, and
 embeds eight image formats — PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF —
-where anything else becomes alt text. The HTML reader parses to the HTML5
+where anything else becomes alt text. **Prefer DOCX to ODT** when a document
+has to keep its code blocks or its merged cells: pandoc's ODT *reader* has
+no construct for either, so neither converter can carry them through an
+`.odt`, and `COMPATIBILITY.md` lists the rest of what that reader drops. The HTML reader parses to the HTML5
 spec, via `html5ever`, where pandoc uses `tagsoup`; on malformed markup — an
 unclosed `<a>`, a tag with no closing `>`, a `<pre>` inside a `<tr>` — the
 two build different trees, and that is what most of the 26 unmatched

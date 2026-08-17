@@ -16,11 +16,13 @@ published sources describe a later pandoc than this binary.
 | GFM | yes (the five spec extensions) | yes |
 | HTML | yes | yes (fragment, or `-s` for a whole page) |
 | DOCX | yes | yes |
+| ODT | yes | yes |
 | pandoc JSON AST | yes | yes |
 | plain text | — | yes |
 
 Everything else pandoc supports — LaTeX, EPUB, RST, Org, presentations, the
-other ~36 — is a declared non-goal. See `TODO.md`.
+rest of its ~40 — is not converted today. `TODO.md` says which are planned
+and which are declared non-goals.
 
 ## Measured conformance
 
@@ -31,6 +33,9 @@ cargo run -p ferrodoc-harness -- diff-ast       corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html      corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx      corpus/docx --fail-under 96
 cargo run -p ferrodoc-harness -- diff-write     corpus --fail-under 90
+cargo run -p ferrodoc-harness -- diff-odt       corpus/odt --fail-under 94
+cargo run -p ferrodoc-harness -- diff-odt       corpus/odt-libreoffice --fail-under 100
+cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-md        corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/commonmark-spec-0.31.2.json --fail-under 99.8
@@ -46,6 +51,9 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-docx` | DOCX reader produces pandoc's AST | **36/37** |
 | `diff-docx` (LibreOffice) | ...on documents *another* writer produced | **7/8** |
 | `diff-write` | DOCX writer survives a round trip through pandoc | **10/11** |
+| `diff-odt` | ODT reader produces pandoc's AST | **32/34** |
+| `diff-odt` (LibreOffice) | ...on documents *another* writer produced | **8/8** |
+| `diff-odt-write` | ODT writer survives a round trip through pandoc | **11/11** |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
@@ -176,6 +184,63 @@ when the note declares none — which is the shape **pandoc writes**, and why
 while ferrodoc keeps it. And a figure is written with pandoc's
 `CaptionedFigure` style: written any other way pandoc's reader drops the
 picture, so a round trip through this writer would lose it one hop later.
+
+### ODT reader — 2 corpus documents, and what pandoc's own reader cannot hold
+
+`corpus/odt` is pandoc's own output and `corpus/odt-libreoffice` is
+LibreOffice's — the same split, and for the same reason, as the two DOCX
+corpora. **All eight LibreOffice documents produce an AST identical to
+pandoc's.** Two of the 34 pandoc-written ones do not, and both for one
+reason:
+
+**Pandoc reads every list twice** — and 2^n times at n levels of nesting.
+The only observable effect is on identifiers: a heading or bookmark inside
+a list is allocated once per pass, so pandoc's suffix is one higher than
+ferrodoc's (`foo-1` where ferrodoc says `foo`). The identifiers are unique
+and internally consistent either way. This is deliberately not reproduced:
+copying an exponential blowup into a converter whose promise is that it
+cannot be made to hang is the worse trade. `corpus/odt/spec-03.odt` and
+`corpus/odt/spec-09.odt`.
+
+Everything else in this section is pandoc's ODT reader, not ferrodoc's, and
+ferrodoc matches it exactly. It is a much plainer reader than pandoc's docx
+one, and it is worth knowing before choosing ODT as an interchange format:
+
+- **no metadata.** `meta.xml` is not read at all. A title, author or date
+  comes back as an ordinary paragraph, not as document metadata;
+- **no code blocks.** A code block written by pandoc's *own* ODT writer
+  does not survive its own reader: it comes back as one paragraph per line,
+  with the indentation intact and the language gone;
+- **no table spans, widths or alignments.** A merged cell becomes a
+  single-column cell and the row is padded at the end; every column is
+  `ColWidthDefault` and `AlignDefault`;
+- a horizontal rule is dropped, and so are annotations, tables of contents,
+  text boxes and the field elements (`text:date`, `text:page-number`);
+- a multi-paragraph block quote comes back as one quote per paragraph;
+- a `text:a` pointing at `#name` is not rewritten to the identifier that
+  bookmark was actually given, so an internal link lands nowhere.
+
+ferrodoc drops one thing pandoc keeps: `text:bibliography-mark` becomes a
+`Cite` for pandoc and nothing here, citations being a declared non-goal.
+
+### ODT writer — everything the reader above cannot hold
+
+`diff-odt-write` compares this writer's output *read back by pandoc*
+against pandoc's own output read back the same way, which is what isolates
+the writer from the format: a loss both writers share does not count
+against either. On that measure it is **11/11 on the corpus**, and
+**640/652** over the spec examples
+(`diff-odt-write corpus/commonmark-spec-0.31.2.json`).
+
+What the format loses on the way through is the list above, and it applies
+to both writers equally: a code block becomes paragraphs, a horizontal rule
+disappears, a table's merged cells flatten, and metadata does not survive.
+Use DOCX rather than ODT when a document has to keep its code blocks.
+
+One divergence is ferrodoc's own: a `Div`'s attributes are dropped rather
+than written as a `text:section`, because pandoc's writer drops them too
+and reading one back would produce a `Div` pandoc's own round trip does
+not.
 
 ### Markdown writer — 4 limits of CommonMark itself
 

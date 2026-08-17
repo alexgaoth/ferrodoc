@@ -14,28 +14,14 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   `export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"` (cargo + pandoc 3.8.2.1).
   Conformance claims are pinned to pandoc 3.8.2.1; a different pandoc will
   produce spurious diffs.
-- Verify any reader/writer change with every gate below before claiming done.
-  They are the conformance job of `.github/workflows/ci.yml`; keep the two in
-  step when a threshold moves.
-  `cargo run -q -p ferrodoc-harness -- diff-spec corpus/commonmark-spec-0.31.2.json --fail-under 100`
-  `cargo run -q -p ferrodoc-harness -- diff-ast corpus --fail-under 100`
-  `cargo run -q -p ferrodoc-harness -- diff-html corpus/commonmark-spec-0.31.2.json --fail-under 100`
-  `cargo run -q -p ferrodoc-harness -- diff-docx corpus/docx --fail-under 96`
-  `cargo run -q -p ferrodoc-harness -- diff-docx corpus/docx-libreoffice --fail-under 87`
-  `cargo run -q -p ferrodoc-harness -- diff-write corpus --fail-under 90`
-  `cargo run -q -p ferrodoc-harness -- diff-md corpus/commonmark-spec-0.31.2.json --fail-under 100`
-  `cargo run -q -p ferrodoc-harness -- diff-gfm corpus/gfm --fail-under 100`
-  `cargo run -q -p ferrodoc-harness -- diff-gfm corpus/commonmark-spec-0.31.2.json --fail-under 99.8`
-  `cargo run -q -p ferrodoc-harness -- diff-gfm-md corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100`
-  `cargo run -q -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95`
-  plus `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings`
-  (pedantic + missing_docs are deny-level).
-- Never run `cargo fmt`: the repo is not fmt-clean (22 files differ), so it
+- **Run every gate in `docs/gates.md` before claiming a reader or writer
+  change is done** — 14 differential commands with their thresholds, plus
+  `cargo test`, clippy, and the fuzz run a reader change needs. They are also
+  the conformance job of `.github/workflows/ci.yml` and the table in
+  `COMPATIBILITY.md`; keep all three in step when a threshold moves.
+- Never run `cargo fmt`: the repo is not fmt-clean (25 files differ), so it
   buries a surgical change in unrelated reformatting. Match surrounding style
   by hand.
-- After touching a reader also run `ferrodoc-harness fuzz corpus --iters
-  500000` (`FERRODOC_FUZZ_SEED` varies the search); it requires every reader
-  to refuse rather than panic. A short fixed-seed run is in `cargo test`.
 - `crates/ferrodoc` is the entry point (facade + `ferrodoc` binary): a new
   reader or writer is unreachable by users until added to its `Format` enum,
   `parse`/`render`, and the `--help` text in `main.rs`.
@@ -55,14 +41,19 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
 - Never guess pandoc behavior — probe it first
   (`printf '...' | pandoc -f commonmark -t json`), then encode the probed rule
   with a comment. Every quirk in ferrodoc-markdown was derived this way.
+- **Probe with `-t json`, and never normalize whitespace in the output you
+  are comparing.** A `re.sub(r'\s+', ' ')` over pandoc's `-t native` output
+  collapses the very thing being measured: it turned "three spaces survive"
+  into "one space", and two ODT rules were derived backwards from that
+  before the tooling was suspected rather than the binary.
 - **Pandoc's GitHub sources describe a later pandoc than the 3.8.2.1 binary**
-  and disagree with it (numbering keyed on numId vs abstractNumId, ColWidth 0,
-  `isRestart`). Read them for algorithm shape only; the binary decides.
+  and disagree with it. Read them for algorithm shape only; the binary decides.
 - **A corpus of your own output proves less than it looks.** `corpus/docx`
-  is pandoc's output, so `diff-docx` over it cannot fail on a structure
-  pandoc's writer never emits — which is most of what a word processor
-  emits. `corpus/docx-libreoffice` (`bash corpus/docx-libreoffice/generate.sh`)
-  is the only evidence the DOCX reader handles anything else.
+  and `corpus/odt` are pandoc's output, so a gate over them cannot fail on
+  a structure pandoc's writer never emits — which is most of what a word
+  processor emits. The `-libreoffice` corpora beside them (`bash
+  corpus/<name>/generate.sh`) are the only evidence either reader handles
+  anything else, and each found a real bug the pandoc corpus could not.
 - Generator inputs live in `<corpus>/src/`, and the HTML collector skips
   `src/`. `diff-html-read` walks `corpus/` for `*.html`, so without that
   rule eight DOCX sources silently widened the HTML gate — and *passed*, so
@@ -81,13 +72,10 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   green while it stays unreached. Making a dormant path live — `docx → docx`
   first embedding a picture, a fixture stopping being skipped — is a change
   to verify end to end, not by its diff. Both shipped breakage that way.
-- **Before publishing any number, read `docs/benchmarking.md`.** The three
-  rules it exists for: never compare builds by absolute timings (this
-  machine drifts ~2× within a session — interleave against a baseline and
-  report the ratio); fixtures come from `bash corpus/bench/generate.sh`
-  into `~/.cache/ferrodoc-bench`, never `/tmp`, which is tmpfs here; and
-  **the fastest way to read a document is to refuse it** — a timing loop
-  that discards a `Result` published 4.12 s of *rejection* as throughput.
+- **Before publishing any number, read `docs/benchmarking.md`.** Its three
+  triggers: comparing two builds, generating a fixture (never into `/tmp`,
+  which is tmpfs here), and any timing loop that discards its `Result` —
+  the fastest way to read a document is to refuse it.
 - Measure every optimization against the code it replaces, and *ablate
   first* to find where the cost is: deleting the DOCX tree won 5× where
   interning its names would have won 8%. Revert what does not measure.
@@ -101,6 +89,10 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   so no crate below the facade may do IO or pull in a C library.
   `bindings/python` is outside the workspace and exempt — see its own
   `CLAUDE.md`.
+- `ferrodoc-docx` exposes `xml` and `media` as `#[doc(hidden)] pub`, and
+  `ferrodoc-odt` is built on them: an ODF package is a zip of XML parts
+  sized the same way an OOXML one is. Extend them there rather than
+  copying, and keep them out of the rendered documentation.
 - All readers bound their recursion and must return `Err`, never abort or
   truncate. Keep bounds low: a test thread gets 2 MiB, so 500 overflows the
   suite the bound exists to protect; 200 works.
@@ -112,6 +104,10 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   Build a new `Vec` in one pass, or use `retain`/`drain`. Same trap in
   identifier uniquing: resume the `-N` suffix search, never restart it.
 - Known gaps live in each crate's docs; `.iterate/*/` holds the critic verdicts
-  behind them, including fixes made after a run hit its round cap. `TODO.md`
-  has the roadmap and the deliberate non-goals, `COMPATIBILITY.md` every known
-  loss with its reproducing command — update both when a number moves.
+  behind them, including fixes made after a run hit its round cap.
+  `COMPATIBILITY.md` has every known loss with its reproducing command —
+  update it when a number moves.
+- **`TODO.md` picks the next item; it is not a wish list.** It holds the bet,
+  three ranking rules and a five-step procedure. Read it before starting
+  anything unprompted, and when an item lands, *re-run the ranking and
+  rewrite the order* — skipping that decays it into a list.
