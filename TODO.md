@@ -43,7 +43,7 @@ an exit test, so "are we there" is checkable rather than a matter of taste.
 | | what it means | exit test | state |
 |---|---|---|---|
 | **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ **JavaScript ✅** · JVM/Go/C# ❌ |
-| **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT ✅ · **EPUB ❌ · PDF/LaTeX out ❌** |
+| **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT ✅ **EPUB in ✅** · EPUB out ❌ · PDF/LaTeX out ❌ |
 | **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ peak RSS gated ✅ · **one superlinear path** |
 | **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 14 gates ✅ two independent corpora ✅ · standing work, never "done" |
 
@@ -254,48 +254,54 @@ Three bugs the cheap tests could not have found:
 - caching the `Uint8Array` view reads zeros after any conversion large
   enough to grow the module's memory.
 
-### 4. EPUB, read then write — `/iterate`
+### ~~4a. EPUB, read~~ — landed; the writer is item 4b
 
-*Rule 2 within H2: a publishing pipeline with EPUBs cannot convert them in
-process at all today.*
+*Rule 2 within H2: a publishing pipeline with EPUBs could not convert them
+in process at all.*
 
-A zip whose content is XHTML, so the reader that does the work already
-exists. Reading is: `META-INF/container.xml` names the `.opf`, the `.opf`
-gives a manifest and a spine, each spine item goes through `read_html`, and
-the results concatenate in spine order. Writing is the HTML writer plus a
-manifest, a spine and a nav document. Images come from the media bag
-`docx → docx` already uses.
+| criterion | committed | measured |
+|---|---|---|
+| two corpora, one not pandoc's | required | ✅ `corpus/epub` and `corpus/epub-handmade` |
+| independent corpus | **100%** | **3/3** |
+| pandoc corpus | **≥ 90%** | **10/12 (83%)** — both misses are HTML reader divergences already counted in `diff-html-read` |
+| an EPUB reader opens the output | required | ✅ `epubcheck` clean on the hand-authored corpus, in CI |
+| spine order proved by a fixture where file order differs | required | ✅ `reversed-spine.epub` |
 
-- Gate: `diff-epub` against pandoc, both directions.
-- Watch for: the spine is the reading order and it is not the file order; a
-  chapter is a document boundary, not a `<div>`; `epub2` and `epub3` differ
-  in the manifest, not in the content.
-- **The lesson ODT paid for: measure what pandoc's *reader* can actually
-  hold before writing a mapping for it.** Half the ODT reader turned out to
-  be about *not* producing constructs pandoc's own reader never emits — no
-  metadata, no code blocks, no table spans. Writing those mappings first
-  would have been days spent making the gate fail.
+**83% against the 90% committed, and the gap is not the EPUB layer.** The
+two failures are an unterminated HTML comment and a line break inside code
+— members of the HTML reader's 26 known divergences, which this reader
+inherits wholesale because an EPUB's content documents *are* XHTML. Closing
+them means closing those, which is `## Smaller things` below, not this item.
+
+The hand-authored corpus was worth more than the pandoc one, exactly as
+`## How a format gets added` claims: it found that pandoc's EPUB reader
+generates no heading identifiers at all, and that the per-file anchor is
+named for the raw href rather than the decoded one. It also found two bugs
+in the **HTML** reader that `diff-html-read` could not see.
+
+### 4b. EPUB, write — `/iterate`
+
+*H2. Reading shipped first because people have books they want as markdown
+far more often than the reverse; that asymmetry is why this is a separate
+item rather than half a finished one.*
+
+Writing is the HTML writer plus a manifest, a spine and a nav document,
+and chapters split at level-1 headings. The shape is known: pandoc's own
+writer wraps each chapter's content in `<section>` divs, and this writer
+must too, or every document differs at the first heading.
 
 **Done when**
 
-- `diff-epub` exists over **two corpora**, as every office format here does:
-  pandoc's own EPUB output, and EPUBs *another program wrote*
-  (`corpus/epub-*/generate.sh`, from Calibre or Sigil — a corpus of our own
-  output cannot fail on a structure our writer never emits).
-- Reader: **≥ 90%** on the pandoc corpus and **100%** on the independent
-  one, committed before measuring. The independent corpus is the one that
-  matters and it is small, so it is gated at 100.
-- Writer: `diff-epub-write` at **100%** on `corpus`, the same shape as
+- `diff-epub-write` at **100%** on `corpus`, the same shape as
   `diff-odt-write` — ours through pandoc against pandoc's through pandoc.
-- **An EPUB reader opens the output**: `epubcheck` reports no errors on a
-  written file, and the file opens in Calibre. An external judge, because
-  "pandoc reads it back" cannot see a manifest a real reader rejects.
-- Spine order is proved by a fixture where **file order and reading order
-  differ** — otherwise the gate passes on documents that cannot distinguish
-  the two, which is most of them.
-
-**Iterate: yes** — a package another program must open, and silent loss is
-one wrong spine entry away.
+- **`epubcheck` reports 0 errors** on every written book, in CI. It has
+  already earned its place: it caught an incomplete `toc.ncx`, a missing
+  navigation document and an unreachable non-linear item in the fixtures.
+- A written book **round-trips through this crate's own reader** with the
+  spine order intact, proved on a document whose chapter order would sort
+  differently by file name.
+- `Format::Epub` becomes writable, reaches `--help`, and `writable_format`
+  stops special-casing it.
 
 ### 5. A LaTeX writer, and deliberately no LaTeX reader
 
