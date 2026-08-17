@@ -188,31 +188,44 @@ is also written — so the queue is what **rule 3** leaves, followed by the
 measurement that decides what comes after it. Probes behind each item are in
 `.iterate/odyssey-20260817-1409/ODYSSEY.md`.
 
-- [ ] **`samples/` is an unchecked guarantee** — rule 3, and it outranks
-  everything else on this page by that rule's own wording: *when a guarantee is
-  currently unchecked, the item that adds the check outranks any new feature*.
-  `grep -rn samples scripts/verify.sh .github/workflows/ci.yml` returns
-  **nothing**. The folder that found three silent data losses — column
-  alignment, column widths, and five dropped inline types — is enforced by a
-  sentence in `CLAUDE.md` telling a future agent to remember to run it. That is
-  the same shape as every guarantee this project gates precisely because prose
-  decays: the losses were invisible to all twenty differential gates, and the
-  thing that saw them is the thing nothing checks.
+- [ ] **The new samples check claims more than it catches** — three MINORs
+  from the `28f064b` review, and the first is the fourth instance this project
+  has produced of one defect: **a documented claim wider than the code behind
+  it**. That pattern has now cost a comment, a divergence table, a results row
+  and a gate description in two days of work.
+  - `docs/gates.md` names all three historical losses — including
+    `Superscript`/`Subscript`/`Underline`/`SmallCaps`/`Span` — and says
+    `--samples` "is what keeps them found". The critic reintroduced the
+    `Underline` and `SmallCaps` drops, confirmed the mutation reached the
+    binary, and **`--samples` exited 0**: no sample document contains either
+    inline. The only `smallcaps` string under `samples/` is pandoc's
+    boilerplate CSS. (`cargo test` does catch it, so nothing can silently
+    ship — the defect is the sentence, not the mechanism.)
+  - **`samples/inputs/` is outside the compare scope entirely.**
+    `artefacts()` is `find RESULTS.md [0-9]*-*/ -type f`, so the six committed
+    inputs are never compared — including `page.html`, which the script itself
+    generates with pandoc on every run. `docs/gates.md` says "Exactly two
+    things are ignored" and `generate.sh` says "Everything else must match
+    byte for byte"; both are wider than the code.
+  - **`samples-check.*` is not in `.gitignore`.** The `EXIT INT TERM` trap is
+    sound — verified against SIGINT, SIGTERM and a failing run, all clean —
+    but SIGKILL, an OOM or a power loss leaves a 13-directory untracked copy
+    of `samples/` at the repo root that a later `git add -A` would commit.
   - **Eval:**
-    1. A `samples` check in `scripts/verify.sh` and in CI that **fails** when a
-       committed `samples/*/diff.txt` no longer matches a fresh
-       `./samples/generate.sh`, ignoring only the `---`/`+++` timestamp header
-       lines and the three nondeterministic binaries (zip mtimes, pandoc ids).
-    2. **Mutation-proof it bites**: reintroduce one of the three original
-       losses — drop table column alignment in the HTML writer — and show the
-       new check fails while *every existing gate stays green*. Restore from a
-       `cp` taken first, never `git checkout`. A check that cannot fail where
-       the gates are blind is the whole defect being fixed, restated.
-    3. It is **not** flaky: three consecutive clean runs on an unmodified tree,
-       exit 0 each time.
-    4. `./scripts/verify.sh` exits 0 with no threshold lowered, and the run
-       cost is stated in `docs/gates.md` — if it doubles the suite's runtime
-       that is a fact the next agent needs, not a detail.
+    1. **Make the claim true rather than narrowing it**, which is the better
+       of the two fixes the critic offered: `samples/inputs/handbook.md` gains
+       an `<u>`, a `<span class="smallcaps">` and an attributed span, and
+       reintroducing the five-inline drop in the markdown writer makes
+       `./scripts/verify.sh --samples` exit **non-zero** — demonstrated with a
+       `cp`-restored mutation, never `git checkout`. If narrowing turns out to
+       be the only honest option, say why with evidence.
+    2. `samples/inputs/` is either inside the compare scope or named as
+       outside it in both `docs/gates.md` and `generate.sh`, so no sentence in
+       either is wider than the code.
+    3. `samples-check.*` is in `.gitignore`, verified by `git status
+       --porcelain` staying empty with such a directory present.
+    4. `./scripts/verify.sh` exits 0 with no threshold lowered, and
+       `./samples/generate.sh --check` stays clean on three consecutive runs.
 
 - [ ] **Nobody has counted what the failing gates are failing on** — the
   measurement that should precede the next three features. `CLAUDE.md`'s first
@@ -293,6 +306,30 @@ measurement that decides what comes after it. Probes behind each item are in
     3. `./scripts/verify.sh` exits 0. This item changes no code.
 
 ## Done
+
+- [x] **`samples/` is an unchecked guarantee** (2026-08-17) — eval met:
+  `28f064b`. `samples/generate.sh --check` regenerates into a `mktemp -d -p .`
+  scratch dir and compares `RESULTS.md`, every text artefact, both
+  `*.readback.md` per binary sample and every `diff.txt` with only lines 1-2 of
+  the header elided; it detects added *and* removed artefacts. Wired into the
+  default `verify.sh` run and into the pandoc-pinned CI `conformance` job.
+  **~3 s of a ~110 s suite**, which is why it runs by default: hiding it behind
+  an opt-in flag would have reproduced the exact defect being fixed.
+
+  Criterion 2 is what the item was for, and it holds three times over. With the
+  colspec fallback removed, `--gates` exits 0 with **all twenty scores
+  identical** and `--samples` exits 1. The critic then refused to accept a
+  check demonstrated on the one loss it was built against and reproduced it
+  with **two different mutations** — column *widths*, and dropped
+  `Superscript`/`Subscript` — both caught, both with the twenty gates green.
+  It also verified the "never writes to the tree" claim on a clean tree, a
+  dirty tree, a *failing* run and SIGINT/SIGTERM interrupts, and planted a
+  content change on a diff body line beginning `---` to confirm the header
+  elision is scoped to lines 1-2 and not to any matching line.
+
+  One incidental finding worth keeping: **`cp -a` preserves mtime, so cargo
+  skips the rebuild** and a restored tree can be measured with a stale binary.
+  Restore with plain `cp` plus `touch`.
 
 - [x] **The correction to the fence comment was itself imprecise**
   (2026-08-17) — eval met: `fd66287`, **on branch `comment/fence-sizing-rule`**,
