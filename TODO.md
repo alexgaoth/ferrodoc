@@ -246,26 +246,35 @@ in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
        and the two halves are now a matched pair that must stay consistent.
     6. `./scripts/verify.sh` exits 0 with no threshold lowered.
 
-- [ ] **The correction to the fence comment is itself imprecise** — third
-  instance of one defect class, and the most instructive: a correction written
-  to replace a false statement about pandoc contains a subtly false statement
-  about pandoc. `crates/ferrodoc-markdown/src/write.rs:906-907` now says pandoc
-  "sizes a fence by the longest line that is **only** backticks", then offers
-  `"   ````"` and `"```` "` as examples — **neither is a line of only
-  backticks.** Measured: all three contents do get a five-backtick fence, so the
-  examples are right and the rule as worded is wrong. Pandoc trims surrounding
-  whitespace before testing the line. Someone implementing from that sentence
-  writes a narrower fence than pandoc for `"   ````"`. The conclusion the
-  comment draws — ferrodoc's fence is never narrower — is unaffected.
-  - **Eval:**
-    1. The sentence states the trimming, verified by probing `"   ````"`,
-       `"```` "`, `"````"` and a line with a tab before the run.
-    2. The six `assert_eq!`s and `longest.max(2) + 1` are byte-identical to
-       `75cd12e` — this is a comment change and nothing else, provable by
-       stripping `//` lines and diffing.
-    3. `./scripts/verify.sh` exits 0 with no threshold lowered.
-
 ## Done
+
+- [x] **The correction to the fence comment was itself imprecise**
+  (2026-08-17) — eval met: `fd66287`, **on branch `comment/fence-sizing-rule`**,
+  not `main`. Comment-only, proved by stripping `//` lines and diffing against
+  `75cd12e` to nothing; `verify.sh` exit 0, all twenty gates unmoved.
+
+  Third round of one defect class, and it took three refutations to land. The
+  original comment stated a false pandoc behaviour. Its replacement stated a
+  rule that **contradicted its own examples** — "the longest line that is
+  *only* backticks", illustrated with `"   ````"` and `"```` "`, neither of
+  which is one. And the fix handed to the worker ("pandoc trims surrounding
+  whitespace") **was itself wrong on two counts**, which the worker measured
+  rather than accepted: the trim is **spaces and tabs only** — a non-breaking
+  space is not trimmed — and what survives must be **one unbroken run**, not
+  merely all-backticks-and-whitespace, which ``"``` ```"`` and ``"```` ``"``
+  both disprove.
+
+  The critic then built cases designed to separate the new wording from its
+  nearest rivals — `` "`` ```` ``" ``, `"````` x\n```"`, `` "```\n`````" ``,
+  vertical tab, form feed, em space, U+2028, ideographic space — and
+  **could not construct a case where it is wrong**. It is not a fourth
+  approximation.
+
+  Why it survived a worker and three critics before this: **the conclusion the
+  comment supports is correct** — ferrodoc's fence is strictly wider, never
+  narrower — so nothing downstream misbehaves and no test can fail. Nothing in
+  this repo tests a *reason*. That is the standing lesson, and it is why
+  `CLAUDE.md`'s "probe it first" has to bind prose as hard as it binds code.
 
 - [x] **Five things three critics measured stale or false** (2026-08-17) —
   eval met: `75cd12e`, plus `36f3211` for the one line barred from every
