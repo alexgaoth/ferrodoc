@@ -1,5 +1,5 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-17 11:35:23.089407332 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-17 11:35:22.925407565 -0700
+--- samples/05-html-to-markdown/pandoc.md	2026-08-17 11:57:28.666527420 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-17 11:57:28.511527625 -0700
 @@ -17,22 +17,22 @@
  
  ## Rollout schedule
@@ -36,23 +36,6 @@
  
  ### Checklist
  
-@@ -45,14 +45,14 @@
- 
- Convert a directory in one pass:
- 
--``` bash
-+```sourceCode
- find . -name '*.docx' -print0 |
-   xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md
- ```
- 
- The Python equivalent, for a pipeline that already has one:
- 
--``` python
-+```sourceCode
- import ferrodoc
- with open("report.docx", "rb") as f:
-     text = ferrodoc.convert(f.read(), "docx", "gfm")
 @@ -60,7 +60,9 @@
  
  An indented code block, which is a different construct:

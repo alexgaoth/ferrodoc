@@ -136,7 +136,15 @@ impl Writer {
                     .max()
                     .unwrap_or(0);
                 let fence = "`".repeat(longest.max(2) + 1);
-                let info = attr.classes.first().map_or("", String::as_str);
+                // Pandoc's HTML writer tags every code block `sourceCode`,
+                // and its markdown writers drop that class and spell the
+                // first one left, after a space: `["sourceCode","bash"]`
+                // is ```` ``` bash ````, `["sourceCode"]` a bare fence.
+                let info = attr
+                    .classes
+                    .iter()
+                    .find(|class| class.as_str() != "sourceCode")
+                    .map_or(String::new(), |class| format!(" {class}"));
                 push_line(out, prefix, &format!("{fence}{info}"));
                 for line in text.split('\n') {
                     push_line(out, prefix, line);
@@ -867,6 +875,45 @@ mod tests {
             vec![Inline::Str("x".to_owned())],
         )])]));
         assert_eq!(bare.trim_end(), "x");
+    }
+
+    /// Pandoc's HTML writer classes every code block `sourceCode`, so
+    /// `html → gfm` fed the whole class list to a writer that took the
+    /// first one: every code block came out ```` ```sourceCode ````.
+    ///
+    /// Invisible to `diff-md`/`diff-gfm-md`, which round-trip through this
+    /// crate's reader — a `CommonMark` info string is one word, so the
+    /// multi-class list this mishandles never reaches the writer there.
+    /// Each case below is `pandoc x.json -f json -t gfm` on 3.8.2.1.
+    #[test]
+    fn a_code_block_is_labelled_the_way_pandoc_labels_it() {
+        let fenced = |classes: &[&str]| {
+            let attr = ferrodoc_ast::Attr {
+                identifier: String::new(),
+                classes: classes.iter().map(|c| (*c).to_owned()).collect(),
+                attributes: Vec::new(),
+            };
+            write_gfm(&Pandoc::new(vec![Block::CodeBlock(attr, "x".to_owned())]))
+        };
+        assert_eq!(fenced(&["sourceCode", "bash"]), "``` bash\nx\n```\n");
+        assert_eq!(fenced(&["bash"]), "``` bash\nx\n```\n");
+        assert_eq!(fenced(&["sourceCode"]), "```\nx\n```\n");
+        assert_eq!(fenced(&["python", "numberLines"]), "``` python\nx\n```\n");
+        // `numberLines` is not filtered: only `sourceCode` is.
+        assert_eq!(fenced(&["numberLines", "python"]), "``` numberLines\nx\n```\n");
+        assert_eq!(fenced(&["a", "b"]), "``` a\nx\n```\n");
+        // The fence still outgrows the backticks inside it — pandoc writes
+        // a three-backtick fence here and loses the rest of the block.
+        let attr = ferrodoc_ast::Attr {
+            identifier: String::new(),
+            classes: vec!["sourceCode".to_owned(), "bash".to_owned()],
+            attributes: Vec::new(),
+        };
+        let long = write_gfm(&Pandoc::new(vec![Block::CodeBlock(
+            attr,
+            "```` x".to_owned(),
+        )]));
+        assert_eq!(long, "````` bash\n```` x\n`````\n");
     }
 
     /// Read, write, read again: the second AST must equal the first.

@@ -1,5 +1,5 @@
---- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-17 11:35:24.666405092 -0700
-+++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-17 11:35:24.612405168 -0700
+--- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-17 11:57:30.489525004 -0700
++++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-17 11:57:30.427525086 -0700
 @@ -45,9 +45,9 @@
  
  ### Checklist

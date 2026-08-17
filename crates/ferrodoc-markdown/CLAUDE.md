@@ -50,6 +50,11 @@ Reads `CommonMark` and GFM with comrak, writes both. Gated by `diff-spec`,
   swallows the rest of the document (pandoc's own writer does emit it).
   Adjacent `Strikeout` merges into one run; strikeout at the very edge of
   strikeout drops a level. Nesting with text on both sides is exact.
+- A fence's info string is the first class that is not `sourceCode`, after
+  a space (`` ``` bash ``). Pandoc's HTML writer classes every code block
+  `sourceCode`, so taking `classes.first()` labelled every `html → gfm`
+  block `sourceCode`; no round-trip gate can see it, because a `CommonMark`
+  info string is one word and the reader never makes a two-class list.
 - A pipe cell is escaped twice, by `escape_text` for `|` and again by
   `cell_text`, so `cell_text` counts backslash parity. cmark-gfm tolerates
   the doubled escape, so only a unit test catches losing it.

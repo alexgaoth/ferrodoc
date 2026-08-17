@@ -45,14 +45,14 @@ something was silently dropped.
 
 Convert a directory in one pass:
 
-```sourceCode
+``` bash
 find . -name '*.docx' -print0 |
   xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md
 ```
 
 The Python equivalent, for a pipeline that already has one:
 
-```sourceCode
+``` python
 import ferrodoc
 with open("report.docx", "rb") as f:
     text = ferrodoc.convert(f.read(), "docx", "gfm")
