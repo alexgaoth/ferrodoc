@@ -61,6 +61,13 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   `src/`. `diff-html-read` walks `corpus/` for `*.html`, so without that
   rule eight DOCX sources silently widened the HTML gate — and *passed*, so
   the score rose and nothing looked wrong.
+- **A corpus input that `.gitignore` hides makes local and CI measure
+  different corpora.** `corpus/docx/src/logo.png` was ignored, so every
+  media-resolving gate found the picture here and nothing on a runner:
+  `diff-epub-write` read 72.7% locally and 63.6% in CI, and the gate that
+  disagreed was the one that had just been written. Check
+  `git ls-files --others --ignored --exclude-standard corpus/` is empty
+  before trusting a number that involved media.
 - A behavior with no corpus document that fails without it is not covered.
   Mutation-test a new rule by breaking it and confirming the corpus drops;
   restore with a `cp` of a copy taken first, never `git checkout`.
