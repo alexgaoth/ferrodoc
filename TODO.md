@@ -511,6 +511,92 @@ Four rules decide *which* formats, inside the ordering above:
 
 ---
 
+## Why not simply rewrite pandoc
+
+Asked directly, and worth answering here once so it is not re-argued: what
+stops a complete pandoc rewrite in Rust? Nothing technical. It is a
+resourcing question with a badly-shaped finish line, and the parts divide
+so unevenly that "about forty formats" is the least informative way to
+describe the target.
+
+**The format count is smaller than it looks.** From the pinned binary —
+`pandoc --list-input-formats | wc -l` and friends — 3.8.2.1 reads **48**,
+writes **69**, carries **73** named extensions and **163** highlighting
+languages. Of the 48 readers, five are bibliography databases (`bibtex`,
+`biblatex`, `csljson`, `ris`, `endnotexml`), two are CSV/TSV, two are its
+own AST, and eight are markdown dialects that are one reader wearing
+different extension defaults. Of the ~31 that remain, nine are wiki
+dialects and four are man-page or doc-comment formats. The genuinely
+mainstream set is **eighteen** — `bits djot docbook docx epub fb2 html
+ipynb jats latex odt opml org rst rtf textile typst xml` — and this
+project already reads four of them (`docx`, `epub`, `html`, `odt`) plus
+markdown, GFM and the AST. Two of the fourteen left are non-goals for
+reasons that are not effort (`latex`, `typst`), and `rst` is one by
+choice.
+
+**But the readers are not the bulk of pandoc.** Parity means four projects
+wearing one name, and only the first is what anyone pictures:
+
+1. readers and writers — the part that looks like the whole;
+2. the **extension matrix**: 73 flags toggled per format
+   (`markdown+footnotes-raw_html`). That is a combinatorial compatibility
+   surface, not a feature list, and it is where "identical to pandoc" gets
+   expensive;
+3. **citeproc** — CSL processing, five bibliography readers, and a style
+   repository in the thousands. On its own it is the size of everything
+   this repository has done so far;
+4. the **Lua filter runtime and template language**. For a large share of
+   pandoc's users that *is* pandoc; conversion is incidental to them.
+
+**Three things are hard for reasons resourcing does not fix.** The rest is
+grind — and cheap grind, because `diff_binary` and `diff_round_trip` are
+already generic over the format name and pandoc is its own oracle wherever
+it round-trips. These three are not:
+
+- **Reading a format that is a language.** A `.tex` expands user-defined
+  macros, so reading it means implementing enough TeX to evaluate a
+  program. Typst and roff are the same shape. Already a non-goal below,
+  and it stays one at any budget.
+- **PDF.** Note it is not in pandoc's input list either. A PDF has no
+  semantic structure — it is positioned glyphs — so reading one is layout
+  reconstruction, and writing one without TeX means owning a typesetter:
+  line breaking, hyphenation, font embedding, tables.
+- **The oracle runs out.** This project's whole claim is differential
+  proof against pandoc, and that works only where pandoc round-trips. It
+  has already broken once: pandoc writes AsciiDoc and cannot read it, so
+  that writer has no gate at all and `asciidoctor` stands in. Push outward
+  and more formats land in that bucket. **Every format added without an
+  oracle dilutes the one property that makes this worth choosing.**
+
+**And the target moves.** `CLAUDE.md` already records that pandoc's
+published sources describe a later pandoc than the pinned binary and
+disagree with it. Parity chases a release train. Worse, pandoc's behaviour
+includes its bugs, and this project has found a pile of them — the WebP
+header, big-endian TIFF rationals, the omitted `dc:title`, dangling EPUB
+references. A complete rewrite forces a per-case ruling on whether to
+reproduce each one, and there are hundreds of such cases nobody has found
+yet.
+
+**So the finish line is the problem, not the work.** "Parity" is owned by
+someone else's release schedule, and reaching for it trades the one
+defensible property — every format checked document by document against a
+pinned oracle — for a larger number. The bet at the top of this file
+already says competing on format count cannot be won; this section is why,
+with the arithmetic attached.
+
+**What would justify expanding, then.** Not the count. Two triggers, both
+already written into the procedure above:
+
+- a **real document someone holds and cannot convert** (step 1, rule 2 —
+  it is somebody's impossible). This is the trigger the long-tail non-goal
+  names, and it is the only one that has ever promoted a format here;
+- a capability **pandoc does not have**, where the comparison is not parity
+  at all. Reading a PDF is the whole of this category today, and it is
+  worth more than the next twenty formats combined — which is exactly why
+  the non-goal below is now contested rather than settled.
+
+---
+
 ## When to run `/iterate`
 
 Not every change earns a builder–critic loop. The rule that decides it,
@@ -646,8 +732,36 @@ the AST ceiling: pandoc's own AST cannot express them either.
 - SmartArt, charts, macros, embedded spreadsheets.
 - Pixel-perfect layout preservation. The goal is semantic conversion, not
   "open any Word file and reproduce every visual detail".
-- **PDF *reading***. That is an ML problem (layout analysis, OCR), owned by
-  Docling and Marker. Interoperate with them; do not compete.
+- **PDF *reading*** — **declared, and now contested. This one is the
+  user's call, not this file's** (procedure step 5: re-ranking is
+  automatic, re-aiming is not). The declaration stands until they rule.
+
+  The stated reason was that it is an ML problem — layout analysis and OCR
+  — owned by Docling and Marker, so interoperate rather than compete. That
+  reason **did not distinguish two different jobs**, and only one of them
+  is ML:
+
+  - a **scanned** PDF, or one with a complex multi-column layout, is
+    genuinely layout reconstruction. The non-goal is right about these and
+    should stay;
+  - a **digital-native** PDF with a text layer — what a word processor or
+    LaTeX exports — is extraction, not inference. That is a parsing job of
+    the same kind as every other reader here.
+
+  What changed: a demonstrated need arrived. A user with a personal
+  writing archive to convert is blocked on PDF and on nothing else, which
+  is precisely the trigger step 1 names — and it is the only category
+  where the comparison is not parity, because **pandoc cannot read PDF
+  either**.
+
+  What it would take before this becomes an item: measure what fraction of
+  a real archive is digital-native rather than scanned, survey the Rust
+  PDF crates against the dependency-count arithmetic that parked the PDF
+  *writer*, and answer the question that decides it — **what is the
+  differential gate?** There is no pandoc oracle here, so this would need
+  an external judge in the shape of `asciidoctor` or `epubcheck`, and
+  "no format ships without a gate" applies. If no honest gate exists, that
+  is an argument for keeping the non-goal, not for making an exception.
 - Citations, templates, Lua filters, presentation formats.
 - **LaTeX *reading***. A `.tex` file expands user-defined macros, so reading
   it means interpreting a language rather than parsing a format. Writing
@@ -655,3 +769,12 @@ the AST ceiling: pandoc's own AST cannot express them either.
 - Wiki dialects, DocBook, JATS, FB2, man, Textile and the rest of the long
   tail — one reader each, for audiences a converter in Rust will not reach.
   Reconsider only against a real document someone cannot convert.
+  `## Why not simply rewrite pandoc` has the arithmetic: these are cheap
+  individually and still not worth it, because the count is not what makes
+  this project worth choosing. **Cheap is not the same as worth doing.**
+- **Bibliography readers** (`bibtex`, `csljson`, `ris`) were floated as a
+  cheap win for research use and are ruled out by the AST-ceiling rule in
+  `## How a format gets added`: a bibliographic database is one of the
+  three things named there that pandoc's own AST cannot carry as content.
+  Reopen only by first answering whether the AST's `references` metadata
+  is enough for the use, which is a different and smaller question.
