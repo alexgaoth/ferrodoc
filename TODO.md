@@ -188,28 +188,6 @@ these as "not deliberate; found by these samples, unfixed". Every rule below
 was probed against pandoc 3.8.2.1 before being written down — the probes are
 in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
 
-- [ ] **The markdown writer emits `sourceCode` as the code language** —
-  `write.rs:139` is `attr.classes.first()`, blind. Pandoc's HTML writer tags
-  every code block `class="sourceCode bash"`, so `html → gfm` writes
-  ```` ```sourceCode ```` where pandoc writes ```` ``` bash ```` — the language
-  is wrong on **every** code block in **every** document that came through
-  pandoc's HTML. Invisible to `diff-md`/`diff-gfm-md`, which round-trip through
-  ferrodoc's own reader, and CommonMark info strings carry one word.
-  - **Eval:**
-    1. Literal-output unit tests, one per probed case, matching pandoc exactly:
-       `["sourceCode","bash"]` → `` ``` bash ``; `["bash"]` → `` ``` bash ``;
-       `["sourceCode"]` → `` ``` `` with no infostring; `["python","numberLines"]`
-       → `` ``` python ``; `["numberLines","python"]` → `` ``` numberLines ``;
-       `["a","b"]` → `` ``` a ``. Note the **space** after the fence, which
-       ferrodoc also omits today — both halves of the divergence, or the item is
-       not done.
-    2. `samples/05-html-to-markdown/diff.txt`, regenerated, contains no
-       ```` ```sourceCode ```` line.
-    3. `diff-md` stays **652/652** and `diff-gfm-md` stays **655/655** — a
-       fidelity gate must not fall to buy a byte-match.
-    4. `./scripts/verify.sh` exits 0 with no threshold lowered.
-    5. `COMPATIBILITY.md` updated if any row's number moves.
-
 - [ ] **The HTML writer does not render a task list** — the reverse of the
   first item. `Str "☒"` leading a bullet item is written literally, where pandoc
   writes `<ul class="task-list">` and `<label><input type="checkbox" checked=""
@@ -242,9 +220,12 @@ in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
        alignment, code indent, list spacing.
     3. `./scripts/verify.sh` exits 0 with no threshold lowered.
 
-- [ ] **Two paperwork corrections a critic measured** — raised as MINOR against
-  `f3a6807` and carried forward rather than waved through, because *done
-  includes the paperwork* makes every number in the tree fair game.
+- [ ] **Four things two critics measured false** — all raised as MINOR, against
+  `f3a6807` and `5b18ff9`, and carried rather than waved through: *done includes
+  the paperwork* makes every number and every stated pandoc behaviour in the
+  tree fair game. Two of these are **statements about pandoc that are wrong**,
+  which is the failure `CLAUDE.md`'s "never guess pandoc behavior — probe it
+  first" exists to prevent, and a comment is not exempt from it.
   - `corpus/epub-spec/generate.sh:6` still says `diff-html-read`, 632/658 in a
     tracked comment. The divergence count (26) is right; the fraction is stale.
   - The `COMPATIBILITY.md` HTML-reader bullet claims pandoc "drops the element
@@ -253,14 +234,49 @@ in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
     does **not** split and ferrodoc matches it byte-for-byte, while in an `<h2>`
     pandoc loses the `Header` *entirely* — worse than "breaks the block" —
     where ferrodoc keeps it.
+  - `crates/ferrodoc-markdown/src/write.rs:905` says pandoc "writes a
+    three-backtick fence here and loses the rest of the block", and it is the
+    **sole justification** for the one assertion in the new test that
+    deliberately diverges from pandoc. Measured false: pandoc writes the short
+    fence *and reads its own output straight back*, losing nothing. Pandoc sizes
+    a fence by the longest line that is **only** backticks — `"````"`, `"   ````"`
+    and `"```` "` all take a five-backtick fence — and stays at three only where
+    the inner run cannot close a fence. ferrodoc's fence is strictly wider,
+    never narrower, so the assertion is right; only its stated reason is wrong.
+  - An **entirely empty** `Attr` is the one class-related shape still spelled
+    differently: pandoc writes an *indented* code block, ferrodoc a bare fence.
+    Pre-existing and not caused by `5b18ff9`, but live in three of the 47
+    remaining lines of `samples/05-html-to-markdown/diff.txt`. Any non-empty
+    `Attr` — even `["sourceCode"]` alone, or only an id, or only key-values —
+    fences in both, so the divergence is exactly the empty case.
   - **Eval:**
-    1. `grep -rn '632/658\|fail-under 95' -- . ` returns nothing outside
-       `.iterate/`.
+    1. `grep -rn '632/658\|fail-under 95' .` returns nothing outside `.iterate/`.
     2. The `COMPATIBILITY.md` sentence states the `<td>` and `<h2>` behaviours
        as measured, each with its reproducing command.
-    3. `./scripts/verify.sh` exits 0 with no threshold lowered.
+    3. The `write.rs:905` rationale is corrected or deleted, and the six
+       assertions and the `longest.max(2) + 1` expression are left alone.
+    4. The empty-`Attr` divergence is recorded — a `COMPATIBILITY.md` row or a
+       `## Smaller things` line — so the next reader of that diff does not
+       rediscover it.
+    5. `./scripts/verify.sh` exits 0 with no threshold lowered.
 
 ## Done
+
+- [x] **The markdown writer emits `sourceCode` as the code language**
+  (2026-08-17) — eval met: `5b18ff9`. `attr.classes.first()` became "first class
+  that is not `sourceCode`, after a space"; six literal-output assertions;
+  `samples/05` diff 51 → 47 lines with the ```` ```sourceCode ```` hunk gone and
+  nothing new; `diff-md` 652/652 and `diff-gfm-md` 655/655 held; `verify.sh`
+  exit 0, `scripts/verify.sh` not touched at all.
+
+  The critic's check was the one that mattered: **a rule derived from six cases
+  and gated on those same six cases is fitted, not proven.** It probed **30
+  shapes the Eval never named** — duplicate `sourceCode`, empty-string classes,
+  a 120-char class, classes that are themselves backtick or tilde runs, ids,
+  key-value attributes — in both `gfm` and `commonmark`, and all 30 agreed with
+  pandoc. It then killed the test five independent ways to prove the assertions
+  are load-bearing. Two MINOR findings went to the item below rather than being
+  written off with the approval.
 
 - [x] **The HTML reader loses a task list's checkbox state** (2026-08-17) —
   eval met: `f3a6807`. `diff-html-read` 632/658 → **633/659**, threshold raised
