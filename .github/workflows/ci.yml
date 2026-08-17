@@ -76,6 +76,44 @@ jobs:
       - name: peak RSS per conversion path
         run: ./scripts/verify.sh --limits
 
+  # The npm package. It lives outside the workspace, so nothing above
+  # reaches it — and its whole claim (a document that never leaves the
+  # client) can only be judged by a browser.
+  wasm-package:
+    name: npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: install typescript for the declaration check
+        run: cd bindings/wasm && npm install --no-save typescript
+      - name: build, test, type-check, and drive a browser
+        run: ./scripts/verify.sh --wasm
+      # A package that builds and cannot be installed is the failure this
+      # step exists for; the Python job caught exactly that once.
+      - name: install the tarball into an empty project and run it
+        run: |
+          cd bindings/wasm && npm pack
+          mkdir -p "$RUNNER_TEMP/consumer" && cd "$RUNNER_TEMP/consumer"
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/bindings/wasm/ferrodoc-*.tgz
+          cat > run.mjs <<'JS'
+          import { convert } from "ferrodoc";
+          const html = await convert("# Hi\n", "markdown", "html");
+          if (html !== "<h1>Hi</h1>\n") { console.error("got", html); process.exit(1); }
+          const docx = await convert("# Hi\n", "markdown", "docx");
+          if (!(docx instanceof Uint8Array) || docx[0] !== 0x50) { process.exit(1); }
+          console.log("installed package converts");
+          JS
+          node run.mjs
+
   # Readers promise to refuse hostile input rather than panic. `cargo test`
   # runs a short fixed-seed loop; this runs a long one with a fresh seed, so
   # the search keeps moving instead of re-checking the same inputs forever.

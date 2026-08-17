@@ -1,0 +1,4 @@
+target/
+node_modules/
+js/ferrodoc.wasm
+*.tgz

@@ -42,7 +42,7 @@ an exit test, so "are we there" is checkable rather than a matter of taste.
 
 | | what it means | exit test | state |
 |---|---|---|---|
-| **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ · **JavaScript ❌ · JVM/Go/C# ❌** |
+| **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ **JavaScript ✅** · JVM/Go/C# ❌ |
 | **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT ✅ · **EPUB ❌ · PDF/LaTeX out ❌** |
 | **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ peak RSS gated ✅ · **one superlinear path** |
 | **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 14 gates ✅ two independent corpora ✅ · standing work, never "done" |
@@ -223,47 +223,36 @@ path at 80×. Reopen this only with a measurement showing a specific
 workload it blocks — that is rule 2, and it is not satisfied by "less
 memory would be nicer".
 
-### 3. A JavaScript package (wasm) — `/iterate`
+### ~~3. A JavaScript package (wasm)~~ — landed, every criterion met
 
-*Rules 1 and 2, both pointing the same way: it is a binding, and it is the
-only item that makes something currently impossible possible.*
+*Rules 1 and 2: a binding, and the only item that made something
+impossible possible.*
 
-Conversion in a browser tab with **no document leaving the client** is not
-something pandoc can offer at any price, and it is the strongest reason
-anyone would choose this over the thing that already works. Edge workers and
-Node pipelines come with it.
+`npm install ferrodoc` converts in a browser tab with **no document
+leaving the client** — something pandoc cannot offer at any price.
 
-The wasm32 artefact exists and CI builds it; a *package* does not. Needed: a
-JavaScript-facing wrapper, a bytes/string API that matches the Python one's
-shape, and installation tested in CI on the platforms claimed — a wheel that
-builds but does not import was the failure the Python job exists to catch,
-and npm has the same failure mode.
+| criterion | committed | measured |
+|---|---|---|
+| installs into an empty project and runs | required | ✅ CI, from the packed tarball |
+| runs in a browser, no network request | required | ✅ headless Chrome over the DevTools protocol |
+| one function, typed | required | ✅ `tsc --noEmit` against `ferrodoc.d.mts` |
+| bad input throws, module still usable | required | ✅ Rust and browser tests |
+| bundle size | **< 3 MB gzipped** | **0.59 MB** |
 
-- One binding at a time. Each is a product commitment with platforms
-  documented and installation tested, not a build artefact with a README.
+**Hand-written, with no `wasm-bindgen` and no `unsafe` block.** Buffers
+stay owned by Rust in a handle table; JavaScript is told a handle and an
+address and writes through its own view, so nothing rebuilds a slice from
+a raw pointer. `no_unsafe_blocks_in_this_crate` holds it, and the crate
+allows `unsafe_code` only for the `#[unsafe(no_mangle)]` attribute.
 
-**Done when**
+Three bugs the cheap tests could not have found:
 
-- `npm pack` produces a tarball that **installs into an empty directory and
-  runs**, in CI, on Node — not "builds". The Python job exists because a
-  wheel that built and could not import shipped once.
-- The same tarball **runs in a browser**: a headless-Chrome test converts a
-  document and asserts the output, with **no network request** — the
-  privacy claim is the reason this item exists, so it is the thing tested.
-- The API matches the Python binding's shape: **one function**, bytes in and
-  `string | Uint8Array` out chosen by the target format, and a typed
-  declaration (`.d.ts`) that `tsc --noEmit` accepts against a sample.
-- Errors arrive as a **thrown `Error` subclass, never a panic**: converting
-  garbage bytes as `docx` rejects, and the wasm instance is **still usable
-  afterwards** (a panicked wasm module is poisoned and every later call
-  fails — that is the failure mode to prove absent).
-- The published bundle is **under 3 MB gzipped**, stated before measuring.
-  Over it, the size goes in the README next to the claim rather than being
-  quietly omitted.
-- `README.md` gains an `npm install ferrodoc` line only once CI proves it.
-
-**Iterate: yes** — a published surface, and a new install path that can pass
-its build and fail its use.
+- picking the loader by **URL scheme** sent a browser on a `file://` page
+  down the Node path; only headless Chrome caught it;
+- the declaration file as `.d.ts` rather than `.d.mts` left TypeScript
+  treating the module as `any` while `tsc` still exited 0;
+- caching the `Uint8Array` view reads zeros after any conversion large
+  enough to grow the module's memory.
 
 ### 4. EPUB, read then write — `/iterate`
 

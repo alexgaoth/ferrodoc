@@ -6,6 +6,7 @@ document by document.
 
 ```sh
 pip install ferrodoc          # Python
+npm install ferrodoc          # JavaScript — browser, Node, edge
 cargo add ferrodoc            # Rust
 cargo install ferrodoc        # or the CLI
 ```
@@ -229,9 +230,11 @@ let without_headings = render(&doc, Format::Html)?;
 - **Deterministic output.** The same AST always produces the same `.docx`
   bytes, which makes content-addressed caching and "did this change?" work.
   Pandoc embeds timestamps, so its output differs run to run.
-- **Portable.** Every library crate, including the DOCX and ODT readers and
-  writers, compiles to `wasm32-unknown-unknown` — conversion in a browser
-  tab or an edge worker, with no document leaving the client.
+- **Portable, and shipped that way.** Every library crate compiles to
+  `wasm32-unknown-unknown`, and `npm install ferrodoc` is that build:
+  **0.6 MB gzipped**, converting in a browser tab with no document leaving
+  the client. CI drives it in headless Chrome and asserts that the page
+  makes no network request, because that claim is the reason it exists.
 
 ```sh
 cargo build --release --target wasm32-unknown-unknown \

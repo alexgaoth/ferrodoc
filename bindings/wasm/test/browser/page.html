@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ferrodoc in a browser tab</title>
+<script type="module">
+  import { convert, ConversionError } from "../../js/ferrodoc.mjs";
+  const results = [];
+  const check = (name, ok, detail) => results.push({ name, ok, detail });
+  try {
+    const html = await convert("# Hi\n\n**bold**\n", "markdown", "html");
+    check("markdown to html", html === "<h1>Hi</h1>\n<p><strong>bold</strong></p>\n", html);
+
+    const docx = await convert("# Hi\n", "markdown", "docx");
+    check("markdown to docx is bytes",
+      docx instanceof Uint8Array && docx[0] === 0x50 && docx[1] === 0x4b,
+      `${docx.length} bytes`);
+
+    const back = await convert(docx, "docx", "gfm");
+    check("docx back to markdown", back.includes("Hi"), back);
+
+    let threw = null;
+    try { await convert(new Uint8Array([1, 2, 3]), "docx", "gfm"); }
+    catch (e) { threw = e; }
+    check("bad input throws ConversionError", threw instanceof ConversionError, String(threw));
+    check("module survives the failure",
+      (await convert("x", "markdown", "html")) === "<p>x</p>\n");
+  } catch (e) {
+    check("unexpected exception", false, String(e && e.stack || e));
+  }
+  document.title = results.every((r) => r.ok) ? "PASS" : "FAIL";
+  window.__results = results;
+</script>

@@ -20,6 +20,11 @@ published sources describe a later pandoc than this binary.
 | pandoc JSON AST | yes | yes |
 | plain text | — | yes |
 
+Reachable from Rust, Python (`pip install ferrodoc`), JavaScript
+(`npm install ferrodoc` — browser, Node and edge, 0.6 MB gzipped) and the
+command line. Every binding converts through the same crates and is held
+to the numbers below.
+
 Everything else pandoc supports — LaTeX, EPUB, RST, Org, presentations, the
 rest of its ~40 — is not converted today. `TODO.md` says which are planned
 and which are declared non-goals.

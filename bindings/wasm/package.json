@@ -1,0 +1,43 @@
+{
+  "name": "ferrodoc",
+  "version": "0.1.0",
+  "description": "Convert documents \u2014 markdown, GFM, HTML, DOCX, ODT \u2014 in the browser or in Node, with no document leaving the client",
+  "type": "module",
+  "main": "./js/ferrodoc.mjs",
+  "module": "./js/ferrodoc.mjs",
+  "types": "./js/ferrodoc.d.mts",
+  "exports": {
+    ".": {
+      "types": "./js/ferrodoc.d.mts",
+      "default": "./js/ferrodoc.mjs"
+    },
+    "./ferrodoc.wasm": "./js/ferrodoc.wasm"
+  },
+  "files": [
+    "js/ferrodoc.mjs",
+    "js/ferrodoc.d.mts",
+    "js/ferrodoc.wasm",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/ferrodoc.test.mjs"
+  },
+  "keywords": [
+    "pandoc",
+    "markdown",
+    "docx",
+    "odt",
+    "html",
+    "converter",
+    "wasm"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexgaoth/ferrodoc.git"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  }
+}

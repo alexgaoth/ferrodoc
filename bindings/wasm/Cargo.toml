@@ -1,0 +1,38 @@
+[package]
+name = "ferrodoc-wasm"
+description = "WebAssembly bindings for ferrodoc, hand-written with no bindgen"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alexgaoth/ferrodoc"
+# The npm package ships the compiled `.wasm`, so this crate is never
+# published to crates.io and depends on the workspace by path.
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ferrodoc = { path = "../../crates/ferrodoc" }
+
+[profile.release]
+# Size is a published claim for this package: it is downloaded over a
+# network into a browser tab, where every kilobyte is somebody's latency.
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[lints.rust]
+# The five exported functions need `#[unsafe(no_mangle)]`, which the
+# workspace's `forbid` would reject. **There is not one `unsafe` block in
+# this crate** — the handle table below is what makes that possible, and
+# `no_unsafe_blocks_in_this_crate` holds it.
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }

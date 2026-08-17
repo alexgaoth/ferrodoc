@@ -10,12 +10,15 @@ members = [
     "crates/ferrodoc-docx",
     "crates/ferrodoc-odt",
 ]
-# The Python binding is built by maturin, not by cargo, and it depends on
-# `ferrodoc` from crates.io so that maturin's source distribution — which
-# contains only that directory — resolves for anyone building it. Keeping
-# it out of the workspace also keeps `cargo test --workspace` from needing
-# Python development headers.
-exclude = ["bindings/python"]
+# Neither binding is a workspace member. The Python one is built by maturin
+# and depends on `ferrodoc` from crates.io, so that maturin's source
+# distribution — which contains only that directory — resolves for anyone
+# building it; keeping it out also spares `cargo test --workspace` the need
+# for Python development headers. The wasm one needs
+# `unsafe_code = "allow"` for its `#[unsafe(no_mangle)]` exports, and the
+# workspace forbids that — see `bindings/wasm/src/lib.rs` for why it still
+# contains no `unsafe` block.
+exclude = ["bindings/python", "bindings/wasm"]
 
 [workspace.package]
 version = "0.1.0"

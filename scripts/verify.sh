@@ -12,6 +12,7 @@
 #   scripts/verify.sh --quick      only tests, clippy and wasm — no pandoc
 #   scripts/verify.sh --fuzz-only  only the fuzz run — no pandoc
 #   scripts/verify.sh --limits     only the resource bound — no pandoc
+#   scripts/verify.sh --wasm       only the npm package — no pandoc
 #
 # Only the gates need pandoc, and they need exactly 3.8.2.1: a different
 # one produces spurious diffs, so this refuses to score against it rather
@@ -29,15 +30,16 @@ HARNESS=./target/release/ferrodoc-harness
 # has stopped gating.
 MAX_RSS_RATIO=80
 
-want_gates=1 want_checks=1 want_fuzz=0 want_limits=1
+want_gates=1 want_checks=1 want_fuzz=0 want_limits=1 want_wasm=0
 case "${1-}" in
     --fuzz)       want_fuzz=1 ;;
     --gates)      want_checks=0 want_limits=0 ;;
     --quick)      want_gates=0 want_limits=0 ;;
     --fuzz-only)  want_checks=0 want_gates=0 want_limits=0 want_fuzz=1 ;;
     --limits)     want_checks=0 want_gates=0 ;;
+    --wasm)       want_checks=0 want_gates=0 want_limits=0 want_wasm=1 ;;
     "")           ;;
-    *) echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only|--limits]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only|--limits|--wasm]" >&2; exit 2 ;;
 esac
 
 failures=0
@@ -129,6 +131,31 @@ if [ "$want_fuzz" = 1 ]; then
     # panicking. The seed varies so the search keeps moving.
     gate "500k mutations" env FERRODOC_FUZZ_SEED="${FERRODOC_FUZZ_SEED-$$}" \
         $HARNESS fuzz corpus --iters 500000
+fi
+
+if [ "$want_wasm" = 1 ]; then
+    echo "== npm package"
+    # The binding is outside the workspace, so none of the checks above
+    # reach it. Each of these has caught something the others could not.
+    ( cd bindings/wasm && ./build.sh >/dev/null 2>&1 )
+    step "cargo test (handle table)" ok \
+        env -C bindings/wasm cargo test --quiet
+    step "cargo clippy -D warnings" ok \
+        env -C bindings/wasm cargo clippy --all-targets -- -D warnings
+    step "node --test" ok \
+        env -C bindings/wasm node --test test/ferrodoc.test.mjs
+    # A browser is the only judge of the claim this package exists for.
+    if command -v google-chrome >/dev/null 2>&1 || [ -n "${CHROME-}" ]; then
+        step "headless Chrome, no network request" ok \
+            env -C bindings/wasm node test/browser/run.mjs
+    else
+        printf '%-46s %s\n' "headless Chrome" "skipped (no browser)"
+    fi
+    if [ -d bindings/wasm/node_modules/typescript ]; then
+        step "tsc --noEmit" ok env -C bindings/wasm npx --no-install tsc --noEmit
+    else
+        printf '%-46s %s\n' "tsc --noEmit" "skipped (npm i typescript)"
+    fi
 fi
 
 echo
