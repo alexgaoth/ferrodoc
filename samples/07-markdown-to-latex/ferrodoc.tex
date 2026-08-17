@@ -1,0 +1,141 @@
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{longtable,booktabs}
+\providecommand{\sout}[1]{{\leavevmode\setbox0=\hbox{#1}%
+  \rlap{\rule[0.5ex]{\wd0}{0.4pt}}\box0}}
+\usepackage{hyperref}
+\begin{document}
+\section{Field Handbook}\label{field-handbook}
+
+A realistic document, written the way people actually write them — and
+deliberately including the awkward parts, because a sample that only shows
+easy cases tells you nothing.
+
+\subsection{Why this exists}\label{why-this-exists}
+
+Teams hold documents in \textbf{Word}, \emph{LibreOffice}, EPUB and markdown at the
+same time. Getting between those formats is supposed to be boring. When it
+is not boring, it is usually because something was silently dropped.
+
+\begin{quote}
+A conversion you cannot inspect is a conversion you cannot trust.
+
+— every migration post-mortem, eventually
+\end{quote}
+
+\subsection{Rollout schedule}\label{rollout-schedule}
+
+\begin{longtable}[]{@{}llll@{}}
+\toprule
+Phase & Owner & Starts & Status \tabularnewline
+\midrule
+\endhead
+Inventory & Priya & 2026-01-06 & done \tabularnewline
+Pilot & Sam & 2026-02-17 & in progress \tabularnewline
+Migration & Ops & 2026-04-01 & not started \tabularnewline
+Decommission & Ops & 2026-09-15 & not started \tabularnewline
+\bottomrule
+\end{longtable}
+
+\subsection{What each team has to do}\label{what-each-team-has-to-do}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+Export everything from the old system.
+\item
+Convert it:
+
+\begin{itemize}
+\item
+\verb|.docx| and \verb|.odt| to markdown for the index
+\item
+markdown back to \verb|.docx| for anyone who needs to edit in Word
+\end{itemize}
+\item
+Spot-check 1 \% of the output by hand.
+\end{enumerate}
+
+\subsubsection{Checklist}\label{checklist}
+
+\begin{itemize}
+\item
+☒ Inventory complete
+\item
+☐ Pilot signed off
+\item
+☐ Rollback plan written
+\end{itemize}
+
+\subsection{Running a conversion}\label{running-a-conversion}
+
+Convert a directory in one pass:
+
+\begin{verbatim}
+find . -name '*.docx' -print0 |
+  xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md
+\end{verbatim}
+
+The Python equivalent, for a pipeline that already has one:
+
+\begin{verbatim}
+import ferrodoc
+with open("report.docx", "rb") as f:
+    text = ferrodoc.convert(f.read(), "docx", "gfm")
+\end{verbatim}
+
+An indented code block, which is a different construct:
+
+\begin{verbatim}
+ferrodoc -f markdown -t html handbook.md
+\end{verbatim}
+
+\subsection{Awkward cases, on purpose}\label{awkward-cases-on-purpose}
+
+Inline code with special characters: \verb!a | b!, \verb|<div>|, \verb|--flag|, and a
+literal backtick: \verb|`|.
+
+Text with entities \& symbols — an em dash, "curly quotes", an
+ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
+
+\sout{Struck-through text} and text with a footnote.[\textasciicircum{}note]
+
+A link with a title: \href{https://example.com/spec}{the spec}.
+A bare autolink: \href{https://example.com/status}{https://example.com/status}. An email:
+\href{mailto:ops@example.com}{ops@example.com}.
+
+An image: \includegraphics[alt={the logo}]{logo.png}
+
+
+
+Raw HTML block, which not every target format can hold.
+
+
+
+Nested quoting:
+
+\begin{quote}
+Outer quote.
+
+\begin{quote}
+Inner quote, with a list:
+
+\begin{itemize}
+\item
+one
+\item
+two
+\end{itemize}
+\end{quote}
+\end{quote}
+
+[\textasciicircum{}note]: Footnote bodies can contain \textbf{formatting} and a
+\href{https://example.com}{link}.
+
+\subsection{Sign-off}\label{sign-off}
+
+Contact \href{mailto:ops@example.com}{ops@example.com} with questions. See the \verb|LICENSE| file for
+terms.
+\end{document}

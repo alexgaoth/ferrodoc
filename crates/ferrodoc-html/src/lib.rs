@@ -36,7 +36,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 use ferrodoc_ast::{
-    Alignment, Attr, Block, Caption, Cell, Inline, ListNumberStyle, Pandoc, Row, Table,
+    Alignment, Attr, Block, Caption, Cell, ColSpec, Inline, ListNumberStyle, Pandoc, Row, Table,
 };
 use std::fmt::Write as _;
 
@@ -287,45 +287,73 @@ fn write_figcaption(out: &mut String, caption: &Caption) {
 fn write_table(out: &mut String, table: &Table) {
     out.push_str("<table");
     write_attr(out, &table.attr);
+    // A table whose columns carry relative widths says so on the element,
+    // and only when they add up to less than the full width. Measured
+    // against pandoc 3.8.2.1: the *table* total is rounded, each *column*
+    // is truncated — 0.335 is a 33% column inside a 67% table.
+    let total: f64 = table.colspecs.iter().filter_map(|c| c.width.fraction()).sum();
+    if !table.colspecs.is_empty() && total > 0.0 && total < 1.0 {
+        let _ = write!(out, " style=\"width:{}%;\"", percent((total * 100.0).round()));
+    }
     out.push('>');
     if !table.caption.blocks.is_empty() {
         out.push_str("\n<caption>");
         write_blocks_joined(out, &table.caption.blocks);
         out.push_str("</caption>");
     }
+    // The column widths a word processor set. Dropping them made every
+    // converted table equal-width — the DOCX reader had the numbers, and
+    // `diff-html` could not see it because its corpus is the CommonMark
+    // spec, which has no tables.
+    if table.colspecs.iter().any(|c| c.width.fraction().is_some()) {
+        out.push_str("\n<colgroup>");
+        for colspec in &table.colspecs {
+            match colspec.width.fraction() {
+                Some(width) => {
+                    let _ = write!(out, "\n<col style=\"width: {}%\" />", percent(width * 100.0));
+                }
+                None => out.push_str("\n<col />"),
+            }
+        }
+        out.push_str("\n</colgroup>");
+    }
     if !table.head.rows.is_empty() {
         out.push_str("\n<thead>");
         for row in &table.head.rows {
-            write_table_row(out, row, "th");
+            write_table_row(out, row, "th", &table.colspecs);
         }
         out.push_str("\n</thead>");
     }
     for body in &table.bodies {
         out.push_str("\n<tbody>");
         for row in body.head.iter().chain(&body.body) {
-            write_table_row(out, row, "td");
+            write_table_row(out, row, "td", &table.colspecs);
         }
         out.push_str("\n</tbody>");
     }
     if !table.foot.rows.is_empty() {
         out.push_str("\n<tfoot>");
         for row in &table.foot.rows {
-            write_table_row(out, row, "td");
+            write_table_row(out, row, "td", &table.colspecs);
         }
         out.push_str("\n</tfoot>");
     }
     out.push_str("\n</table>");
 }
 
-fn write_table_row(out: &mut String, row: &Row, cell_tag: &str) {
+fn write_table_row(out: &mut String, row: &Row, cell_tag: &str, colspecs: &[ColSpec]) {
     out.push_str("\n<tr>");
+    // The column a cell sits in is its position *after* the spans before
+    // it, which is what makes the column's alignment findable.
+    let mut column = 0usize;
     for cell in &row.cells {
-        write_table_cell(out, cell, cell_tag);
+        write_table_cell(out, cell, cell_tag, colspecs.get(column));
+        column += usize::try_from(cell.col_span).unwrap_or(1).max(1);
     }
     out.push_str("\n</tr>");
 }
 
-fn write_table_cell(out: &mut String, cell: &Cell, tag: &str) {
+fn write_table_cell(out: &mut String, cell: &Cell, tag: &str, colspec: Option<&ColSpec>) {
     let _ = write!(out, "\n<{tag}");
     if cell.row_span != 1 {
         let _ = write!(out, " rowspan=\"{}\"", cell.row_span);
@@ -333,12 +361,30 @@ fn write_table_cell(out: &mut String, cell: &Cell, tag: &str) {
     if cell.col_span != 1 {
         let _ = write!(out, " colspan=\"{}\"", cell.col_span);
     }
-    if let Some(align) = alignment_style(cell.alignment) {
+    // A cell's own alignment wins, and almost no cell has one: pandoc
+    // keeps table alignment in the **column specs**, so a `|---:|` header
+    // leaves every cell `AlignDefault` and the column holding the answer.
+    // Reading only the cell dropped the alignment of every markdown and
+    // HTML table — invisible to `diff-html`, whose corpus is the
+    // CommonMark spec, which has no tables in it at all.
+    let alignment = match cell.alignment {
+        Alignment::AlignDefault => colspec.map_or(Alignment::AlignDefault, |c| c.alignment),
+        explicit => explicit,
+    };
+    if let Some(align) = alignment_style(alignment) {
         let _ = write!(out, " style=\"text-align: {align};\"");
     }
     out.push('>');
     write_blocks_joined(out, &cell.blocks);
     let _ = write!(out, "</{tag}>");
+}
+
+/// A scaled width as whole percent. The caller rounds or truncates first
+/// — pandoc does both, in different places, and the difference is visible
+/// in the output.
+#[expect(clippy::cast_possible_truncation, reason = "a percentage, and the truncation is the rule")]
+fn percent(scaled: f64) -> i64 {
+    scaled as i64
 }
 
 fn alignment_style(alignment: Alignment) -> Option<&'static str> {
@@ -555,6 +601,61 @@ mod tests {
 
     fn html(md: &str) -> String {
         write_html(&ferrodoc_markdown::read_commonmark(md).expect("convertible"))
+    }
+
+    /// Pandoc keeps a table's alignment in the **column specs**, and
+    /// leaves every cell `AlignDefault`. Reading only the cell therefore
+    /// dropped the alignment of every table that had one — and no gate
+    /// could see it, because `diff-html` runs on the `CommonMark` spec and
+    /// `CommonMark` has no tables.
+    #[test]
+    fn a_column_alignment_reaches_the_cells_it_governs() {
+        let table = write_html(
+            &ferrodoc_markdown::read_gfm("| L | C | R |\n|:--|:-:|--:|\n| a | b | c |\n")
+                .expect("convertible"),
+        );
+        assert_eq!(table.matches("text-align: left;").count(), 2, "{table}");
+        assert_eq!(table.matches("text-align: center;").count(), 2, "{table}");
+        assert_eq!(table.matches("text-align: right;").count(), 2, "{table}");
+        // A column with no alignment stays bare rather than gaining one.
+        let plain = write_html(
+            &ferrodoc_markdown::read_gfm("| a |\n|---|\n| b |\n").expect("convertible"),
+        );
+        assert!(!plain.contains("text-align"), "{plain}");
+    }
+
+    /// A word processor sets column widths and the DOCX reader keeps
+    /// them exactly; the writer threw them away, so every converted table
+    /// came out equal-width. Same blind spot as the alignment above.
+    #[test]
+    fn column_widths_survive_into_the_colgroup() {
+        use ferrodoc_ast::{ColSpec, ColWidth};
+        let mut doc = ferrodoc_markdown::read_gfm("| a | b |\n|---|---|\n| 1 | 2 |\n")
+            .expect("convertible");
+        let Some(Block::Table(table)) = doc.blocks.first_mut() else { panic!("a table") };
+        table.colspecs = vec![
+            ColSpec { alignment: Alignment::AlignDefault, width: ColWidth::ColWidth(0.335) },
+            ColSpec { alignment: Alignment::AlignDefault, width: ColWidth::ColWidth(0.335) },
+        ];
+        let html = write_html(&doc);
+        // The column truncates and the table rounds — pandoc's own
+        // arithmetic, and 33/67 rather than 34/67 or 33/66.
+        assert!(html.contains("<table style=\"width:67%;\">"), "{html}");
+        assert_eq!(html.matches("<col style=\"width: 33%\" />").count(), 2, "{html}");
+        // Columns that add up to the whole width name no table width.
+        let Some(Block::Table(table)) = doc.blocks.first_mut() else { panic!("a table") };
+        table.colspecs = vec![
+            ColSpec { alignment: Alignment::AlignDefault, width: ColWidth::ColWidth(0.5) },
+            ColSpec { alignment: Alignment::AlignDefault, width: ColWidth::ColWidth(0.5) },
+        ];
+        let full = write_html(&doc);
+        assert!(full.contains("<table>"), "{full}");
+        assert_eq!(full.matches("<col style=\"width: 50%\" />").count(), 2, "{full}");
+        // A table with no stated widths gains no colgroup at all.
+        let plain = write_html(
+            &ferrodoc_markdown::read_gfm("| a |\n|---|\n| b |\n").expect("convertible"),
+        );
+        assert!(!plain.contains("colgroup"), "{plain}");
     }
 
     #[test]

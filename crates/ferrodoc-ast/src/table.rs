@@ -89,6 +89,17 @@ pub enum ColWidth {
     ColWidthDefault,
 }
 
+impl ColWidth {
+    /// The fraction of the text width this column takes, if it states one.
+    #[must_use]
+    pub fn fraction(&self) -> Option<f64> {
+        match self {
+            ColWidth::ColWidth(width) => Some(*width),
+            ColWidth::ColWidthDefault => None,
+        }
+    }
+}
+
 /// The specification of a single table column: alignment plus width.
 ///
 /// Pandoc's `ColSpec` is the tuple `(alignment, colwidth)`.

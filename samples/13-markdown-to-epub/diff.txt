@@ -1,0 +1,44 @@
+--- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-16 22:54:18.082546700 -0700
++++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-16 22:54:18.018546763 -0700
+@@ -45,9 +45,9 @@
+ 
+ ### Checklist
+ 
+-- <label>☒ Inventory complete</label>
+-- <label>☐ Pilot signed off</label>
+-- <label>☐ Rollback plan written</label>
++- [x] Inventory complete
++- [ ] Pilot signed off
++- [ ] Rollback plan written
+ 
+ </div>
+ 
+@@ -86,11 +86,11 @@
+ 
+ Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
+ 
+-~~Struck-through text~~ and text with a footnote.[^1]
++~~Struck-through text~~ and text with a footnote.\[^note\]
+ 
+ A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
+ 
+-An image: ![the logo](media/file0.png "Project logo")
++An image: ![the logo](media/image0.png "Project logo")
+ 
+ <div class="callout">
+ 
+@@ -107,6 +107,8 @@
+ > > - one
+ > > - two
+ 
++\[^note\]: Footnote bodies can contain **formatting** and a [link](https://example.com).
++
+ </div>
+ 
+ <div id="ch001.xhtml_sign-off" class="section level2">
+@@ -118,5 +120,3 @@
+ </div>
+ 
+ </div>
+-
+-[^1]: . Footnote bodies can contain **formatting** and a [link](https://example.com).

@@ -57,6 +57,15 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   processor emits. The `-libreoffice` corpora beside them (`bash
   corpus/<name>/generate.sh`) are the only evidence either reader handles
   anything else, and each found a real bug the pandoc corpus could not.
+- **`diff-html` scores against the CommonMark specification, which has no
+  tables in it at all**, so nothing in the HTML writer's table handling is
+  gated by it — and `diff-md`/`diff-gfm-md` are round trips through this
+  project's own reader, so an inline the reader never produces (there is
+  no `^x^` in CommonMark) never reaches the writer either. Three silent
+  losses lived in those two blind spots with every gate green: column
+  alignment, column widths, and `Superscript`/`Subscript`/`Underline`/
+  `SmallCaps`/`Span` attributes. `samples/` is what found them — run
+  `./samples/generate.sh` after any writer change and read the diffs.
 - Generator inputs live in `<corpus>/src/`, and the HTML collector skips
   `src/`. `diff-html-read` walks `corpus/` for `*.html`, so without that
   rule eight DOCX sources silently widened the HTML gate — and *passed*, so

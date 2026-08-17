@@ -425,6 +425,13 @@ impl Writer {
     /// that meet make four tildes — not a delimiter at all but a tilde
     /// code fence, which swallows the rest of the document. Where that
     /// would happen the markup degrades to its content instead.
+    /// An inline written as a raw HTML element, for the constructs
+    /// markdown has no syntax for.
+    fn tagged(&mut self, out: &mut String, tag: &str, attributes: &str, inner: &[Inline]) {
+        let text = self.inlines(inner);
+        let _ = write!(out, "<{tag}{attributes}>{text}</{tag}>");
+    }
+
     fn strikeout(&mut self, out: &mut String, inner: &[Inline]) {
         let text = self.inlines(inner);
         let body = text.trim_matches([' ', '\n']);
@@ -488,14 +495,34 @@ impl Writer {
                 let _ = write!(out, "**{text}**");
             }
             Inline::Strikeout(inner) if self.gfm => self.strikeout(out, inner),
-            // No CommonMark syntax: keep the text, drop the styling.
-            Inline::Strikeout(inner)
-            | Inline::Superscript(inner)
-            | Inline::Subscript(inner)
-            | Inline::SmallCaps(inner)
-            | Inline::Underline(inner)
-            | Inline::Span(_, inner)
-            | Inline::Cite(_, inner) => {
+            // No markdown syntax for any of these, so pandoc falls back to
+            // raw HTML — which markdown allows inline and every renderer
+            // shows. Dropping the tag instead loses meaning rather than
+            // styling: `H~2~O` became `H2O` and an anchor a link pointed
+            // at disappeared, both silently. Measured against pandoc 3.8.2.1
+            // one construct at a time.
+            Inline::Strikeout(inner) => self.tagged(out, "s", "", inner),
+            Inline::Superscript(inner) => self.tagged(out, "sup", "", inner),
+            Inline::Subscript(inner) => self.tagged(out, "sub", "", inner),
+            Inline::Underline(inner) => self.tagged(out, "u", "", inner),
+            Inline::SmallCaps(inner) => {
+                self.tagged(out, "span", " class=\"smallcaps\"", inner);
+            }
+            Inline::Span(attr, inner) => {
+                let attributes = html_attributes(attr);
+                // A span carrying nothing is only a wrapper; pandoc writes
+                // no tag for it either.
+                if attributes.is_empty() {
+                    let text = self.inlines(inner);
+                    out.push_str(&text);
+                } else {
+                    self.tagged(out, "span", &attributes, inner);
+                }
+            }
+            // A citation renders as the text it stands for: pandoc's
+            // `citeproc` is what turns one into a reference, and this is
+            // not that.
+            Inline::Cite(_, inner) => {
                 let text = self.inlines(inner);
                 out.push_str(&text);
             }
@@ -766,10 +793,81 @@ fn escape_text(out: &mut String, text: &str, gfm: bool) {
     }
 }
 
+/// An `Attr` as HTML attributes: `id` first, then the classes as one
+/// `class`, then the key-value pairs in order. Pandoc's order, and the
+/// empty string when the attribute carries nothing.
+fn html_attributes(attr: &ferrodoc_ast::Attr) -> String {
+    let mut out = String::new();
+    if !attr.identifier.is_empty() {
+        let _ = write!(out, " id=\"{}\"", escape_attribute(&attr.identifier));
+    }
+    if !attr.classes.is_empty() {
+        let _ = write!(out, " class=\"{}\"", escape_attribute(&attr.classes.join(" ")));
+    }
+    for (key, value) in &attr.attributes {
+        let _ = write!(out, " {key}=\"{}\"", escape_attribute(value));
+    }
+    out
+}
+
+fn escape_attribute(value: &str) -> String {
+    value.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::read_commonmark;
+
+    /// Markdown has no syntax for these, so pandoc writes raw HTML and so
+    /// does this. Dropping the tag loses meaning, not styling: `H~2~O`
+    /// came out as `H2O`, and an anchor a link pointed at vanished.
+    ///
+    /// No gate could see it. `diff-md` and `diff-gfm-md` are round trips
+    /// through *this crate's* reader, which never produces a `Superscript`
+    /// — `CommonMark` has no `^x^` — so the arm was never reached.
+    #[test]
+    fn the_constructs_markdown_cannot_spell_are_written_as_html() {
+        let one = |inline: Inline| {
+            write_gfm(&Pandoc::new(vec![Block::Para(vec![inline])])).trim_end().to_owned()
+        };
+        let text = || vec![Inline::Str("x".to_owned())];
+        assert_eq!(one(Inline::Superscript(text())), "<sup>x</sup>");
+        assert_eq!(one(Inline::Subscript(text())), "<sub>x</sub>");
+        assert_eq!(one(Inline::Underline(text())), "<u>x</u>");
+        assert_eq!(one(Inline::SmallCaps(text())), "<span class=\"smallcaps\">x</span>");
+        // GFM has strikeout; CommonMark does not and takes the tag.
+        assert_eq!(one(Inline::Strikeout(text())), "~~x~~");
+        let commonmark = write_markdown(&Pandoc::new(vec![Block::Para(vec![
+            Inline::Strikeout(text()),
+        ])]));
+        assert_eq!(commonmark.trim_end(), "<s>x</s>");
+    }
+
+    /// A span carrying an identifier is an anchor something links to.
+    /// Converting an EPUB to markdown dropped every one of them, so the
+    /// cross-references in the output pointed at nothing.
+    #[test]
+    fn a_span_keeps_the_attributes_that_make_it_an_anchor() {
+        use ferrodoc_ast::Attr;
+        let attr = Attr {
+            identifier: "one.xhtml".to_owned(),
+            classes: vec!["c".to_owned()],
+            attributes: Vec::new(),
+        };
+        let written = write_gfm(&Pandoc::new(vec![Block::Para(vec![Inline::Span(
+            Box::new(attr),
+            Vec::new(),
+        )])]));
+        assert_eq!(written.trim_end(), "<span id=\"one.xhtml\" class=\"c\"></span>");
+        // A span with nothing to say is only a wrapper, and pandoc writes
+        // no tag for it either.
+        let bare = write_gfm(&Pandoc::new(vec![Block::Para(vec![Inline::Span(
+            Box::default(),
+            vec![Inline::Str("x".to_owned())],
+        )])]));
+        assert_eq!(bare.trim_end(), "x");
+    }
 
     /// Read, write, read again: the second AST must equal the first.
     fn round_trips(markdown: &str) -> bool {
@@ -904,10 +1002,15 @@ mod tests {
             Inline::Str("b".to_owned()),
         ])]);
         assert_eq!(write_gfm(&spaced), "~~a~~ b\n");
-        // Content that is only whitespace cannot carry the markup at all,
-        // so it degrades exactly as it does without the extensions.
+        // Content that is only whitespace cannot carry `~~` at all, so GFM
+        // drops the markup. Pandoc writes `~~~~` here, which is a tilde
+        // code fence that swallows the rest of the document — the one
+        // place this writer will not follow it.
         let blank = Pandoc::new(vec![Block::Para(vec![Inline::Strikeout(vec![Inline::Space])])]);
-        assert_eq!(write_gfm(&blank), write_markdown(&blank));
+        assert_eq!(write_gfm(&blank), " \n");
+        // CommonMark has no `~~`, so it takes the tag either way, and this
+        // is pandoc's output byte for byte.
+        assert_eq!(write_markdown(&blank), "<s> </s>\n");
     }
 
     #[test]

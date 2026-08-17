@@ -351,6 +351,13 @@ has no table syntax, so a table becomes one paragraph per cell there and
 the row/column relationship is gone — not recoverable afterwards. GFM
 output keeps it.
 
+Superscript, subscript, underline, small caps and a span carrying
+attributes have no markdown syntax, and are written as raw HTML —
+`<sup>`, `<sub>`, `<u>`, `<span class="smallcaps">` — which is what pandoc
+writes, byte for byte. They used to degrade to their content, which lost
+meaning rather than styling: `H~2~O` became `H2O` and an anchor a link
+pointed at disappeared.
+
 The other four, listed in `crates/ferrodoc-markdown/src/write.rs`: footnotes
 and definition lists degrade to their content; emphasis directly inside
 emphasis inside a word; two ordered lists in a row sharing a delimiter; an

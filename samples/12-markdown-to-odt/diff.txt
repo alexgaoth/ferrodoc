@@ -1,0 +1,22 @@
+--- samples/12-markdown-to-odt/pandoc.readback.md	2026-08-16 22:54:17.857546919 -0700
++++ samples/12-markdown-to-odt/ferrodoc.readback.md	2026-08-16 22:54:17.778546996 -0700
+@@ -62,7 +62,7 @@
+ 
+ Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
+ 
+-~~Struck-through text~~ and text with a footnote.[^1]
++~~Struck-through text~~ and text with a footnote.\[^note\]
+ 
+ A link with a title: [the spec](https://example.com/spec). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
+ 
+@@ -79,8 +79,8 @@
+ - one
+ - two
+ 
++\[^note\]: Footnote bodies can contain **formatting** and a [link](https://example.com).
++
+ ## <span id="anchor"></span>Sign-off
+ 
+ Contact <ops@example.com> with questions. See the `LICENSE` file for terms.
+-
+-[^1]: Footnote bodies can contain **formatting** and a [link](https://example.com).

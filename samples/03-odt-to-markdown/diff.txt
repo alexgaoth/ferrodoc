@@ -1,0 +1,38 @@
+--- samples/03-odt-to-markdown/pandoc.md	2026-08-16 22:54:16.002548723 -0700
++++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-16 22:54:15.975548749 -0700
+@@ -4,24 +4,24 @@
+ 
+ ## Schedule
+ 
+-|                |            |          |
+-|----------------|------------|----------|
+-| Item           | Due        | Owner    |
+-| Design         | Q1         | A. Patel |
+-| Combined phase | R. Okonkwo |          |
+-| Delivery       | Q3         | A. Patel |
++|  |  |  |
++| ---- | ---- | ---- |
++| Item | Due | Owner |
++| Design | Q1 | A. Patel |
++| Combined phase | R. Okonkwo |  |
++| Delivery | Q3 | A. Patel |
+ 
+ ## Definitions
+ 
+-1.  Party
++1. Party 
+ 
+-    1.  The first party
+-    2.  The second party
++   1. The first party
++   2. The second party
+ 
+-2.  Term
++2. Term
+ 
+ fixed width
+ 
+-indented line
++  indented line
+ 
+ Signed on the date first written above.
