@@ -147,7 +147,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            texlive-latex-base texlive-latex-recommended
+            texlive-latex-base texlive-latex-recommended texlive-luatex
       - name: every corpus document compiles
         run: |
           cargo build --release -p ferrodoc
@@ -155,9 +155,22 @@ jobs:
           for doc in "$GITHUB_WORKSPACE"/corpus/*.md; do
             name=$(basename "$doc" .md)
             "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t latex -s -o "$name.tex"
-            pdflatex -halt-on-error -interaction=nonstopmode "$name.tex" >/dev/null \
-              || { echo "FAILED to compile $name"; tail -40 "$name.log"; exit 1; }
-            echo "compiled $name.pdf"
+            if pdflatex -halt-on-error -interaction=nonstopmode "$name.tex" >/dev/null; then
+              echo "compiled $name.pdf with pdflatex"
+              continue
+            fi
+            # `pdflatex` reads UTF-8 through `inputenc`, which only knows
+            # the characters it has declarations for: `edge-cases.md` has a
+            # ☕ in it and no 8-bit engine can set it. That is a fact about
+            # the engine, not about the output — pandoc emits the character
+            # raw here too, and `diff-latex` requires that it does — so the
+            # document is retried on a Unicode engine rather than skipped.
+            # Which documents need one is printed, because a corpus quietly
+            # narrowed is a gate that has stopped gating.
+            echo "pdflatex refused $name; retrying on a Unicode engine"
+            lualatex -halt-on-error -interaction=nonstopmode "$name.tex" >/dev/null \
+              || { echo "FAILED to compile $name on either engine"; tail -40 "$name.log"; exit 1; }
+            echo "compiled $name.pdf with lualatex"
           done
 
   # RST and AsciiDoc exist here to feed a documentation toolchain, so the

@@ -14,7 +14,12 @@ actually compiling the output — see the root `CLAUDE.md`.
   survive.
 - **The check that matters is `pdflatex`.** Output pandoc reads back but
   TeX refuses has missed the point of the crate. CI installs
-  `texlive-latex-base` and compiles every corpus document; locally,
+  `texlive-latex-base` and compiles every corpus document. **A character
+  `inputenc` has no declaration for stops `pdflatex` dead** — an emoji in
+  `edge-cases.md` did — so CI retries such a document on `lualatex` and
+  says which needed it. Do not "fix" that in the writer: pandoc emits the
+  character raw and `diff-latex` requires the same, so escaping it would
+  trade a working document for a failing gate. Locally,
   `the_whole_corpus_of_shapes_stays_well_formed` checks environments and
   braces balance, which is the failure mode that makes TeX unreadable.
 - **Ten special characters, in two groups.** Seven take a backslash

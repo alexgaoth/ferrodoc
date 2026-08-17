@@ -477,8 +477,13 @@ care:
   into two empty divs, drops link titles, and invents a heading identifier
   where the document had none. The 1/11 is a measure of the *format*
   through pandoc's reader, not of the writer. What is checked instead is
-  that **`pdflatex` compiles every corpus document**, in CI, which is what
-  anyone actually does with LaTeX;
+  that **every corpus document compiles**, in CI, which is what anyone
+  actually does with LaTeX. One caveat, and it is the engine's rather than
+  the writer's: **`pdflatex` cannot set a character `inputenc` has no
+  declaration for**, so a document containing an emoji — `edge-cases.md`
+  has a ☕ — needs `lualatex` or `xelatex`. The character is emitted raw,
+  which is both what pandoc does and what `diff-latex` requires; CI tries
+  `pdflatex` first and names any document that needed a Unicode engine;
 - **RST cannot nest inline markup at all**, and has no link title and no
   strikeout, so a document using any of them cannot return unchanged.
   `sphinx-build -W` — warnings as errors — is the real check, because a
