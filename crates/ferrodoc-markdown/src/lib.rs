@@ -643,7 +643,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
         NodeValue::LineBreak => out.push(Inline::LineBreak),
         NodeValue::Code(c) => out.push(Inline::Code(Box::default(), c.literal.clone())),
         NodeValue::HtmlInline(h) => {
-            out.push(Inline::RawInline(Format("html".to_owned()), h.clone()));
+            out.push(Inline::RawInline(Box::new(Format("html".to_owned())), h.clone()));
         }
         NodeValue::Emph => out.push(Inline::Emph(inlines(node.children()))),
         NodeValue::Strong => out.push(Inline::Strong(inlines(node.children()))),

@@ -41,7 +41,11 @@ pub enum Inline {
     /// Quoted text with quote type.
     Quoted(QuoteType, Vec<Inline>),
     /// A citation: the citations plus their textual rendering.
-    Cite(Vec<Citation>, Vec<Inline>),
+    ///
+    /// Boxed like the rest of the wide payloads — see the note on
+    /// [`Inline`]. Citations are rare and this variant was one of the two
+    /// setting the size of every `Str` in every document.
+    Cite(Box<Vec<Citation>>, Vec<Inline>),
     /// Inline code with attributes.
     ///
     /// The attributes are boxed, as they are on every variant that carries
@@ -56,7 +60,10 @@ pub enum Inline {
     /// A TeX math fragment.
     Math(MathType, String),
     /// Raw content in the given format, passed through verbatim.
-    RawInline(Format, String),
+    ///
+    /// The format label is boxed: it is a `String` in its own right, and
+    /// with the payload unboxed this variant was 48 bytes.
+    RawInline(Box<Format>, String),
     /// A hyperlink: attributes, link text, target.
     Link(Box<Attr>, Vec<Inline>, Box<Target>),
     /// An image: attributes, alt text, source.

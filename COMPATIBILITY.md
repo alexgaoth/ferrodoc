@@ -414,28 +414,31 @@ prose (`bash corpus/bench/generate.sh`):
 
 | path | peak RSS | ratio |
 |---|---|---|
-| markdown → AST | 386 MB | 38.6× |
-| markdown → HTML | 386 MB | 38.6× |
-| markdown → ODT | 386 MB | 38.6× |
-| ODT → markdown | 403 MB | 40.3× |
-| HTML → AST | 405 MB | 40.5× |
-| markdown → DOCX | 680 MB | 68.0× |
-| **DOCX → markdown** | **772 MB** | **77.2×** |
+| markdown → AST | 359 MB | 35.9× |
+| markdown → HTML | 359 MB | 35.9× |
+| markdown → ODT | 359 MB | 35.9× |
+| ODT → markdown | 367 MB | 36.7× |
+| HTML → AST | 379 MB | 37.8× |
+| markdown → DOCX | 654 MB | 65.4× |
+| **DOCX → markdown** | **738 MB** | **73.8×** |
 
-CI holds the worst path at **85×**, which is a regression bound rather than
+CI holds the worst path at **80×**, which is a regression bound rather than
 an aspiration: nothing may quietly get hungrier.
 
-**What this means in practice.** A 1 MB document needs roughly 80 MB and
-fits anywhere. A 10 MB document needs about 800 MB and does not fit a small
+**What this means in practice.** A 1 MB document needs roughly 75 MB and
+fits anywhere. A 10 MB document needs about 750 MB and does not fit a small
 edge worker; convert it in a process with room, or split it. The ratio is
 stable across sizes, so it multiplies out honestly.
 
-**Why the floor is around 38×.** Holding a pandoc AST costs what it costs:
+**Why the floor is around 36×.** Holding a pandoc AST costs what it costs:
 every word is a separate `Str` with its own heap allocation, and every
-element of a `Vec<Inline>` is as wide as the widest variant. Boxing the two
-widest payloads took `Inline` from 152 to 56 bytes and cut peak memory by
-1.6–1.9× across every path; the remainder is one allocation per word, which
-no amount of boxing reaches.
+element of a `Vec<Inline>` is as wide as the widest variant. Boxing every
+wide payload took `Inline` from **152 to 48 bytes** and cut peak memory
+**1.7–2.0× across every path**. What remains is one allocation per word,
+which no amount of boxing reaches — and the three ways to fix *that* each
+cost something this project values more (raw pointers, a dependency in the
+AST crate, or a public type that cannot serialize alone). `TODO.md` records
+the measurement.
 
 Two further limits worth planning around. The DOCX body is read one part at
 a time, so its XML tree never exists in full — streaming it cut peak RSS

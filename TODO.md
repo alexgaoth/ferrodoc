@@ -188,30 +188,40 @@ quadratic. Cutting memory 1.6× left the curve unchanged, so it is not byte
 volume either. **It is the number of live allocations** — which promotes
 the item below.
 
-### 2. One allocation per word is the floor under both limits
+### ~~2. One allocation per word~~ — measured, and parked with the reason
 
-*Rule 3, promoted by what item 1 measured.*
+*Attempted, partly delivered, and then blocked by two of this project's own
+constraints. Recorded here so nobody re-derives it.*
 
-A 10 MB document becomes ~1.7M `Inline::Str` values, each with its own heap
-allocation. That single fact sets the 38× memory floor *and* the
-superlinear time, and it is now the largest measured lever left.
+**What was done.** `Cite` and `RawInline` were the two variants still
+setting `Inline`'s width; boxing them took it 56 → 48 bytes and the worst
+path 77.2× → **73.8×**. Cumulatively this session: `Inline` 152 → 48 bytes,
+`markdown → AST` 71.9× → **35.9×**, `docx → markdown` 122.8× → **73.8×**.
 
-The shape of a fix is a `Str` that borrows or interns rather than owning —
-`Box<str>` saves 8 bytes a word and nothing else; the real win is not
-allocating per word at all. It is a deep change to a published type, so it
-wants measuring before it is attempted.
+**Why the 45× criterion is not reachable.** Boxing has run out. The
+remaining width is `Emph(Vec<Inline>)` and `Str(String)` at 24 bytes each,
+and boxing *those* would add an allocation to the two commonest nodes in
+every document — paying in the exact currency the item is trying to save.
+Boxing everything else still leaves ~32 bytes, or roughly 65× on the worst
+path.
 
-**Done when**
+What is left is the **allocation count**: ~1.7M `Str` values per 10 MB, one
+heap allocation each. The three ways to fix that are all closed here:
 
-- `bench-rss` reports the worst path at **≤ 45×** on 10 MB, and
-  `scripts/verify.sh` holds it there.
-- `docx → AST` grows **≤ 12×** for 10× the input, measured interleaved.
-- `diff-ast` still scores **100%**: the JSON representation is the contract
-  and may not move, whatever the in-memory one does.
-- The allocation count per megabyte is reported by the harness, so the next
-  person does not have to rediscover the cause.
+- a small-string optimization needs a union or raw pointers, and the
+  workspace is `unsafe_code = "forbid"` — a guarantee worth more than the
+  memory;
+- an existing crate (`compact_str`, `smol_str`) would do it safely, but
+  every crate below the facade must build for `wasm32` with no C library,
+  and adding a dependency to the *AST* is the heaviest place to add one;
+- an arena, with `Str` holding a range into one buffer, changes the public
+  type fundamentally and would not serialize without the arena beside it.
 
-**Iterate: yes.** It touches memory, and no differential gate sees it.
+**So the honest state:** 35.9× is the floor for holding a pandoc AST in
+this design, it is published in `COMPATIBILITY.md`, and CI holds the worst
+path at 80×. Reopen this only with a measurement showing a specific
+workload it blocks — that is rule 2, and it is not satisfied by "less
+memory would be nicer".
 
 ### 3. A JavaScript package (wasm) — `/iterate`
 

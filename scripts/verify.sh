@@ -23,9 +23,11 @@ PANDOC_PINNED=3.8.2.1
 HARNESS=./target/release/ferrodoc-harness
 
 # Peak resident memory, as a multiple of the input, on a 10 MB document.
-# Set from the measured worst path (docx -> markdown, 77.2x) with room to
-# move. It is a *regression* bound: nothing here may quietly get hungrier.
-MAX_RSS_RATIO=85
+# Set from the measured worst path (docx -> markdown, 73.8x) with room to
+# move. It is a *regression* bound: nothing here may quietly get hungrier,
+# and it follows real improvements *down* — a bound left slack after a win
+# has stopped gating.
+MAX_RSS_RATIO=80
 
 want_gates=1 want_checks=1 want_fuzz=0 want_limits=1
 case "${1-}" in
