@@ -188,24 +188,6 @@ these as "not deliberate; found by these samples, unfixed". Every rule below
 was probed against pandoc 3.8.2.1 before being written down — the probes are
 in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
 
-- [ ] **The HTML writer does not render a task list** — the reverse of the
-  first item. `Str "☒"` leading a bullet item is written literally, where pandoc
-  writes `<ul class="task-list">` and `<label><input type="checkbox" checked=""
-  />`. `samples/README.md` lists this as a real gap and marks it *not
-  deliberate*. Probed shapes: the class appears only when **every** item is a
-  task; a mixed list gets a bare `<ul>` while the task item still gets its
-  `<label><input>`; an `<ol>`'s items transform but the `<ol>` takes no class.
-  - **Eval:**
-    1. Literal-output unit tests for all four probed shapes, byte-identical to
-       pandoc 3.8.2.1's output for the same AST.
-    2. `samples/06-markdown-to-html/diff.txt`, regenerated, contains none of the
-       `<ul class="task-list">` / `<input type="checkbox">` lines.
-    3. `diff-html` stays **652/652** — the CommonMark spec has no task lists, so
-       this must move nothing there.
-    4. `./scripts/verify.sh` exits 0 with no threshold lowered.
-    5. `samples/README.md`'s gap table loses this row; `COMPATIBILITY.md`
-       updated.
-
 - [ ] **The `plain` writer is plainer than pandoc's** — `samples/10` differs by
   47 lines: block quotes are not indented two spaces, tables are tab-separated
   where pandoc column-aligns them, indented code blocks lose their four-space
@@ -258,9 +240,38 @@ in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
     4. The empty-`Attr` divergence is recorded — a `COMPATIBILITY.md` row or a
        `## Smaller things` line — so the next reader of that diff does not
        rediscover it.
-    5. `./scripts/verify.sh` exits 0 with no threshold lowered.
+    5. `crates/ferrodoc-html/CLAUDE.md` records the *writer's* task-list rule.
+       It documents the reader's in detail and gained nothing for the writer,
+       so the rule lives only in `COMPATIBILITY.md` and two doc-comments —
+       and the two halves are now a matched pair that must stay consistent.
+    6. `./scripts/verify.sh` exits 0 with no threshold lowered.
 
 ## Done
+
+- [x] **The HTML writer does not render a task list** (2026-08-17) — eval met:
+  `a145326`. `task_box()` recognises a box at the head of an item's first
+  `Plain`/`Para`; the `task-list` class is emitted only when **every** item is
+  one; `OrderedList` gets boxes but never the class. `samples/06` 27 → 19 diff
+  lines with no `task-list`/`checkbox` line left; `diff-html` held at 652/652;
+  `verify.sh` exit 0 with `scripts/` untouched.
+
+  The critic compared **42 shapes byte-for-byte** — including `☑` and `✓`,
+  which are *not* the two characters pandoc uses, a box wrapped in
+  `Strong`/`Link`/`Span`, a `DefinitionList`, three-level nesting, and a
+  variation-selector `☒️` — and found **zero divergences**; the only diff in
+  the sweep was footnotes, which reproduces outside any task list and is
+  declared scope. It broke the rule **seven** independent ways and each failed
+  a distinct assertion.
+
+  Two things it settled that the Eval never asked about. **EPUB**, because
+  this writer renders EPUB's XHTML: `epubcheck` 5.1.0 on eleven books —
+  0 errors, 0 warnings on every ferrodoc-written one — and `diff-epub-write`
+  unmoved at 8/11. And **`samples/13` losing a whole hunk**, which was
+  adjudicated rather than accepted: pandoc reading ferrodoc's EPUB and pandoc
+  reading its *own* now produce identical output, both
+  `- <label>☒ one</label>`, so the loss is pandoc's markdown writer and not
+  ferrodoc's EPUB — while ferrodoc's own reader still recovers `- [x]`.
+  Nothing is lost that pandoc keeps.
 
 - [x] **The markdown writer emits `sourceCode` as the code language**
   (2026-08-17) — eval met: `5b18ff9`. `attr.classes.first()` became "first class
