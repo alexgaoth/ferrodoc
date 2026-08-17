@@ -11,10 +11,11 @@ moves**; a threshold changed here and nowhere else is a gate that has quietly
 stopped gating.
 
 ```sh
-./scripts/verify.sh          # tests, clippy, wasm32, resource bounds, all gates
-./scripts/verify.sh --fuzz   # and 500k mutations on top
-./scripts/verify.sh --wasm   # the npm package, including a headless browser
-./scripts/verify.sh --c      # the C ABI, and its example under valgrind
+./scripts/verify.sh           # tests, clippy, wasm32, resource bounds, gates, samples
+./scripts/verify.sh --samples # only: samples/ is still what this tree produces
+./scripts/verify.sh --fuzz    # and 500k mutations on top
+./scripts/verify.sh --wasm    # the npm package, including a headless browser
+./scripts/verify.sh --c       # the C ABI, and its example under valgrind
 ```
 
 **`scripts/verify.sh` is where every threshold lives, and the only place.**
@@ -51,6 +52,34 @@ are the ones a *toolchain* judges: `pdflatex` compiles the LaTeX,
 produces**, a headless browser runs the npm package, and valgrind runs the
 C example. Pandoc cannot read AsciiDoc at
 all, so for that writer the toolchain is the *only* judge.
+
+## `samples/`, which is where the gates are blind
+
+`diff-html` scores against the CommonMark specification, which has no
+tables in it at all, and `diff-md`/`diff-gfm-md` round-trip through this
+project's own reader, which never produces an inline CommonMark cannot
+spell. Three silent data losses lived in those two blind spots with every
+gate above green — table column alignment, table column widths, and
+`Superscript`/`Subscript`/`Underline`/`SmallCaps`/`Span`. `samples/` is
+what found them, and `./scripts/verify.sh --samples` is what keeps them
+found: it regenerates every sample into a scratch directory and requires
+the committed artefacts to match, so the folder is a check rather than a
+habit. The tree is never written to, so a passing run leaves it clean.
+
+Exactly two things are ignored, because nothing can make them equal: the
+`---`/`+++` header lines of a diff, which carry the run's timestamp, and
+the `.docx`/`.odt`/`.epub` themselves, which embed zip mtimes and
+generated ids — their `*.readback.md`, which is what the rest of the world
+sees when it opens the file, is compared instead.
+
+**It costs ~3 s of the ~110 s `./scripts/verify.sh` run** (measured warm,
+including the `cargo build --release -p ferrodoc` it needs), which is why
+it is in the default run rather than behind a flag like `--wasm` or `--c`:
+at 3% of the suite there is nothing to buy by skipping it, and a check
+that has to be remembered is the unchecked guarantee it replaces. When it
+fails, run `./samples/generate.sh`, **read** the diffs — a change there may
+be an improvement, but it is never nothing — and commit them with the
+change that moved them.
 
 ## Reading a failure
 

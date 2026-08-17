@@ -15,7 +15,8 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   Conformance claims are pinned to pandoc 3.8.2.1; a different pandoc will
   produce spurious diffs.
 - **`./scripts/verify.sh` decides whether the tree is releasable** — tests,
-  clippy, wasm32, the memory bound and all 20 differential gates. The
+  clippy, wasm32, the memory bound, all 20 differential gates, and that
+  `samples/` still matches a fresh `./samples/generate.sh` (~110 s). The
   bindings live outside the workspace and need their own runs: `--wasm`
   (npm, including a headless browser), `--c` (the C ABI under valgrind),
   `--fuzz` (500k mutations, after any reader change). Every threshold is in
@@ -64,8 +65,11 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   no `^x^` in CommonMark) never reaches the writer either. Three silent
   losses lived in those two blind spots with every gate green: column
   alignment, column widths, and `Superscript`/`Subscript`/`Underline`/
-  `SmallCaps`/`Span` attributes. `samples/` is what found them — run
-  `./samples/generate.sh` after any writer change and read the diffs.
+  `SmallCaps`/`Span` attributes. `samples/` is what found them, and
+  `verify.sh` now fails when a committed sample stops matching a fresh run
+  (`--samples`, ~3 s, writes nothing). When it does: run
+  `./samples/generate.sh`, **read** the diffs — a moved line may be an
+  improvement, but it is never nothing — and commit them with the change.
 - Generator inputs live in `<corpus>/src/`, and the HTML collector skips
   `src/`. `diff-html-read` walks `corpus/` for `*.html`, so without that
   rule eight DOCX sources silently widened the HTML gate — and *passed*, so

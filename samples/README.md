@@ -6,7 +6,10 @@ conversion, ferrodoc's output and pandoc's output, side by side, with the
 diff between them.**
 
 Regenerate with `./samples/generate.sh` (needs pandoc 3.8.2.1). Start with
-`RESULTS.md` for the summary table.
+`RESULTS.md` for the summary table. Everything here is **checked**, not
+merely committed: `./scripts/verify.sh` fails when one of these artefacts
+stops being what this tree produces, which is `./samples/generate.sh
+--check` regenerating the folder into a scratch directory and comparing.
 
 ## How to read a folder
 

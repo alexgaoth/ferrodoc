@@ -5,14 +5,33 @@
 # pandoc — and both outputs are kept side by side so the difference is
 # something you can read rather than a percentage you have to believe.
 #
-#   ./samples/generate.sh
+#   ./samples/generate.sh            rewrite samples/
+#   ./samples/generate.sh --check    fail if samples/ is not what a fresh
+#                                    run produces, leaving the tree alone
 #
 # Needs pandoc 3.8.2.1 on PATH. Writes samples/RESULTS.md at the end.
 set -uo pipefail
 
+check=0
+case "${1-}" in
+    --check) check=1 ;;
+    "")      ;;
+    *) echo "usage: $0 [--check]" >&2; exit 2 ;;
+esac
+
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 out=samples
+# --check writes a whole second copy beside the committed one and compares
+# the two at the end, so a verification run never touches the tree it is
+# verifying. The directory is created inside the repo because the paths in
+# a diff header are relative to it.
+if [ "$check" = 1 ]; then
+    out=$(mktemp -d -p . samples-check.XXXXXX)/samples
+    trap 'rm -rf "$(dirname "$out")"' EXIT INT TERM
+    mkdir -p "$out/inputs"
+    cp samples/inputs/handbook.md "$out/inputs/handbook.md"
+fi
 inputs=$out/inputs
 bin=target/release/ferrodoc
 
@@ -141,4 +160,42 @@ case_binary 13-markdown-to-epub handbook.md gfm epub
 } > "$out/RESULTS.md"
 
 echo
-echo "wrote $out/RESULTS.md"
+if [ "$check" = 0 ]; then
+    echo "wrote $out/RESULTS.md"
+    exit 0
+fi
+
+# What is committed has to be what a fresh run produces, or samples/ is a
+# description of some earlier tree. Two things can never compare equal and
+# only two: the `---`/`+++` header of a diff carries the timestamp and the
+# directory the run happened in, and the three binaries embed zip mtimes
+# and pandoc-generated ids. Their `*.readback.md` is the comparable
+# artefact and is compared. Everything else must match byte for byte.
+artefacts() {
+    ( cd "$1" && find RESULTS.md [0-9]*-*/ -type f \
+        ! -name '*.docx' ! -name '*.odt' ! -name '*.epub' -print ) | sort
+}
+header='1,2{/^--- /d;/^+++ /d;}'
+stale=0
+while read -r f; do
+    fresh=$out/$f committed=samples/$f
+    if [ ! -f "$fresh" ]; then
+        echo "  no longer produced, still committed: samples/$f"
+        stale=1
+    elif [ ! -f "$committed" ]; then
+        echo "  produced, not committed: samples/$f"
+        stale=1
+    elif [ "$(basename "$f")" = diff.txt ]; then
+        diff <(sed "$header" "$committed") <(sed "$header" "$fresh") >/dev/null ||
+            { echo "  differs: samples/$f"; stale=1; }
+    elif ! cmp -s "$fresh" "$committed"; then
+        echo "  differs: samples/$f"
+        stale=1
+    fi
+done < <( { artefacts "$out"; artefacts samples; } | sort -u )
+
+if [ "$stale" = 1 ]; then
+    echo "samples/ is stale: run ./samples/generate.sh and read the diffs before committing" >&2
+    exit 1
+fi
+echo "samples/ matches a fresh run"

@@ -9,6 +9,7 @@
 #   scripts/verify.sh              everything but the long fuzz run (~2 min)
 #   scripts/verify.sh --fuzz       and 500k mutations on top (~1 min more)
 #   scripts/verify.sh --gates      only the differential gates
+#   scripts/verify.sh --samples    only the samples/ freshness check
 #   scripts/verify.sh --quick      only tests, clippy and wasm — no pandoc
 #   scripts/verify.sh --fuzz-only  only the fuzz run — no pandoc
 #   scripts/verify.sh --limits     only the resource bound — no pandoc
@@ -32,16 +33,18 @@ HARNESS=./target/release/ferrodoc-harness
 MAX_RSS_RATIO=80
 
 want_gates=1 want_checks=1 want_fuzz=0 want_limits=1 want_wasm=0 want_c=0
+want_samples=1
 case "${1-}" in
     --fuzz)       want_fuzz=1 ;;
-    --gates)      want_checks=0 want_limits=0 ;;
-    --quick)      want_gates=0 want_limits=0 ;;
-    --fuzz-only)  want_checks=0 want_gates=0 want_limits=0 want_fuzz=1 ;;
-    --limits)     want_checks=0 want_gates=0 ;;
-    --wasm)       want_checks=0 want_gates=0 want_limits=0 want_wasm=1 ;;
-    --c)          want_checks=0 want_gates=0 want_limits=0 want_c=1 ;;
+    --gates)      want_checks=0 want_limits=0 want_samples=0 ;;
+    --samples)    want_checks=0 want_gates=0 want_limits=0 ;;
+    --quick)      want_gates=0 want_limits=0 want_samples=0 ;;
+    --fuzz-only)  want_checks=0 want_gates=0 want_limits=0 want_samples=0 want_fuzz=1 ;;
+    --limits)     want_checks=0 want_gates=0 want_samples=0 ;;
+    --wasm)       want_checks=0 want_gates=0 want_limits=0 want_samples=0 want_wasm=1 ;;
+    --c)          want_checks=0 want_gates=0 want_limits=0 want_samples=0 want_c=1 ;;
     "")           ;;
-    *) echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only|--limits|--wasm|--c]" >&2
+    *) echo "usage: $0 [--fuzz|--gates|--samples|--quick|--fuzz-only|--limits|--wasm|--c]" >&2
        exit 2 ;;
 esac
 
@@ -85,7 +88,7 @@ if [ "$want_checks" = 1 ]; then
         --target wasm32-unknown-unknown --exclude ferrodoc-harness
 fi
 
-if [ "$want_gates" = 1 ]; then
+if [ "$want_gates" = 1 ] || [ "$want_samples" = 1 ]; then
     have=$(pandoc --version | head -1 | awk '{print $2}')
     if [ "$have" != "$PANDOC_PINNED" ]; then
         echo "pandoc $have is on PATH; conformance is pinned to $PANDOC_PINNED" >&2
@@ -158,6 +161,19 @@ if [ "$want_gates" = 1 ]; then
     # `diff-asciidoc` — pandoc writes AsciiDoc and cannot read it, so
     # there is no oracle; `asciidoctor` judges that one in CI.
     gate "RST writer (fidelity)"       $HARNESS diff-rst corpus --fail-under 18
+fi
+
+if [ "$want_samples" = 1 ]; then
+    echo "== samples"
+    # The gates above are blind in two places — `diff-html` scores against
+    # the CommonMark specification, which has no tables, and the markdown
+    # gates round-trip through this project's own reader, which never
+    # produces an inline CommonMark cannot spell. Three silent data losses
+    # lived there with every gate green, and `samples/` is what found them.
+    # This says the committed artefacts are still what this tree produces,
+    # so a fourth cannot land unnoticed. ~4 s: it regenerates every sample
+    # into a scratch directory and compares, leaving the tree untouched.
+    step "samples/ matches a fresh generate.sh" ok ./samples/generate.sh --check
 fi
 
 if [ "$want_fuzz" = 1 ]; then
