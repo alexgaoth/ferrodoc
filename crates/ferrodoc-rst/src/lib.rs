@@ -31,9 +31,67 @@ use std::fmt::Write as _;
 /// Render a document as reStructuredText.
 pub fn write_rst(doc: &Pandoc) -> String {
     let mut out = String::new();
-    blocks(&doc.blocks, &mut out);
+    let mut def = Defs::default();
+    blocks(&doc.blocks, &mut out, &mut def);
+    def.flush(&mut out);
     let text = out.trim_end().to_owned();
     if text.is_empty() { text } else { text + "\n" }
+}
+
+/// The definitions an inline defers to block level.
+///
+/// An inline image is a substitution reference and a footnote is a label:
+/// neither carries its own content, and the block that does cannot be
+/// written where the inline sits — the rest of the paragraph lands on the
+/// next line and RST reads it as a continuation of the directive. That
+/// shipped, and `sphinx-build` read `swatch.png` followed by ` inside a
+/// sentence.` as one file name. Definitions are collected in document
+/// order and written at the end of the document, which is a block level in
+/// every context an inline can appear in — inside a table cell or a list
+/// item, no other position is.
+#[derive(Default)]
+struct Defs {
+    /// Substitution name to URL, in first-use order.
+    images: Vec<(String, String)>,
+    /// Footnote bodies, in reference order — which is what pairs them with
+    /// the auto-numbered `[#]_` references.
+    notes: Vec<String>,
+}
+
+impl Defs {
+    /// The substitution name for one image, reusing a definition when the
+    /// same alt text already names the same URL and uniquing it when it
+    /// names a different one. Two definitions of one name is an error in
+    /// docutils, not a last-one-wins.
+    fn image_name(&mut self, alt: &str, url: &str) -> String {
+        let base = if alt.is_empty() { "image" } else { alt };
+        let mut name = base.to_owned();
+        let mut suffix = 1;
+        while let Some((_, existing)) = self.images.iter().find(|(n, _)| *n == name) {
+            if existing == url {
+                return name;
+            }
+            suffix += 1;
+            name = format!("{base} {suffix}");
+        }
+        self.images.push((name.clone(), url.to_owned()));
+        name
+    }
+
+    fn flush(&self, out: &mut String) {
+        for (name, url) in &self.images {
+            let _ = write!(out, "\n.. |{name}| image:: {url}\n");
+        }
+        for body in &self.notes {
+            // A body of more than one line is a continuation, and an
+            // unindented second line ends the footnote instead.
+            let mut lines = body.lines();
+            let _ = write!(out, "\n.. [#] {}\n", lines.next().unwrap_or_default());
+            for line in lines {
+                let _ = writeln!(out, "{INDENT}{line}");
+            }
+        }
+    }
 }
 
 /// The underline characters, by heading level.
@@ -48,9 +106,9 @@ const UNDERLINES: &[char] = &['=', '-', '~', '^', '"', '\''];
 /// for directive and quote content.
 const INDENT: &str = "   ";
 
-fn blocks(list: &[Block], out: &mut String) {
+fn blocks(list: &[Block], out: &mut String, def: &mut Defs) {
     for block in list {
-        block_to(block, out);
+        block_to(block, out, def);
         // A blank line between blocks is not decoration in RST; it is what
         // ends the previous one.
         if !out.ends_with("\n\n") {
@@ -59,7 +117,7 @@ fn blocks(list: &[Block], out: &mut String) {
     }
 }
 
-fn block_to(block: &Block, out: &mut String) {
+fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
     match block {
         Block::Plain(list) | Block::Para(list) => {
             // A paragraph that is nothing but a picture is the `image`
@@ -70,19 +128,19 @@ fn block_to(block: &Block, out: &mut String) {
                 let _ = writeln!(out, ".. image:: {}", target.url);
                 if !alt.is_empty() {
                     let mut text = String::new();
-                    inlines(alt, &mut text);
+                    inlines(alt, &mut text, def);
                     let _ = writeln!(out, "{INDENT}:alt: {}", text.trim());
                 }
                 return;
             }
             let mut text = String::new();
-            inlines(list, &mut text);
+            inlines(list, &mut text, def);
             let _ = writeln!(out, "{}", text.trim_end());
         }
         Block::LineBlock(lines) => {
             for line in lines {
                 let mut text = String::new();
-                inlines(line, &mut text);
+                inlines(line, &mut text, def);
                 let _ = writeln!(out, "| {text}");
             }
         }
@@ -102,7 +160,7 @@ fn block_to(block: &Block, out: &mut String) {
         }
         Block::BlockQuote(inner) => {
             let mut text = String::new();
-            blocks(inner, &mut text);
+            blocks(inner, &mut text, def);
             out.push_str(&indent(&text));
         }
         Block::OrderedList(attrs, items) => {
@@ -117,22 +175,22 @@ fn block_to(block: &Block, out: &mut String) {
                     ListNumberStyle::UpperRoman => format!("{}.", roman(number, true)),
                     _ => format!("{number}."),
                 };
-                item_to(item, &marker, out);
+                item_to(item, &marker, out, def);
             }
         }
         Block::BulletList(items) => {
             for item in items {
-                item_to(item, "-", out);
+                item_to(item, "-", out, def);
             }
         }
         Block::DefinitionList(entries) => {
             for (term, definitions) in entries {
                 let mut text = String::new();
-                inlines(term, &mut text);
+                inlines(term, &mut text, def);
                 let _ = writeln!(out, "{}", text.trim_end());
                 for definition in definitions {
                     let mut body = String::new();
-                    blocks(definition, &mut body);
+                    blocks(definition, &mut body, def);
                     out.push_str(&indent(&body));
                 }
             }
@@ -143,7 +201,7 @@ fn block_to(block: &Block, out: &mut String) {
                 let _ = writeln!(out, ".. _{}:\n", attr.identifier);
             }
             let mut text = String::new();
-            inlines(list, &mut text);
+            inlines(list, &mut text, def);
             let text = text.trim().to_owned();
             let index = usize::try_from(*level).unwrap_or(1).saturating_sub(1);
             let underline = UNDERLINES.get(index).copied().unwrap_or('\'');
@@ -154,16 +212,16 @@ fn block_to(block: &Block, out: &mut String) {
             let _ = writeln!(out, "{text}\n{}", underline.to_string().repeat(width));
         }
         Block::HorizontalRule => out.push_str("----\n"),
-        Block::Table(table) => table_to(table, out),
+        Block::Table(table) => table_to(table, out, def),
         Block::Figure(_, caption, inner) => {
-            blocks(inner, out);
+            blocks(inner, out, def);
             if !caption.blocks.is_empty() {
                 let mut text = String::new();
-                blocks(&caption.blocks, &mut text);
+                blocks(&caption.blocks, &mut text, def);
                 out.push_str(&indent(&text));
             }
         }
-        Block::Div(_, inner) => blocks(inner, out),
+        Block::Div(_, inner) => blocks(inner, out, def),
         Block::RawBlock(format, text) => {
             if format.0 == "rst" {
                 out.push_str(text);
@@ -174,9 +232,9 @@ fn block_to(block: &Block, out: &mut String) {
 }
 
 /// One list item: its marker, then its content aligned under it.
-fn item_to(item: &[Block], marker: &str, out: &mut String) {
+fn item_to(item: &[Block], marker: &str, out: &mut String, def: &mut Defs) {
     let mut text = String::new();
-    blocks(item, &mut text);
+    blocks(item, &mut text, def);
     let pad = " ".repeat(marker.chars().count() + 1);
     for (index, line) in text.trim_end().lines().enumerate() {
         if index == 0 {
@@ -206,14 +264,14 @@ fn indent(text: &str) -> String {
 
 /// A grid table, because it is the only RST table that can hold a cell
 /// with more than one line in it.
-fn table_to(table: &Table, out: &mut String) {
+fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
     let rows: Vec<Vec<String>> = table
         .head
         .rows
         .iter()
         .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
         .chain(table.foot.rows.iter())
-        .map(|row| row_cells(row, table.colspecs.len()))
+        .map(|row| row_cells(row, table.colspecs.len(), def))
         .collect();
     if rows.is_empty() {
         return;
@@ -256,30 +314,30 @@ fn table_to(table: &Table, out: &mut String) {
     out.push('\n');
 }
 
-fn row_cells(row: &Row, columns: usize) -> Vec<String> {
-    let mut cells: Vec<String> = row.cells.iter().map(cell_text).collect();
+fn row_cells(row: &Row, columns: usize, def: &mut Defs) -> Vec<String> {
+    let mut cells: Vec<String> = row.cells.iter().map(|cell| cell_text(cell, def)).collect();
     cells.resize(columns.max(cells.len()), String::new());
     cells
 }
 
-fn cell_text(cell: &Cell) -> String {
+fn cell_text(cell: &Cell, def: &mut Defs) -> String {
     let mut out = String::new();
     for block in &cell.blocks {
         match block {
-            Block::Plain(list) | Block::Para(list) => inlines(list, &mut out),
-            other => block_to(other, &mut out),
+            Block::Plain(list) | Block::Para(list) => inlines(list, &mut out, def),
+            other => block_to(other, &mut out, def),
         }
     }
     out.replace('\n', " ").trim().to_owned()
 }
 
-fn inlines(list: &[Inline], out: &mut String) {
+fn inlines(list: &[Inline], out: &mut String, def: &mut Defs) {
     for inline in list {
-        inline_to(inline, out);
+        inline_to(inline, out, def);
     }
 }
 
-fn inline_to(inline: &Inline, out: &mut String) {
+fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
     match inline {
         Inline::Str(text) => out.push_str(&escape(text)),
         Inline::Space => out.push(' '),
@@ -287,25 +345,25 @@ fn inline_to(inline: &Inline, out: &mut String) {
         // break becomes a soft one rather than markup that would show as
         // text. `COMPATIBILITY.md` records the loss.
         Inline::SoftBreak | Inline::LineBreak => out.push('\n'),
-        Inline::Emph(inner) => wrap("*", inner, out),
+        Inline::Emph(inner) => wrap("*", inner, out, def),
         // RST has no underline, and no strikeout either; both keep their
         // content rather than inventing a role a toolchain would not have.
         Inline::Underline(inner) | Inline::Strikeout(inner) | Inline::SmallCaps(inner) => {
-            inlines(inner, out);
+            inlines(inner, out, def);
         }
-        Inline::Strong(inner) => wrap("**", inner, out),
-        Inline::Superscript(inner) => role("superscript", inner, out),
-        Inline::Subscript(inner) => role("subscript", inner, out),
+        Inline::Strong(inner) => wrap("**", inner, out, def),
+        Inline::Superscript(inner) => role("superscript", inner, out, def),
+        Inline::Subscript(inner) => role("subscript", inner, out, def),
         Inline::Quoted(kind, inner) => {
             let (open, close) = match kind {
                 QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
                 QuoteType::DoubleQuote => ('\u{201c}', '\u{201d}'),
             };
             out.push(open);
-            inlines(inner, out);
+            inlines(inner, out, def);
             out.push(close);
         }
-        Inline::Cite(_, inner) | Inline::Span(_, inner) => inlines(inner, out),
+        Inline::Cite(_, inner) | Inline::Span(_, inner) => inlines(inner, out, def),
         // Double backticks, and no escaping inside them: that is what
         // makes it literal.
         Inline::Code(_, code) => {
@@ -321,38 +379,32 @@ fn inline_to(inline: &Inline, out: &mut String) {
         }
         Inline::Link(_, inner, target) => {
             let mut text = String::new();
-            inlines(inner, &mut text);
+            inlines(inner, &mut text, def);
             // An anonymous reference (two underscores) rather than a named
             // one: a named target must be unique in the document, and two
             // links with the same text are ordinary.
             let _ = write!(out, "`{}<{}>`__", text.trim_end().to_owned() + " ", target.url);
         }
+        // Only the reference is written here. The definition it names is a
+        // block, and `Defs` records why this is not a place one can go.
         Inline::Image(_, alt, target) => {
             let mut text = String::new();
-            inlines(alt, &mut text);
-            let _ = write!(out, "|{}|", if text.is_empty() { "image" } else { text.trim() });
-            let _ = write!(out, "");
-            // The substitution definition has to follow the paragraph; it
-            // is emitted inline here, which RST accepts at the end of a
-            // document body.
-            let _ = write!(
-                out,
-                "\n\n.. |{}| image:: {}\n",
-                if text.is_empty() { "image" } else { text.trim() },
-                target.url
-            );
+            inlines(alt, &mut text, def);
+            let name = def.image_name(text.trim(), &target.url);
+            let _ = write!(out, "|{name}|");
         }
         Inline::Note(blocks_in_note) => {
             let mut text = String::new();
-            blocks(blocks_in_note, &mut text);
-            let _ = write!(out, " [#]_\n\n.. [#] {}\n", text.trim());
+            blocks(blocks_in_note, &mut text, def);
+            def.notes.push(text.trim().to_owned());
+            out.push_str(" [#]_");
         }
     }
 }
 
-fn wrap(marker: &str, inner: &[Inline], out: &mut String) {
+fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
     let mut text = String::new();
-    inlines(inner, &mut text);
+    inlines(inner, &mut text, def);
     if text.trim().is_empty() {
         out.push_str(&text);
         return;
@@ -360,9 +412,9 @@ fn wrap(marker: &str, inner: &[Inline], out: &mut String) {
     let _ = write!(out, "{marker}{}{marker}", text.trim());
 }
 
-fn role(name: &str, inner: &[Inline], out: &mut String) {
+fn role(name: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
     let mut text = String::new();
-    inlines(inner, &mut text);
+    inlines(inner, &mut text, def);
     let _ = write!(out, ":{name}:`{}`", text.trim());
 }
 
@@ -472,6 +524,69 @@ mod tests {
         )])]));
         assert!(rst.contains(".. image:: x.png"), "{rst}");
         assert!(!rst.contains(":alt:"), "an alt appeared from nowhere: {rst}");
+    }
+
+    #[test]
+    fn an_inline_image_leaves_its_paragraph_in_one_piece() {
+        // The definition used to be written where the reference sits, so
+        // the rest of the sentence landed on the line after `image::` and
+        // became part of the file name. `sphinx-build` reported a missing
+        // `swatch.pnginsideasentence.`; nothing here could see it, because
+        // RST has no reader to round-trip against.
+        let rst = write_rst(&doc(vec![Block::Para(vec![
+            Inline::Str("before".into()),
+            Inline::Space,
+            Inline::Image(
+                Box::default(),
+                vec![Inline::Str("swatch".into())],
+                Box::new(Target { url: "swatch.png".into(), title: String::new() }),
+            ),
+            Inline::Space,
+            Inline::Str("after".into()),
+        ])]));
+        assert!(rst.contains("before |swatch| after"), "the paragraph was broken up: {rst}");
+        assert!(rst.contains("\n.. |swatch| image:: swatch.png"), "{rst}");
+        // The definition after the paragraph, never inside it.
+        let (paragraph, _) = rst.split_once(".. |").expect("no definition: {rst}");
+        assert!(paragraph.contains("after"), "the definition cut the paragraph short: {rst}");
+    }
+
+    #[test]
+    fn one_alt_text_over_two_urls_becomes_two_names() {
+        // Docutils rejects a name defined twice rather than taking the
+        // last, so the same alt text on a different picture has to unique.
+        let picture = |url: &str| {
+            Inline::Image(
+                Box::default(),
+                vec![Inline::Str("logo".into())],
+                Box::new(Target { url: url.into(), title: String::new() }),
+            )
+        };
+        let rst = write_rst(&doc(vec![Block::Para(vec![
+            picture("a.png"),
+            Inline::Space,
+            picture("b.png"),
+            Inline::Space,
+            picture("a.png"),
+        ])]));
+        assert!(rst.contains("|logo| |logo 2| |logo|"), "{rst}");
+        assert_eq!(rst.matches(".. |logo| image:: a.png").count(), 1, "{rst}");
+        assert_eq!(rst.matches(".. |logo 2| image:: b.png").count(), 1, "{rst}");
+    }
+
+    #[test]
+    fn a_footnote_body_follows_the_document_not_the_sentence() {
+        // Same defect as the image: the body is a block, and written in
+        // place it swallowed the rest of the paragraph silently — a
+        // footnote body accepts any text, so nothing complained.
+        let rst = write_rst(&doc(vec![Block::Para(vec![
+            Inline::Str("claim".into()),
+            Inline::Note(vec![Block::Para(vec![Inline::Str("source".into())])]),
+            Inline::Space,
+            Inline::Str("and on".into()),
+        ])]));
+        assert!(rst.contains("claim [#]_ and on"), "the sentence lost its tail: {rst}");
+        assert!(rst.contains("\n.. [#] source"), "{rst}");
     }
 
     #[test]

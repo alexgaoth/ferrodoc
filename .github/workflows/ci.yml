@@ -168,20 +168,34 @@ jobs:
         run: cargo build --release -p ferrodoc
       - name: sphinx-build reads every corpus document
         run: |
-          mkdir -p "$RUNNER_TEMP/rst" && cd "$RUNNER_TEMP/rst"
-          printf 'project = "gate"\nmaster_doc = "index"\n' > conf.py
-          : > index.rst
+          # Each document is its own project root. A `toctree` linking them
+          # warns about every document whose markdown has no top-level
+          # heading — a fact about the corpus, not about the writer, and
+          # the kind of noise that gets a real warning suppressed later.
+          fail=0
           for doc in "$GITHUB_WORKSPACE"/corpus/*.md; do
             name=$(basename "$doc" .md)
+            mkdir -p "$RUNNER_TEMP/rst/$name" && cd "$RUNNER_TEMP/rst/$name"
+            printf 'project = "gate"\nmaster_doc = "%s"\nexclude_patterns = ["out"]\n' "$name" > conf.py
             "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t rst -o "$name.rst"
-            printf '%s\n' "$name" >> toc.txt
+            # Every picture the *source* names, so that `image.not_readable`
+            # stays a check on the URL the writer emitted. Creating the
+            # files sphinx asks for instead would make it vacuous — and it
+            # is the warning that caught a substitution definition written
+            # inside its own paragraph, which swallowed the next sentence
+            # into the file name.
+            grep -ho '](\([^)]*\.\(png\|jpg\|gif\|svg\)\)' "$doc" | sed 's/](//' | sort -u |
+              while read -r image; do printf '\211PNG\r\n\032\n' > "$image"; done
+            # -W turns every warning into an error: a malformed table or a
+            # short title underline is a warning, and both mean the document
+            # is wrong rather than merely untidy.
+            if sphinx-build -q -W -b html . out; then
+              echo "sphinx accepted $name"
+            else
+              echo "sphinx REJECTED $name"; fail=1
+            fi
           done
-          { echo "Gate"; echo "===="; echo; echo ".. toctree::"; echo;
-            sed 's/^/   /' toc.txt; } > index.rst
-          # -W turns every warning into an error: a malformed table or a
-          # short title underline is a warning, and both mean the document
-          # is wrong rather than merely untidy.
-          sphinx-build -W -b html . out
+          exit $fail
       - name: asciidoctor reads every corpus document
         run: |
           mkdir -p "$RUNNER_TEMP/adoc" && cd "$RUNNER_TEMP/adoc"
