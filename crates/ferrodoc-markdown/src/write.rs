@@ -904,11 +904,14 @@ mod tests {
         assert_eq!(fenced(&["a", "b"]), "``` a\nx\n```\n");
         // The fence still outgrows the backticks inside it, which pandoc
         // does not need to do: it sizes a fence by the longest line that is
-        // *only* backticks (contents `"````"`, `"   ````"` and `"```` "`
-        // each get a five-backtick fence), so a three-backtick fence closes
-        // this block and pandoc reads its own output straight back, losing
-        // nothing. Counting any run instead is strictly wider, never
-        // narrower — the one assertion here that diverges on purpose.
+        // one unbroken run of backticks once the line's leading and trailing
+        // spaces and tabs are dropped — contents `"````"`, `"   ````"`,
+        // `"\t````"` and `"```` "` each get a five-backtick fence, while
+        // `"```` ``"` and `"```` x"` get three, the run no longer being the
+        // whole trimmed line. So a three-backtick fence closes this block and
+        // pandoc reads its own output straight back, losing nothing. Counting
+        // any run instead is strictly wider, never narrower — the one
+        // assertion here that diverges on purpose.
         let attr = ferrodoc_ast::Attr {
             identifier: String::new(),
             classes: vec!["sourceCode".to_owned(), "bash".to_owned()],
