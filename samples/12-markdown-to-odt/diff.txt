@@ -1,5 +1,5 @@
---- samples/12-markdown-to-odt/pandoc.readback.md	2026-08-17 11:57:30.228525350 -0700
-+++ samples/12-markdown-to-odt/ferrodoc.readback.md	2026-08-17 11:57:30.158525443 -0700
+--- samples/12-markdown-to-odt/pandoc.readback.md	2026-08-17 12:18:56.647884318 -0700
++++ samples/12-markdown-to-odt/ferrodoc.readback.md	2026-08-17 12:18:56.556884447 -0700
 @@ -62,7 +62,7 @@
  
  Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.

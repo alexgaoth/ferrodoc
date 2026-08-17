@@ -194,7 +194,16 @@ fn write_block(out: &mut String, block: &Block) {
             out.push_str("\n</blockquote>");
         }
         Block::BulletList(items) => {
-            out.push_str("<ul>\n");
+            // Pandoc classes a bullet list only when every one of its items
+            // opens with a box: a mixed list gets no class yet still gets the
+            // boxes on the items that have one, and an `<ol>` never gets the
+            // class however many of its items are task items. An empty list
+            // takes the class, the same vacuous way pandoc's does.
+            if items.iter().all(|item| item.first().and_then(task_box).is_some()) {
+                out.push_str("<ul class=\"task-list\">\n");
+            } else {
+                out.push_str("<ul>\n");
+            }
             write_list_items(out, items);
             out.push_str("</ul>");
         }
@@ -259,9 +268,52 @@ fn write_block(out: &mut String, block: &Block) {
 fn write_list_items(out: &mut String, items: &[Vec<Block>]) {
     for item in items {
         out.push_str("<li>");
-        write_blocks_joined(out, item);
+        match item.first().and_then(task_box) {
+            // The box and the space after it become the `<input>`, the rest
+            // of that first block goes in the `<label>` beside it, and the
+            // item's remaining blocks stand as they are.
+            Some((checked, label)) => {
+                let para = matches!(item[0], Block::Para(_));
+                if para {
+                    out.push_str("<p>");
+                }
+                out.push_str("<label><input type=\"checkbox\"");
+                if checked {
+                    out.push_str(" checked=\"\"");
+                }
+                out.push_str(" />");
+                write_inlines(out, label);
+                out.push_str("</label>");
+                if para {
+                    out.push_str("</p>");
+                }
+                for block in &item[1..] {
+                    out.push('\n');
+                    write_block(out, block);
+                }
+            }
+            None => write_blocks_joined(out, item),
+        }
         out.push_str("</li>\n");
     }
+}
+
+/// A task-list box opening a list item's first block: whether it is ticked,
+/// and the inlines that follow it. Pandoc's HTML writer takes only a
+/// `Str "☒"`/`Str "☐"` immediately followed by a `Space` at the head of a
+/// `Plain` or `Para`; a `SoftBreak` in the space's place, a box with nothing
+/// after it, a box inside an `Emph`, and a box in a `Str` of its own with the
+/// space attached all stay literal text.
+fn task_box(block: &Block) -> Option<(bool, &[Inline])> {
+    let (Block::Plain(inlines) | Block::Para(inlines)) = block else {
+        return None;
+    };
+    let checked = match inlines.first()? {
+        Inline::Str(marker) if marker == "\u{2610}" => false,
+        Inline::Str(marker) if marker == "\u{2612}" => true,
+        _ => return None,
+    };
+    matches!(inlines.get(1), Some(Inline::Space)).then(|| (checked, &inlines[2..]))
 }
 
 fn list_type(style: ListNumberStyle) -> Option<&'static str> {
@@ -727,6 +779,119 @@ mod tests {
         assert_eq!(
             html("- a\n\n- b\n"),
             "<ul>\n<li><p>a</p></li>\n<li><p>b</p></li>\n</ul>\n"
+        );
+    }
+
+    /// No round trip can see any of this: `- ☒ a` and `- [x] a` are one AST,
+    /// so the boxes have to be checked against the literal bytes pandoc
+    /// 3.8.2.1 writes for the same AST (`pandoc -f json -t html --wrap=none`).
+    #[test]
+    fn task_list_boxes_become_checkbox_inputs() {
+        fn boxes(blocks: Vec<Block>) -> String {
+            write_html(&Pandoc::new(blocks))
+        }
+        fn task(marker: &str, text: &str) -> Vec<Block> {
+            vec![Block::Plain(vec![
+                Inline::Str(marker.to_owned()),
+                Inline::Space,
+                Inline::Str(text.to_owned()),
+            ])]
+        }
+        let plain = || vec![Block::Plain(vec![Inline::Str("plain".to_owned())])];
+
+        // Every item a task item: the list itself is classed.
+        assert_eq!(
+            boxes(vec![Block::BulletList(vec![task("☒", "Done"), task("☐", "Todo")])]),
+            "<ul class=\"task-list\">\n\
+             <li><label><input type=\"checkbox\" checked=\"\" />Done</label></li>\n\
+             <li><label><input type=\"checkbox\" />Todo</label></li>\n\
+             </ul>\n"
+        );
+        // One ordinary item and the class goes, but the boxes stay.
+        assert_eq!(
+            boxes(vec![Block::BulletList(vec![task("☒", "Done"), plain()])]),
+            "<ul>\n\
+             <li><label><input type=\"checkbox\" checked=\"\" />Done</label></li>\n\
+             <li>plain</li>\n\
+             </ul>\n"
+        );
+        // An ordered list never takes the class, and still gets the boxes.
+        assert_eq!(
+            boxes(vec![Block::OrderedList(
+                ferrodoc_ast::ListAttributes {
+                    start: 1,
+                    style: ListNumberStyle::Decimal,
+                    delim: ferrodoc_ast::ListNumberDelim::Period,
+                },
+                vec![task("☒", "Done"), plain()],
+            )]),
+            "<ol type=\"1\">\n\
+             <li><label><input type=\"checkbox\" checked=\"\" />Done</label></li>\n\
+             <li>plain</li>\n\
+             </ol>\n"
+        );
+        // A loose item boxes inside its `<p>`, and its later blocks stand.
+        let loose = |marker: &str, text: &str| {
+            vec![Block::Para(vec![
+                Inline::Str(marker.to_owned()),
+                Inline::Space,
+                Inline::Str(text.to_owned()),
+            ])]
+        };
+        let mut first = loose("☒", "a");
+        first.push(Block::Para(vec![Inline::Str("x".to_owned())]));
+        assert_eq!(
+            boxes(vec![Block::BulletList(vec![first, loose("☐", "b")])]),
+            "<ul class=\"task-list\">\n\
+             <li><p><label><input type=\"checkbox\" checked=\"\" />a</label></p>\n\
+             <p>x</p></li>\n\
+             <li><p><label><input type=\"checkbox\" />b</label></p></li>\n\
+             </ul>\n"
+        );
+    }
+
+    /// The rule is narrower than "an item starting with a box": pandoc wants
+    /// a `Str` holding the box alone and a `Space` right after it, at the
+    /// head of the item's first `Plain`/`Para`. Everything else is text.
+    #[test]
+    fn a_box_pandoc_would_leave_alone_stays_text() {
+        fn one(inlines: Vec<Inline>) -> String {
+            write_html(&Pandoc::new(vec![Block::BulletList(vec![vec![Block::Plain(inlines)]])]))
+        }
+        let ticked = || Inline::Str("☒".to_owned());
+        // No space after the box.
+        assert_eq!(one(vec![ticked(), Inline::Str("no space".to_owned())]), "<ul>\n<li>☒no space</li>\n</ul>\n");
+        // Nothing after the box at all.
+        assert_eq!(one(vec![ticked()]), "<ul>\n<li>☒</li>\n</ul>\n");
+        // A box inside an `Emph` is not at the head of the item.
+        assert_eq!(
+            one(vec![Inline::Emph(vec![ticked()]), Inline::Space, Inline::Str("emph".to_owned())]),
+            "<ul>\n<li><em>☒</em> emph</li>\n</ul>\n"
+        );
+        // A `SoftBreak` is not the `Space` the rule asks for.
+        assert_eq!(
+            one(vec![ticked(), Inline::SoftBreak, Inline::Str("soft".to_owned())]),
+            "<ul>\n<li>☒ soft</li>\n</ul>\n"
+        );
+        // The box and the space have to be separate inlines.
+        assert_eq!(one(vec![Inline::Str("☒ one str".to_owned())]), "<ul>\n<li>☒ one str</li>\n</ul>\n");
+        // An item that is only a box and a space is a task item with an
+        // empty label, and a `<blockquote>` around the box is not one.
+        assert_eq!(
+            one(vec![ticked(), Inline::Space]),
+            "<ul class=\"task-list\">\n<li><label><input type=\"checkbox\" checked=\"\" /></label></li>\n</ul>\n"
+        );
+        assert_eq!(
+            write_html(&Pandoc::new(vec![Block::BulletList(vec![vec![Block::Plain(vec![
+                Inline::Str("outer".to_owned()),
+            ]), Block::BulletList(vec![vec![Block::Plain(vec![
+                ticked(),
+                Inline::Space,
+                Inline::Str("i".to_owned()),
+            ])]])]])])),
+            "<ul>\n<li>outer\n<ul class=\"task-list\">\n\
+             <li><label><input type=\"checkbox\" checked=\"\" />i</label></li>\n\
+             </ul></li>\n</ul>\n"
         );
     }
 

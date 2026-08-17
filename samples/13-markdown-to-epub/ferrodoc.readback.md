@@ -45,9 +45,9 @@ Teams hold documents in **Word**, *LibreOffice*, EPUB and markdown at the same t
 
 ### Checklist
 
-- [x] Inventory complete
-- [ ] Pilot signed off
-- [ ] Rollback plan written
+- <label>☒ Inventory complete</label>
+- <label>☐ Pilot signed off</label>
+- <label>☐ Rollback plan written</label>
 
 </div>
 

@@ -433,6 +433,29 @@ delimiter and two runs that meet make a tilde code fence:
   emits the four tildes instead, and its own output then re-reads as a
   code block that swallows the rest of the document.
 
+### HTML writer — 652/652, and the shape that gate cannot see
+
+`diff-html` scores against the CommonMark specification, which has no task
+lists in it, and no round trip can see one either, because `- ☐ a` and
+`- [ ] a` are one AST. So the writer's task lists are held by literal-output
+tests in `crates/ferrodoc-html/src/lib.rs` instead, measured against pandoc
+3.8.2.1 for the same AST. The rule, as probed: a list item whose first
+`Plain`/`Para` opens with a `Str "☒"`/`Str "☐"` **immediately followed by a
+`Space`** becomes `<label><input type="checkbox" checked="" />…</label>` —
+`checked` present and empty when ticked, absent when not — and a `<ul>`
+takes `class="task-list"` only when *every* item is one. A mixed list keeps
+the boxes and loses the class; an `<ol>` never takes the class and still
+gets the boxes. Anything narrower stays literal text: no `Space` after the
+box, a `SoftBreak` in its place, the box and its space in one `Str`, or the
+box inside an `Emph`.
+
+    printf -- '- [x] a\n- [ ] b\n' | ferrodoc -f gfm -t html
+    printf -- '- [x] a\n- [ ] b\n' | pandoc -f gfm -t html --wrap=none
+
+Pandoc's LaTeX writer makes something else of the same AST (`\item[$\boxtimes$]`,
+and it leaves ordered lists alone); that is a different writer and ferrodoc's
+LaTeX writer is gated on fidelity, not on matching it.
+
 ### HTML reader — 26 of 659
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
