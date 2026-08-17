@@ -11,6 +11,8 @@ members = [
     "crates/ferrodoc-odt",
     "crates/ferrodoc-epub",
     "crates/ferrodoc-latex",
+    "crates/ferrodoc-rst",
+    "crates/ferrodoc-asciidoc",
 ]
 # Neither binding is a workspace member. The Python one is built by maturin
 # and depends on `ferrodoc` from crates.io, so that maturin's source
@@ -46,6 +48,8 @@ ferrodoc-docx = { path = "crates/ferrodoc-docx", version = "0.1.0" }
 ferrodoc-odt = { path = "crates/ferrodoc-odt", version = "0.1.0" }
 ferrodoc-epub = { path = "crates/ferrodoc-epub", version = "0.1.0" }
 ferrodoc-latex = { path = "crates/ferrodoc-latex", version = "0.1.0" }
+ferrodoc-rst = { path = "crates/ferrodoc-rst", version = "0.1.0" }
+ferrodoc-asciidoc = { path = "crates/ferrodoc-asciidoc", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip makes parsed doubles bit-identical to their source text,
 # so comparing our AST against pandoc's JSON never reports a phantom

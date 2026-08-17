@@ -47,6 +47,7 @@ fn main() -> Result<()> {
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-odt-write") => diff_odt_write(&args[1..], verbose, fail_under),
         Some("diff-latex") => diff_latex(&args[1..], verbose, fail_under),
+        Some("diff-rst") => diff_rst(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
         Some("diff-gfm") => diff_gfm(&args[1..], verbose, fail_under),
         Some("diff-gfm-md") => diff_gfm_md(&args[1..], verbose, fail_under),
@@ -58,7 +59,7 @@ fn main() -> Result<()> {
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-write|diff-odt-write|diff-latex|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-write|diff-odt-write|diff-latex|diff-rst|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -985,6 +986,16 @@ fn diff_latex(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
     )
 }
 
+fn diff_rst(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_text_write(paths, "rst", &|ast| ferrodoc_rst::write_rst(ast), verbose, fail_under)
+}
+
+// There is no `diff-asciidoc`, and there cannot be: **pandoc writes
+// AsciiDoc and does not read it** ("Pandoc can convert to asciidoc, but
+// not from asciidoc"), so there is no oracle to compare against. The
+// AsciiDoc writer is judged by `asciidoctor` accepting its output, in CI,
+// and by the structural tests in its own crate.
+
 /// The fidelity gate for a text writer: our output through pandoc's
 /// reader, compared with the AST that went in, with pandoc's own score on
 /// the same corpus printed beside it.
@@ -1103,7 +1114,7 @@ fn diff_round_trip(
         // line happened to end. That is typesetting, not content, and
         // comparing against it would measure who guessed the same column.
         // A binary format has no lines to wrap.
-        if matches!(format, "latex" | "rst" | "asciidoc") {
+        if matches!(format, "latex" | "rst") {
             command.arg("--wrap=preserve");
         }
         let status = command

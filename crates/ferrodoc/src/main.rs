@@ -25,7 +25,7 @@ OPTIONS:
 
 FORMATS:
     input:   markdown (commonmark, md), gfm, html, docx, odt, epub, json
-    output:  those, plus latex (tex) and plain (text)
+    output:  those, plus latex (tex), rst, asciidoc (adoc) and plain (text)
 
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
     and bare-URL links. Prefer it over `markdown` for anything with a

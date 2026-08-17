@@ -139,6 +139,11 @@ if [ "$want_gates" = 1 ]; then
     # pandoc's reader — see COMPATIBILITY.md — and CI compiles the output
     # with pdflatex, which is the check that matters for this writer.
     gate "LaTeX writer (fidelity)"     $HARNESS diff-latex corpus --fail-under 9
+    # Same framing as LaTeX: pandoc round-trips 3/11 of this corpus, so
+    # the ceiling is the format, not the writer. There is deliberately no
+    # `diff-asciidoc` — pandoc writes AsciiDoc and cannot read it, so
+    # there is no oracle; `asciidoctor` judges that one in CI.
+    gate "RST writer (fidelity)"       $HARNESS diff-rst corpus --fail-under 18
 fi
 
 if [ "$want_fuzz" = 1 ]; then

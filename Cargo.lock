@@ -89,6 +89,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 name = "ferrodoc"
 version = "0.1.0"
 dependencies = [
+ "ferrodoc-asciidoc",
  "ferrodoc-ast",
  "ferrodoc-docx",
  "ferrodoc-epub",
@@ -96,8 +97,16 @@ dependencies = [
  "ferrodoc-latex",
  "ferrodoc-markdown",
  "ferrodoc-odt",
+ "ferrodoc-rst",
  "ferrodoc-text",
  "serde_json",
+]
+
+[[package]]
+name = "ferrodoc-asciidoc"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
 ]
 
 [[package]]
@@ -142,6 +151,7 @@ dependencies = [
  "ferrodoc-latex",
  "ferrodoc-markdown",
  "ferrodoc-odt",
+ "ferrodoc-rst",
  "ferrodoc-text",
  "serde",
  "serde_json",
@@ -182,6 +192,13 @@ dependencies = [
  "ferrodoc-docx",
  "serde_json",
  "zip",
+]
+
+[[package]]
+name = "ferrodoc-rst"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
 ]
 
 [[package]]

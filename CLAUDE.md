@@ -114,6 +114,10 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   behind them, including fixes made after a run hit its round cap.
   `COMPATIBILITY.md` has every known loss with its reproducing command —
   update it when a number moves.
+- **Some formats have no oracle.** Pandoc writes `AsciiDoc` and cannot
+  read it, so that writer has no differential gate at all and is judged by
+  `asciidoctor` in CI. Where a format's own toolchain exists, it is the
+  better judge anyway: `pdflatex`, `sphinx-build -W`, `epubcheck`.
 - A **text** writer is gated on *fidelity* (write it, read it back, require
   the original) with pandoc's score printed beside it; a **binary** writer
   is gated against pandoc's own output through pandoc's reader. The
