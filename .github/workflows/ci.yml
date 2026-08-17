@@ -30,6 +30,8 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+        # `verify.sh --quick` is the same three on Linux; the matrix runs
+        # them directly so a Windows failure names the step that broke.
 
   # The browser and edge-worker story is a claim in the README; check it.
   wasm:
@@ -58,35 +60,8 @@ jobs:
             "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
           sudo dpkg -i pandoc.deb
           pandoc --version | head -1
-      - run: cargo build --release -p ferrodoc-harness
-      - name: markdown reader
-        run: ./target/release/ferrodoc-harness diff-spec corpus/commonmark-spec-0.31.2.json --fail-under 100
-      - name: AST round trip
-        run: ./target/release/ferrodoc-harness diff-ast corpus --fail-under 100
-      - name: HTML writer
-        run: ./target/release/ferrodoc-harness diff-html corpus/commonmark-spec-0.31.2.json --fail-under 100
-      - name: DOCX reader
-        run: ./target/release/ferrodoc-harness diff-docx corpus/docx --fail-under 96
-      - name: DOCX reader, documents LibreOffice wrote
-        run: ./target/release/ferrodoc-harness diff-docx corpus/docx-libreoffice --fail-under 87
-      - name: DOCX writer
-        run: ./target/release/ferrodoc-harness diff-write corpus --fail-under 90
-      - name: ODT reader
-        run: ./target/release/ferrodoc-harness diff-odt corpus/odt --fail-under 94
-      - name: ODT reader, documents LibreOffice wrote
-        run: ./target/release/ferrodoc-harness diff-odt corpus/odt-libreoffice --fail-under 100
-      - name: ODT writer
-        run: ./target/release/ferrodoc-harness diff-odt-write corpus --fail-under 100
-      - name: markdown writer
-        run: ./target/release/ferrodoc-harness diff-md corpus/commonmark-spec-0.31.2.json --fail-under 100
-      - name: GFM reader (corpus)
-        run: ./target/release/ferrodoc-harness diff-gfm corpus/gfm --fail-under 100
-      - name: GFM reader (spec)
-        run: ./target/release/ferrodoc-harness diff-gfm corpus/commonmark-spec-0.31.2.json --fail-under 99.8
-      - name: GFM writer
-        run: ./target/release/ferrodoc-harness diff-gfm-md corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
-      - name: HTML reader
-        run: ./target/release/ferrodoc-harness diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
+      - name: every gate, at the thresholds scripts/verify.sh holds
+        run: ./scripts/verify.sh --gates
 
   # Readers promise to refuse hostile input rather than panic. `cargo test`
   # runs a short fixed-seed loop; this runs a long one with a fresh seed, so
@@ -102,4 +77,4 @@ jobs:
       - name: mutate the corpus
         env:
           FERRODOC_FUZZ_SEED: ${{ github.run_id }}
-        run: ./target/release/ferrodoc-harness fuzz corpus --iters 500000
+        run: ./scripts/verify.sh --fuzz-only

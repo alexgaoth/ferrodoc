@@ -14,11 +14,13 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   `export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"` (cargo + pandoc 3.8.2.1).
   Conformance claims are pinned to pandoc 3.8.2.1; a different pandoc will
   produce spurious diffs.
-- **Run every gate in `docs/gates.md` before claiming a reader or writer
-  change is done** — 14 differential commands with their thresholds, plus
-  `cargo test`, clippy, and the fuzz run a reader change needs. They are also
-  the conformance job of `.github/workflows/ci.yml` and the table in
-  `COMPATIBILITY.md`; keep all three in step when a threshold moves.
+- **`./scripts/verify.sh` decides whether the tree is releasable** — tests,
+  clippy, wasm32 and all 14 gates; `--fuzz` adds the 500k-mutation run a
+  reader change needs. Every threshold lives in that script and nowhere
+  else, and CI calls it, so there is one number to change. Never report a
+  gate from a piped command: `| tail` masks the exit status, which is how a
+  failing publish once read as success. `docs/gates.md` says what each gate
+  proves.
 - Never run `cargo fmt`: the repo is not fmt-clean (25 files differ), so it
   buries a surgical change in unrelated reformatting. Match surrounding style
   by hand.

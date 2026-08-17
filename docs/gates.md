@@ -10,47 +10,33 @@ table in `COMPATIBILITY.md`. **Keep all three in step when a threshold
 moves**; a threshold changed here and nowhere else is a gate that has quietly
 stopped gating.
 
-Conformance is pinned to **pandoc 3.8.2.1**. A different pandoc produces
-spurious diffs, so a green run means "identical to this version", not
-"identical to whatever pandoc was on the machine".
-
 ```sh
-export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-H="cargo run -q -p ferrodoc-harness --"
-
-$H diff-spec       corpus/commonmark-spec-0.31.2.json --fail-under 100
-$H diff-ast        corpus --fail-under 100
-$H diff-html       corpus/commonmark-spec-0.31.2.json --fail-under 100
-$H diff-docx       corpus/docx --fail-under 96
-$H diff-docx       corpus/docx-libreoffice --fail-under 87
-$H diff-write      corpus --fail-under 90
-$H diff-odt        corpus/odt --fail-under 94
-$H diff-odt        corpus/odt-libreoffice --fail-under 100
-$H diff-odt-write  corpus --fail-under 100
-$H diff-md         corpus/commonmark-spec-0.31.2.json --fail-under 100
-$H diff-gfm        corpus/gfm --fail-under 100
-$H diff-gfm        corpus/commonmark-spec-0.31.2.json --fail-under 99.8
-$H diff-gfm-md     corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
-$H diff-html-read  corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
+./scripts/verify.sh          # tests, clippy, wasm32, and all 14 gates
+./scripts/verify.sh --fuzz   # and 500k mutations on top
 ```
 
-Plus, always:
+**`scripts/verify.sh` is where every threshold lives, and the only place.**
+CI calls it rather than repeating the list, so a threshold cannot be lowered
+in one file and left standing in another — that had already happened twice.
+Read the script for the current numbers; they are not duplicated here on
+purpose.
 
-```sh
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings   # pedantic + missing_docs are deny-level
-```
+Conformance is pinned to **pandoc 3.8.2.1**, and the script refuses to score
+against any other version rather than publish a number that means something
+else. A green run means "identical to this pandoc".
 
-And after touching a **reader**, because a reader's contract is that it
-refuses hostile input rather than panicking:
+The gates, and what each one proves:
 
-```sh
-cargo run -q --release -p ferrodoc-harness -- fuzz corpus --iters 500000
-```
-
-`FERRODOC_FUZZ_SEED` varies the search; CI sets it from the run id so the
-search keeps moving instead of re-checking the same inputs forever. A short
-fixed-seed run is already in `cargo test`.
+| gate | proves |
+|---|---|
+| `diff-spec` | the markdown reader produces pandoc's AST |
+| `diff-ast` | any `pandoc -t json` document round-trips to an equal value |
+| `diff-html` | the HTML writer produces pandoc's HTML |
+| `diff-html-read` | the HTML reader produces pandoc's AST |
+| `diff-md` | the markdown writer round-trips the document |
+| `diff-gfm` / `diff-gfm-md` | the same, for GFM |
+| `diff-docx` / `diff-odt` | the office readers produce pandoc's AST, over *two* corpora each: pandoc's own output, and a word processor's |
+| `diff-write` / `diff-odt-write` | the office writers survive a round trip — ours through pandoc against pandoc's through pandoc, which is what isolates the writer from the format |
 
 ## Reading a failure
 
