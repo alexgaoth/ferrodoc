@@ -124,6 +124,33 @@ jobs:
           JS
           node run.mjs
 
+  # A LaTeX writer whose output pandoc reads back but TeX refuses has
+  # missed the entire point: this writer exists so that
+  # `ferrodoc x.docx -t latex | pdflatex` produces a PDF.
+  latex:
+    name: the LaTeX output compiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: a minimal TeX, which is the point
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-latex-base texlive-latex-recommended
+      - name: every corpus document compiles
+        run: |
+          cargo build --release -p ferrodoc
+          mkdir -p "$RUNNER_TEMP/tex" && cd "$RUNNER_TEMP/tex"
+          for doc in "$GITHUB_WORKSPACE"/corpus/*.md; do
+            name=$(basename "$doc" .md)
+            "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t latex -s -o "$name.tex"
+            pdflatex -halt-on-error -interaction=nonstopmode "$name.tex" >/dev/null \
+              || { echo "FAILED to compile $name"; tail -40 "$name.log"; exit 1; }
+            echo "compiled $name.pdf"
+          done
+
   # Readers promise to refuse hostile input rather than panic. `cargo test`
   # runs a short fixed-seed loop; this runs a long one with a fresh seed, so
   # the search keeps moving instead of re-checking the same inputs forever.

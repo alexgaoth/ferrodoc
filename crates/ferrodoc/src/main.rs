@@ -18,14 +18,14 @@ OPTIONS:
     -f, --from <FORMAT>     Input format   [inferred from INPUT's extension]
     -t, --to <FORMAT>       Output format  [inferred from --output's extension]
     -o, --output <FILE>     Write to FILE instead of standard output
-    -s, --standalone        Wrap HTML output in a complete page
+    -s, --standalone        Wrap HTML in a page, or LaTeX in a whole document
         --css <FILE>        Inline a stylesheet into that page
     -h, --help              Print this help
     -V, --version           Print the version
 
 FORMATS:
     input:   markdown (commonmark, md), gfm, html, docx, odt, epub, json
-    output:  those, plus plain (text) — except epub, which is read-only
+    output:  those, plus latex (tex) and plain (text)
 
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
     and bare-URL links. Prefer it over `markdown` for anything with a
@@ -42,6 +42,7 @@ EXAMPLES:
     ferrodoc report.docx -t plain
     ferrodoc minutes.odt -t gfm             # LibreOffice in, markdown out
     ferrodoc book.epub -t gfm               # an e-book in, markdown out
+    ferrodoc report.docx -t latex | pdflatex # DOCX in, PDF out, via TeX
     ferrodoc README.md -o readme.odt        # markdown in, LibreOffice out
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ";
@@ -182,17 +183,27 @@ fn write_output(output: Option<&std::path::Path>, bytes: &[u8]) -> Result<(), St
     std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-/// A complete HTML page, with `css` inlined if a file was named.
+/// A complete document rather than a fragment: an HTML page with `css`
+/// inlined, or a LaTeX file with a preamble and `\begin{document}`.
 ///
-/// Only HTML has a page to stand alone in; saying so beats writing the
-/// fragment the flag was meant to prevent.
+/// Only those two have a fragment/whole distinction; saying so beats
+/// writing the fragment the flag was meant to prevent.
 fn render_page(
     doc: &ferrodoc::Pandoc,
     to: Format,
     css: Option<&std::path::Path>,
 ) -> Result<Vec<u8>, String> {
+    if to == Format::Latex {
+        if css.is_some() {
+            return Err("--css applies to html output, not latex".to_owned());
+        }
+        // Without this, `-s` on LaTeX would hand pdflatex a fragment with
+        // no preamble — which is the exact mistake the flag prevents for
+        // HTML.
+        return Ok(ferrodoc::render_latex_standalone(doc).into_bytes());
+    }
     if to != Format::Html {
-        return Err(format!("--standalone applies to html output, not {to}"));
+        return Err(format!("--standalone applies to html or latex output, not {to}"));
     }
     let css = css
         .map(|path| {

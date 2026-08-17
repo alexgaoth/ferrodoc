@@ -28,6 +28,7 @@ ferrodoc-text = { workspace = true }
 ferrodoc-docx = { workspace = true }
 ferrodoc-odt = { workspace = true }
 ferrodoc-epub = { workspace = true }
+ferrodoc-latex = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

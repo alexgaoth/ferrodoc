@@ -46,6 +46,7 @@ fn main() -> Result<()> {
         Some("diff-epub") => diff_epub(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-odt-write") => diff_odt_write(&args[1..], verbose, fail_under),
+        Some("diff-latex") => diff_latex(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
         Some("diff-gfm") => diff_gfm(&args[1..], verbose, fail_under),
         Some("diff-gfm-md") => diff_gfm_md(&args[1..], verbose, fail_under),
@@ -57,7 +58,7 @@ fn main() -> Result<()> {
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-write|diff-odt-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-write|diff-odt-write|diff-latex|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -964,6 +965,92 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
     }, verbose, fail_under)
 }
 
+/// Score the LaTeX writer by **fidelity**, and print pandoc's score on the
+/// same corpus beside it.
+///
+/// Not by matching pandoc's output, the way the office writers are scored:
+/// pandoc's LaTeX round trip is lossy in ways worth *not* copying — a code
+/// block with a language comes back as two empty `Shaded`/`Highlighting`
+/// divs, its content gone. Requiring our output to reproduce that would
+/// gate us on being bug-compatible. So the question here is the one
+/// `diff-md` asks: write the document out, read it back, and require what
+/// returns to be what went in.
+fn diff_latex(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_text_write(
+        paths,
+        "latex",
+        &|ast| ferrodoc_latex::write_latex(ast),
+        verbose,
+        fail_under,
+    )
+}
+
+/// The fidelity gate for a text writer: our output through pandoc's
+/// reader, compared with the AST that went in, with pandoc's own score on
+/// the same corpus printed beside it.
+fn diff_text_write(
+    paths: &[String],
+    format: &str,
+    write: &dyn Fn(&ferrodoc_ast::Pandoc) -> String,
+    verbose: bool,
+    fail_under: Option<f64>,
+) -> Result<()> {
+    let cases = collect_mixed(paths)?;
+    if cases.is_empty() {
+        bail!("no inputs found");
+    }
+    let mut matched = 0usize;
+    let mut pandoc_matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        // Read as GFM, not CommonMark, and the reason is not cosmetic: a
+        // heading with an *empty* identifier cannot survive any LaTeX at
+        // all, because pandoc's reader derives one from the heading text
+        // when there is no `\label`. GFM assigns identifiers, so the
+        // question becomes whether the writer carries them — which is a
+        // question about the writer. Pandoc scores 0/11 on the other
+        // corpus for exactly this reason, and so would anything.
+        let ast = ferrodoc_markdown::read_gfm(&case.markdown)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let original = serde_json::to_value(&ast)?;
+        let ast_json = serde_json::to_string(&ast)?;
+
+        let ours = pandoc_text(&write(&ast), format)
+            .with_context(|| format!("pandoc could not read our {format} for {}", case.name))?;
+
+        // `--wrap=preserve` for the same reason `diff-md` uses it: pandoc
+        // reflows at column 72 otherwise, and scoring either side on where
+        // a line happened to break measures nothing.
+        let theirs = run_pandoc_input(
+            &ast_json,
+            &["-f", "json", "-t", format, "--wrap=preserve"],
+        )?;
+        let theirs = String::from_utf8(theirs).context("pandoc emitted invalid UTF-8")?;
+        if pandoc_text(&theirs, format)? == original {
+            pandoc_matched += 1;
+        }
+
+        if ours == original {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &original, "")));
+        }
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let pandoc_pct = 100.0 * pandoc_matched as f64 / cases.len() as f64;
+    println!(
+        "pandoc round-trips {pandoc_matched}/{} of the same corpus ({pandoc_pct:.1}%)",
+        cases.len()
+    );
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Read text in a given format with pandoc, as JSON.
+fn pandoc_text(input: &str, format: &str) -> Result<Value> {
+    let output = run_pandoc_input(input, &["-f", format, "-t", "json"])?;
+    Ok(serde_json::from_slice(&output)?)
+}
+
 fn diff_odt_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
     diff_round_trip(paths, "odt", &|ast, base| {
         ferrodoc_odt::write_odt_with_media(ast, &|url| std::fs::read(base.join(url)).ok())
@@ -1010,7 +1097,16 @@ fn diff_round_trip(
 
         // Theirs: pandoc writes the file and reads it back.
         let theirs_path = dir.join(format!("theirs.{format}"));
-        let status = Command::new("pandoc")
+        let mut command = Command::new("pandoc");
+        // A text format gets `--wrap=preserve`: pandoc otherwise reflows
+        // at column 72, so its own readback has a `SoftBreak` wherever the
+        // line happened to end. That is typesetting, not content, and
+        // comparing against it would measure who guessed the same column.
+        // A binary format has no lines to wrap.
+        if matches!(format, "latex" | "rst" | "asciidoc") {
+            command.arg("--wrap=preserve");
+        }
+        let status = command
             .args(["-f", "json", "-t", format, "--resource-path"])
             .arg(&base)
             .arg("-o")

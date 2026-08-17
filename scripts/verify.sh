@@ -133,6 +133,12 @@ if [ "$want_gates" = 1 ]; then
     # layer — see corpus/epub-spec/generate.sh. A *drop* is still a
     # regression, so the level is held.
     gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 36
+    # Fidelity, not agreement with pandoc: pandoc's own LaTeX round trip
+    # scores 0/11 on this corpus, so matching it would gate us on copying
+    # losses. The number is low because the *format* is lossy through
+    # pandoc's reader — see COMPATIBILITY.md — and CI compiles the output
+    # with pdflatex, which is the check that matters for this writer.
+    gate "LaTeX writer (fidelity)"     $HARNESS diff-latex corpus --fail-under 9
 fi
 
 if [ "$want_fuzz" = 1 ]; then

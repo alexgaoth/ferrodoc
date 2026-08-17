@@ -53,6 +53,11 @@ pub enum Format {
     Odt,
     /// EPUB, the e-book format. Readable; see `TODO.md` for the writer.
     Epub,
+    /// LaTeX. Writable — `ferrodoc x.docx -t latex | pdflatex` is PDF
+    /// output for anyone with TeX. Deliberately never readable: a `.tex`
+    /// file expands user-defined macros, which is a language, not a
+    /// format.
+    Latex,
     /// The pandoc JSON AST. Readable and writable.
     Json,
     /// Unformatted text extraction. Writable.
@@ -62,7 +67,8 @@ pub enum Format {
 impl Format {
     /// Every format name accepted on the command line, in help order.
     pub const NAMES: &'static [&'static str] = &[
-        "markdown", "commonmark", "gfm", "html", "docx", "odt", "epub", "json", "plain",
+        "markdown", "commonmark", "gfm", "html", "docx", "odt", "epub", "latex", "json",
+        "plain",
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
@@ -74,6 +80,7 @@ impl Format {
             "docx" => Some(Format::Docx),
             "odt" => Some(Format::Odt),
             "epub" | "epub2" | "epub3" => Some(Format::Epub),
+            "latex" | "tex" => Some(Format::Latex),
             "json" => Some(Format::Json),
             "plain" | "text" | "txt" => Some(Format::Plain),
             _ => None,
@@ -87,7 +94,7 @@ impl Format {
 
     /// Whether documents can be read from this format.
     pub fn readable(self) -> bool {
-        !matches!(self, Format::Plain)
+        !matches!(self, Format::Plain | Format::Latex)
     }
 
     /// Whether documents can be written to this format.
@@ -122,6 +129,7 @@ impl Format {
             Format::Docx => "docx",
             Format::Odt => "odt",
             Format::Epub => "epub",
+            Format::Latex => "latex",
             Format::Json => "json",
             Format::Plain => "plain",
         }
@@ -236,6 +244,7 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
             detail: e.to_string(),
         }),
         Format::Plain => Err(Error::NotReadable(Format::Plain)),
+        Format::Latex => Err(Error::NotReadable(Format::Latex)),
     }
 }
 
@@ -340,6 +349,7 @@ pub fn render_with_media(
         Format::Gfm => Ok(ferrodoc_markdown::write_gfm(doc).into_bytes()),
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         Format::Plain => Ok(ferrodoc_text::write_text(doc).into_bytes()),
+        Format::Latex => Ok(ferrodoc_latex::write_latex(doc).into_bytes()),
         Format::Docx => {
             // A `data:` URL carries its own bytes, so it is answered here
             // rather than passed to a resolver that would look for a file
@@ -369,6 +379,16 @@ pub fn render_with_media(
             Ok(json)
         }
     }
+}
+
+/// Render a document as a complete LaTeX file rather than a fragment:
+/// preamble, `\begin{document}`, and the title block if the document
+/// carries one.
+///
+/// This is what `pdflatex` can compile on its own; [`render`] to
+/// [`Format::Latex`] gives the body alone, for someone else's template.
+pub fn render_latex_standalone(doc: &Pandoc) -> String {
+    ferrodoc_latex::write_latex_standalone(doc)
 }
 
 /// Render a document as a complete HTML page rather than a fragment.

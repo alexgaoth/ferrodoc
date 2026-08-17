@@ -114,6 +114,12 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   behind them, including fixes made after a run hit its round cap.
   `COMPATIBILITY.md` has every known loss with its reproducing command —
   update it when a number moves.
+- A **text** writer is gated on *fidelity* (write it, read it back, require
+  the original) with pandoc's score printed beside it; a **binary** writer
+  is gated against pandoc's own output through pandoc's reader. The
+  difference is whether pandoc's writer is lossy enough that matching it
+  would copy its losses — it is for markdown and LaTeX, and is not for
+  DOCX and ODT.
 - **`TODO.md` picks the next item; it is not a wish list.** It holds the bet,
   three ranking rules and a five-step procedure. Read it before starting
   anything unprompted, and when an item lands, *re-run the ranking and

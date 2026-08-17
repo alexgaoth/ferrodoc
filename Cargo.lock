@@ -93,6 +93,7 @@ dependencies = [
  "ferrodoc-docx",
  "ferrodoc-epub",
  "ferrodoc-html",
+ "ferrodoc-latex",
  "ferrodoc-markdown",
  "ferrodoc-odt",
  "ferrodoc-text",
@@ -138,6 +139,7 @@ dependencies = [
  "ferrodoc-docx",
  "ferrodoc-epub",
  "ferrodoc-html",
+ "ferrodoc-latex",
  "ferrodoc-markdown",
  "ferrodoc-odt",
  "ferrodoc-text",
@@ -154,6 +156,13 @@ dependencies = [
  "ferrodoc-markdown",
  "html5ever",
  "markup5ever_rcdom",
+]
+
+[[package]]
+name = "ferrodoc-latex"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
 ]
 
 [[package]]
