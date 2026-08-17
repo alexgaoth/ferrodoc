@@ -1,0 +1,20 @@
+<p>A task list is how pandoc's own HTML writer spells a checked box, so this
+shape comes back through every round trip through HTML.</p>
+
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Inventory complete</label></li>
+<li><label><input type="checkbox" />Ship the release</label></li>
+<li>An ordinary item beside them is not a task at all</li>
+</ul>
+
+<ol type="1">
+<li><label><input type="checkbox" checked="" />Numbered and done</label></li>
+<li><label><input type="checkbox" />Numbered and pending</label></li>
+</ol>
+
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />A box keeps the <em>formatting</em> that follows it</label>
+<ul class="task-list">
+<li><label><input type="checkbox" />A nested list has boxes of its own</label></li>
+</ul></li>
+</ul>

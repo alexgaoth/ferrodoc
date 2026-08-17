@@ -1,5 +1,5 @@
---- samples/10-markdown-to-plain/pandoc.txt	2026-08-16 22:54:17.218575910 -0700
-+++ samples/10-markdown-to-plain/ferrodoc.txt	2026-08-16 22:54:17.155547602 -0700
+--- samples/10-markdown-to-plain/pandoc.txt	2026-08-17 11:35:23.927434793 -0700
++++ samples/10-markdown-to-plain/ferrodoc.txt	2026-08-17 11:35:23.883406204 -0700
 @@ -6,49 +6,56 @@
  
  Teams hold documents in Word, LibreOffice, EPUB and markdown at the same time. Getting between those formats is supposed to be boring. When it is not boring, it is usually because something was silently dropped.

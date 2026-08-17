@@ -59,6 +59,15 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
 - The span-with-a-class family is `abbr`, `dfn`, `kbd`, `mark`, `small`.
   Measured one element at a time; it cannot be guessed from what the tags
   mean, which is why `cite` is not in it and `var`/`samp` are code instead.
+- An `<input type="checkbox">` is a task list's box **only below a `<li>`**,
+  and however deep below one — a quotation, a div or a table cell inside the
+  item all keep it, a `<dd>` does not, and a bare `<p>` drops it and breaks
+  the block around it. Hence the flag set in `items`, not in `item`, which
+  the two share. Two things pandoc measures that guessing gets wrong: the
+  box is written *where the element stands*, not at the head of the item,
+  and tagsoup only sees it when the tag closes itself — `<input …>` with no
+  `/` stays open for pandoc and swallows the rest of the list, so a fixture
+  must use the `<input … />` its own writer emits.
 - Pandoc counts `<output>`, `<canvas>` and `<textarea>` block-level and
   splits a paragraph around them. This reader does not: all three are
   phrasing content. Deliberate, and in `COMPATIBILITY.md`.

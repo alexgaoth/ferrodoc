@@ -95,6 +95,9 @@ struct Reader {
     /// when reading an EPUB's chapters — see
     /// [`read_html_without_generated_identifiers`].
     generate_identifiers: bool,
+    /// Whether the nodes being read sit below a `<li>`, where an
+    /// `<input type="checkbox">` is a task-list box — see [`Reader::items`].
+    inside_a_list_item: bool,
 }
 
 impl Default for Reader {
@@ -105,6 +108,7 @@ impl Default for Reader {
             used_idents: HashSet::new(),
             next_suffix: HashMap::new(),
             generate_identifiers: true,
+            inside_a_list_item: false,
         }
     }
 }
@@ -235,7 +239,21 @@ impl Reader {
     }
 
     /// The items of a list: everything inside each `<li>`.
+    ///
+    /// A list item is the one place an `<input type="checkbox">` means
+    /// something — see [`Reader::element`] — and it means it however deep
+    /// below the `<li>` it sits, inside a quotation, a div or a table cell.
+    /// A `<dd>` is not a list item that way, which is why the flag is set
+    /// here and not in [`Reader::item`], which both share.
     fn items(&mut self, nodes: &[Handle]) -> Result<Vec<Vec<Block>>, Error> {
+        let outer = self.inside_a_list_item;
+        self.inside_a_list_item = true;
+        let items = self.items_inner(nodes);
+        self.inside_a_list_item = outer;
+        items
+    }
+
+    fn items_inner(&mut self, nodes: &[Handle]) -> Result<Vec<Vec<Block>>, Error> {
         let mut items = Vec::new();
         for node in nodes {
             if element_name(node).as_deref() == Some("li") {
@@ -507,6 +525,21 @@ impl Reader {
             // alternate with nesting, and the element's attributes have
             // nowhere to go: `Quoted` carries none, here or in pandoc.
             "q" => out.push(self.quotation(kids)?),
+            // A checkbox below a `<li>` is a task list's box, and this is
+            // the shape pandoc's own HTML writer emits for one — so every
+            // round trip through HTML depends on reading it back. The box
+            // is a character followed by a space, written where the element
+            // stands rather than at the head of the item. Anywhere else
+            // pandoc drops the element and breaks the block around it; this
+            // reader drops it and does not break — see `COMPATIBILITY.md`.
+            "input"
+                if self.inside_a_list_item
+                    && attribute(node, "type").as_deref() == Some("checkbox") =>
+            {
+                let mark = if attribute(node, "checked").is_some() { "☒" } else { "☐" };
+                out.push(Inline::Str(mark.to_owned()));
+                out.push(Inline::Space);
+            }
             // Never content, however it is nested. A `<textarea>` holds
             // a form's default value, not the document's text.
             "script" | "style" | "head" | "title" | "meta" | "link" | "textarea" => {}
@@ -1484,6 +1517,30 @@ mod tests {
         assert_eq!(
             blocks("<ul><li>x</li></ul>"),
             vec![Block::BulletList(vec![vec![Block::Plain(vec![Inline::Str("x".to_owned())])]])]
+        );
+    }
+
+    #[test]
+    fn a_task_list_keeps_which_boxes_are_ticked() {
+        // No round trip can see this: `- ☒ a` and `- [x] a` are one AST,
+        // so a lost box comes back as a list item that simply reads as its
+        // text. Only the literal inlines say the state survived.
+        let item = |mark: &str| {
+            vec![Block::Plain(vec![
+                Inline::Str(mark.to_owned()),
+                Inline::Space,
+                Inline::Str("done".to_owned()),
+            ])]
+        };
+        let list = |checked: &str| {
+            format!(r#"<ul><li><label><input type="checkbox"{checked} />done</label></li></ul>"#)
+        };
+        assert_eq!(blocks(&list(r#" checked="""#)), vec![Block::BulletList(vec![item("☒")])]);
+        assert_eq!(blocks(&list("")), vec![Block::BulletList(vec![item("☐")])]);
+        // And only in a list item: elsewhere the element is not a box.
+        assert_eq!(
+            blocks(r#"<p><label><input type="checkbox" checked="" />done</label></p>"#),
+            vec![Block::Para(vec![Inline::Str("done".to_owned())])]
         );
     }
 

@@ -115,7 +115,7 @@ if [ "$want_gates" = 1 ]; then
     gate "markdown reader"      $HARNESS diff-spec       $SPEC --fail-under 100
     gate "AST round trip"       $HARNESS diff-ast        corpus --fail-under 100
     gate "HTML writer"          $HARNESS diff-html       $SPEC --fail-under 100
-    gate "HTML reader"          $HARNESS diff-html-read  $SPEC corpus --fail-under 95
+    gate "HTML reader"          $HARNESS diff-html-read  $SPEC corpus --fail-under 96
     gate "markdown writer"      $HARNESS diff-md         $SPEC --fail-under 100
     gate "GFM reader (corpus)"  $HARNESS diff-gfm        corpus/gfm --fail-under 100
     gate "GFM reader (spec)"    $HARNESS diff-gfm        $SPEC --fail-under 99.8

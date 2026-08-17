@@ -50,7 +50,7 @@ cargo run -p ferrodoc-harness -- diff-md        corpus/commonmark-spec-0.31.2.js
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/commonmark-spec-0.31.2.json --fail-under 99.8
 cargo run -p ferrodoc-harness -- diff-gfm-md    corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
-cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 95
+cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96
 ```
 
 | gate | what it proves | result |
@@ -72,7 +72,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
-| `diff-html-read` | HTML reader produces pandoc's AST | **632/658** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **633/659** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -433,7 +433,7 @@ delimiter and two runs that meet make a tilde code fence:
   emits the four tildes instead, and its own output then re-reads as a
   code block that swallows the rest of the document.
 
-### HTML reader — 26 of 658
+### HTML reader — 26 of 659
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
 pandoc parses with `tagsoup`, which does not.** On malformed markup the two
@@ -446,7 +446,7 @@ the `<![CDATA[…]]>` and `<style>` raw-text boundaries are a tokenizer
 disagreement on input that is merely unusual, and `<a/>` self-closing syntax
 sends the two parsers down different recovery paths.
 
-Two deliberate divergences, both chosen on the same principle — *match
+Four deliberate divergences, all chosen on the same principle — *match
 pandoc wherever pandoc has a describable rule on well-formed input; diverge
 only where matching would mean reproducing a parse failure*:
 
@@ -461,6 +461,20 @@ only where matching would mean reproducing a parse failure*:
   fragments; all three are phrasing content, so a paragraph that mentions
   one is one paragraph. Measured: `<p>x <canvas>t</canvas> y</p>` is three
   blocks to pandoc and one `Para` here.
+- An `<input type="checkbox">` **outside a list item** is dropped and
+  nothing else. Inside one it is a task list's box and is read as pandoc
+  reads it — `Str "☒"` or `Str "☐"` then `Space`, written where the element
+  stands — which is what makes a task list survive a round trip through
+  HTML, because `<li><label><input type="checkbox" checked="" />done</label>`
+  is what pandoc's own HTML writer emits for one. Everywhere else pandoc
+  drops the element *and* breaks the block around it, so
+  `<p>loose <input type="checkbox" /> in a paragraph</p>` is two blocks to
+  pandoc and one `Para` here. Matching that would mean reproducing a parse
+  failure. One more consequence of `tagsoup`: pandoc reads the box only
+  when the tag closes itself. Written `<input type="checkbox" checked="">`,
+  with no `/`, the tag stays open for pandoc and takes the rest of the list
+  with it — `<ol><li><label><input type="checkbox" checked="">a</label></li></ol>`
+  loses its list entirely, where `html5ever` knows the element is void.
 
 Two more, measured, where ferrodoc keeps *more* than pandoc: a `<tr>`
 inside a `<template>` stays a table row here (tagsoup has no notion of a

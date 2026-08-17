@@ -1,5 +1,5 @@
---- samples/06-markdown-to-html/pandoc.html	2026-08-16 22:54:16.427974817 -0700
-+++ samples/06-markdown-to-html/ferrodoc.html	2026-08-16 22:54:16.342548392 -0700
+--- samples/06-markdown-to-html/pandoc.html	2026-08-17 11:35:23.210407160 -0700
++++ samples/06-markdown-to-html/ferrodoc.html	2026-08-17 11:35:23.130407274 -0700
 @@ -54,25 +54,25 @@
  <li>Spot-check 1 % of the output by hand.</li>
  </ol>

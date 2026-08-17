@@ -64,7 +64,7 @@ compiles on a base TeX. These three are judged by `pdflatex`,
 | gap | what you see | status |
 |---|---|---|
 | **footnotes are not parsed** | `[^note]` survives as literal text in *every* output | deliberate scope, and the most visible limitation here |
-| **task lists render as `☒`/`☐`** | pandoc emits a real `<input type="checkbox">` and `class="task-list"` | not deliberate; found by these samples, unfixed |
+| **the HTML *writer* renders task lists as `☒`/`☐`** | pandoc emits a real `<input type="checkbox">` and `class="task-list"` | not deliberate; found by these samples, unfixed. The *reader* half is fixed — see below |
 | **`plain` output is plainer** | quotes not indented, tables tab-separated rather than column-aligned | minor format, low priority |
 
 The footnote one deserves a sentence of its own. Footnotes are a *pandoc*
@@ -75,7 +75,7 @@ documents use footnotes, this is currently the wrong tool for them.
 
 ## What building this folder found
 
-Three real defects, all of them **silent data loss**, all fixed and each
+Four real defects, all of them **silent data loss**, all fixed and each
 now covered by a test:
 
 1. **The HTML writer dropped table column alignment.** `|---:|` produced no
@@ -89,11 +89,20 @@ now covered by a test:
    came out as `H2O`, `E=mc^2^` as `E=mc2`, and an anchor that links
    pointed at simply disappeared. Pandoc writes raw HTML for all of these
    and now so does ferrodoc, byte for byte.
+4. **The HTML reader dropped which boxes in a task list were ticked.**
+   `<li><label><input type="checkbox" checked="" />done</label></li>` — the
+   shape pandoc's own HTML writer emits — read as its text alone, so
+   `- [x] Inventory complete` came back as `- Inventory complete` and a
+   checklist arrived saying nothing had been done. Visible in
+   `05-html-to-markdown/diff.txt` until it was fixed; now
+   `corpus/task-lists.html` covers it.
 
-None of the three could be caught by any existing gate, and for the same
+The first three could not be caught by any existing gate, and for the same
 reason in each case: `diff-html` scores against the **CommonMark
 specification**, which contains no tables at all, and `diff-md` is a round
 trip through ferrodoc's own reader, which never produces a `Superscript`
-because CommonMark has no `^x^`. The gates were green and the output was
-wrong. That is what this folder is for, and it is worth re-running it after
-any writer change.
+because CommonMark has no `^x^`. The fourth had a gate that could have
+seen it and no document to see it with — and a round trip could not have
+seen it at all, because `- ☒ a` and `- [x] a` are one AST. The gates were
+green and the output was wrong. That is what this folder is for, and it is
+worth re-running it after any reader or writer change.

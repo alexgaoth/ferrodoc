@@ -1,6 +1,6 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-16 22:54:16.306548427 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-16 22:54:16.155548574 -0700
-@@ -17,42 +17,42 @@
+--- samples/05-html-to-markdown/pandoc.md	2026-08-17 11:35:23.089407332 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-17 11:35:22.925407565 -0700
+@@ -17,22 +17,22 @@
  
  ## Rollout schedule
  
@@ -36,15 +36,7 @@
  
  ### Checklist
  
--- [x] Inventory
-+- Inventory
-   complete
--- [ ] Pilot signed off
--- [ ] Rollback plan written
-+- Pilot signed off
-+- Rollback plan written
- 
- ## Running a conversion
+@@ -45,14 +45,14 @@
  
  Convert a directory in one pass:
  

@@ -36,10 +36,10 @@ something was silently dropped.
 
 ### Checklist
 
-- Inventory
+- [x] Inventory
   complete
-- Pilot signed off
-- Rollback plan written
+- [ ] Pilot signed off
+- [ ] Rollback plan written
 
 ## Running a conversion
 
