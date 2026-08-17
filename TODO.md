@@ -109,6 +109,47 @@ is the point — the roadmap re-derives itself instead of being re-decided.
 
 ---
 
+## What "done" means
+
+Every item below carries a **Done when** block. It is not a summary of the
+work; it is the *test that decides*, and it is written before the work
+starts so it cannot be fitted to the result afterwards.
+
+Four rules make these hard to talk around. They exist because each failure
+has happened here at least once:
+
+1. **Every criterion is a command that exits non-zero, or a number one
+   prints.** "Works well", "reads correctly" and "should be fine" are not
+   criteria. If it cannot fail, it is not a criterion.
+2. **Thresholds are set before measuring.** A gate whose threshold is chosen
+   after seeing the score is a thermometer, not a gate. Where an item below
+   states a number, that number is the commitment; scoring under it means
+   the item is *not done*, not that the number was ambitious.
+3. **Nothing else may regress.** `./scripts/verify.sh` must exit 0 at the
+   end of every item, with no existing threshold lowered. Lowering one to
+   land something is the single most available form of circumvention, and it
+   shows up in the diff of that file.
+4. **An external judge where one exists.** "Another program opens it", "the
+   package installs from a clean machine", "pandoc reads it back" — an
+   oracle that does not know what we intended. Self-graded output is how a
+   package that built but could not import shipped once already.
+
+And one that applies to every item without being repeated in each:
+
+> **Done includes the paperwork.** A row in `COMPATIBILITY.md` with its
+> number and every deliberate divergence, the gate in `scripts/verify.sh`
+> and CI, the rules in the crate's `CLAUDE.md`, and the item moved out of
+> this list into `## Where the bet stands` with the ranking re-run. Code
+> that works and is undocumented is not done; it is a liability with a
+> passing test.
+
+If an item turns out to be a bad idea once measured, that is a real outcome:
+say so, record what the measurement showed, and move it to `## Explicit
+non-goals`. That is not circumvention — silently redefining the criterion
+is.
+
+---
+
 ## Next, in order
 
 Derived by applying the three rules to today's pool. The derivation is shown
@@ -140,6 +181,24 @@ the audience it was built for.
   superlinear it was the benchmark timing a *rejection* — measure the
   measurement first.
 
+**Done when**
+
+- `ferrodoc-harness bench-sizes` reports **peak RSS as well as latency**, for
+  every path including the two ODT ones, and `--max-rss-ratio N` makes it
+  exit non-zero when any path's peak RSS exceeds N× its input size.
+- `scripts/verify.sh` runs it at a threshold that **holds for a 10 MB
+  input**, and CI runs it. Committed before measuring: **`--max-rss-ratio
+  20`** — a 10 MB document must convert inside 200 MB, because that is what
+  fits the 128–512 MB edge-worker range item 2 targets, with headroom.
+- `docx → AST` is **linear enough to state**: time for 10× the input is
+  **under 12×** (it is 16.9× today). If ablation shows the cost is
+  irreducible, that is a real finding — record the measurement and the
+  reason in `COMPATIBILITY.md`, and lower the claim rather than the gate.
+- `COMPATIBILITY.md` gains a **"Resource limits worth knowing"** table with
+  a bound per path and the command that reproduces it.
+- Every ratio is taken **interleaved against a baseline**, per
+  `docs/benchmarking.md` — this machine drifts ~2× within a session.
+
 **Iterate: yes.** No differential gate sees memory, and this adds a gate —
 two of the conditions the loop exists for.
 
@@ -161,6 +220,26 @@ and npm has the same failure mode.
 
 - One binding at a time. Each is a product commitment with platforms
   documented and installation tested, not a build artefact with a README.
+
+**Done when**
+
+- `npm pack` produces a tarball that **installs into an empty directory and
+  runs**, in CI, on Node — not "builds". The Python job exists because a
+  wheel that built and could not import shipped once.
+- The same tarball **runs in a browser**: a headless-Chrome test converts a
+  document and asserts the output, with **no network request** — the
+  privacy claim is the reason this item exists, so it is the thing tested.
+- The API matches the Python binding's shape: **one function**, bytes in and
+  `string | Uint8Array` out chosen by the target format, and a typed
+  declaration (`.d.ts`) that `tsc --noEmit` accepts against a sample.
+- Errors arrive as a **thrown `Error` subclass, never a panic**: converting
+  garbage bytes as `docx` rejects, and the wasm instance is **still usable
+  afterwards** (a panicked wasm module is poisoned and every later call
+  fails — that is the failure mode to prove absent).
+- The published bundle is **under 3 MB gzipped**, stated before measuring.
+  Over it, the size goes in the README next to the claim rather than being
+  quietly omitted.
+- `README.md` gains an `npm install ferrodoc` line only once CI proves it.
 
 **Iterate: yes** — a published surface, and a new install path that can pass
 its build and fail its use.
@@ -187,6 +266,24 @@ manifest, a spine and a nav document. Images come from the media bag
   metadata, no code blocks, no table spans. Writing those mappings first
   would have been days spent making the gate fail.
 
+**Done when**
+
+- `diff-epub` exists over **two corpora**, as every office format here does:
+  pandoc's own EPUB output, and EPUBs *another program wrote*
+  (`corpus/epub-*/generate.sh`, from Calibre or Sigil — a corpus of our own
+  output cannot fail on a structure our writer never emits).
+- Reader: **≥ 90%** on the pandoc corpus and **100%** on the independent
+  one, committed before measuring. The independent corpus is the one that
+  matters and it is small, so it is gated at 100.
+- Writer: `diff-epub-write` at **100%** on `corpus`, the same shape as
+  `diff-odt-write` — ours through pandoc against pandoc's through pandoc.
+- **An EPUB reader opens the output**: `epubcheck` reports no errors on a
+  written file, and the file opens in Calibre. An external judge, because
+  "pandoc reads it back" cannot see a manifest a real reader rejects.
+- Spine order is proved by a fixture where **file order and reading order
+  differ** — otherwise the gate passes on documents that cannot distinguish
+  the two, which is most of them.
+
 **Iterate: yes** — a package another program must open, and silent loss is
 one wrong spine entry away.
 
@@ -206,6 +303,19 @@ single crate, which is exactly what the PDF item below cannot manage.
 - Gate: `diff-latex`, round trip — write LaTeX, have **pandoc** read it back,
   require the AST to survive. The same shape as `diff-write`.
 
+**Done when**
+
+- `diff-latex` scores **≥ 95%** over the spec examples and **100%** over
+  `corpus`, committed before measuring. LaTeX can express more of this AST
+  than ODT can, so the bar is higher than ODT's.
+- **The output compiles.** `pdflatex -halt-on-error` succeeds on every
+  corpus document, in CI where TeX is installed. A writer whose output
+  pandoc reads back but TeX refuses has missed the entire point of the item.
+- Every one of the ten special characters is covered by a fixture that
+  fails without its escape — mutation-tested, not asserted.
+- `ferrodoc report.docx -t latex | pdflatex` is in the README **only after**
+  it is in CI.
+
 ### 5. A C ABI, when a second ecosystem asks
 
 *Rule 1 says a binding outranks a format, but rule 2 says wait: Go, JVM and
@@ -216,12 +326,37 @@ is the highest multiplier left. It is ranked below EPUB anyway because
 nobody has yet said they cannot proceed without it. **Promote it the moment
 somebody does** — that is step 1 of the procedure, not a change of plan.
 
+**Done when**
+
+- A C header and a `cdylib`, with **one worked example in a language that is
+  not Rust** compiled and run in CI. A header nobody has called through is
+  not an ABI, it is a guess.
+- **No memory is leaked and none is freed twice**: the example runs under
+  `valgrind --error-exitcode=1` (or ASan) in CI. This is the whole risk of
+  the item; without that check the criterion is decorative.
+- Every entry point is `#[unsafe(no_mangle)] extern "C"` and **cannot
+  unwind** across the boundary — a panic caught at the edge and returned as
+  an error code, proved by a test that converts garbage and checks the
+  process survives.
+- The crate declares `unsafe_code = "allow"` **only in the ABI crate**, and
+  the workspace `forbid` stays untouched everywhere else.
+
 ### 6. Writers for reStructuredText and AsciiDoc, when a pipeline asks
 
 Both are bounded writer work and both unlock a documentation toolchain
 (Sphinx, Antora) that currently shells out to pandoc. Neither is worth a
 reader: people write these by hand in editors that already understand them,
 and convert *out of* them far more often than in.
+
+**Done when**
+
+- `diff-rst` and `diff-asciidoc` round-trip through pandoc at **≥ 90%** over
+  the spec examples and **100%** over `corpus`, committed before measuring.
+- **The toolchain accepts it**: `sphinx-build` on the RST output and
+  `asciidoctor` on the AsciiDoc output both exit 0 with no warnings, in CI.
+  That is the reason either format is on this list, so it is the test.
+- Both appear in `--help` and in `Format::NAMES`; a writer users cannot
+  reach is not shipped.
 
 ### 7. Learn from real documents and users — standing
 
