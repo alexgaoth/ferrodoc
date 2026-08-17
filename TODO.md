@@ -43,9 +43,9 @@ an exit test, so "are we there" is checkable rather than a matter of taste.
 | | what it means | exit test | state |
 |---|---|---|---|
 | **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ JavaScript ✅ **C ABI ✅** (Go, JVM, C#, Ruby) — **met** |
-| **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT, EPUB in ✅ LaTeX/PDF, RST, AsciiDoc out ✅ · **EPUB out ❌** |
+| **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT, EPUB in ✅ LaTeX/PDF, RST, AsciiDoc, **EPUB out ✅** — every format read is now also written — **met** |
 | **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ peak RSS gated ✅ · **one superlinear path** |
-| **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 19 differential gates ✅ four independent corpora ✅ six external judges ✅ · standing work, never "done" |
+| **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 20 differential gates ✅ four independent corpora ✅ six external judges ✅ · standing work, never "done" |
 
 H1 and H2 are the reach of the thing. H3 is why anyone would embed it rather
 than shell out — and it is the horizon that quietly decays, because a
@@ -182,11 +182,64 @@ before any work starts, in the sense `## What "done" means` defines. The four
 rules there apply to each without being restated, in particular: *nothing else
 may regress*, and *done includes the paperwork*.
 
-These are here by **procedure step 1**, not by taste. `samples/` is a real
-document that failed to convert, and its own `README.md` already names one of
-these as "not deliberate; found by these samples, unfixed". Every rule below
-was probed against pandoc 3.8.2.1 before being written down — the probes are
-in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
+**Re-ranked 2026-08-17 after five items landed**, by the three rules in order.
+Rules 1 and 2 still have nothing to promote — H1 is met and every format read
+is also written — so the queue is what **rule 3** leaves, followed by the
+measurement that decides what comes after it. Probes behind each item are in
+`.iterate/odyssey-20260817-1409/ODYSSEY.md`.
+
+- [ ] **`samples/` is an unchecked guarantee** — rule 3, and it outranks
+  everything else on this page by that rule's own wording: *when a guarantee is
+  currently unchecked, the item that adds the check outranks any new feature*.
+  `grep -rn samples scripts/verify.sh .github/workflows/ci.yml` returns
+  **nothing**. The folder that found three silent data losses — column
+  alignment, column widths, and five dropped inline types — is enforced by a
+  sentence in `CLAUDE.md` telling a future agent to remember to run it. That is
+  the same shape as every guarantee this project gates precisely because prose
+  decays: the losses were invisible to all twenty differential gates, and the
+  thing that saw them is the thing nothing checks.
+  - **Eval:**
+    1. A `samples` check in `scripts/verify.sh` and in CI that **fails** when a
+       committed `samples/*/diff.txt` no longer matches a fresh
+       `./samples/generate.sh`, ignoring only the `---`/`+++` timestamp header
+       lines and the three nondeterministic binaries (zip mtimes, pandoc ids).
+    2. **Mutation-proof it bites**: reintroduce one of the three original
+       losses — drop table column alignment in the HTML writer — and show the
+       new check fails while *every existing gate stays green*. Restore from a
+       `cp` taken first, never `git checkout`. A check that cannot fail where
+       the gates are blind is the whole defect being fixed, restated.
+    3. It is **not** flaky: three consecutive clean runs on an unmodified tree,
+       exit 0 each time.
+    4. `./scripts/verify.sh` exits 0 with no threshold lowered, and the run
+       cost is stated in `docs/gates.md` — if it doubles the suite's runtime
+       that is a fact the next agent needs, not a detail.
+
+- [ ] **Nobody has counted what the failing gates are failing on** — the
+  measurement that should precede the next three features. `CLAUDE.md`'s first
+  rule is that *a roadmap item's premise is a claim like any other: measure it
+  before building on it*, and two premises in this file were false that way.
+  Two live claims here are unmeasured: that the HTML reader's 26 divergences
+  are what holds `corpus/epub-spec` at **8/22 (36.4%)**, by far the worst gate
+  in the suite, and that closing them "costs three ways". Both may be true;
+  neither has a breakdown behind it.
+  - **Eval:**
+    1. A table — committed as `docs/divergences.md` — with **one row per
+       failing document** across every gate scoring under 100%: 26 HTML
+       reader, 14 EPUB spec chunks, 3 EPUB writer, 2 EPUB reader, 2 ODT
+       reader, 1 GFM spec, 1 DOCX reader, 1 DOCX LO, 1 DOCX writer. Each row:
+       the document, the first diverging AST path, and a one-line cause.
+    2. Causes **grouped**, with a count per group, so the table answers "which
+       single fix buys the most documents" — that number is the item's whole
+       point.
+    3. Each claimed cause carries its reproducing command, and at least the
+       top three groups are confirmed by probing pandoc 3.8.2.1 directly
+       rather than inferred from the harness's output.
+    4. States plainly, with evidence, whether the `epub-spec` 8/22 really is
+       the HTML reader — **including if it is not**. A refuted premise is a
+       successful outcome here, not a failure.
+    5. No behaviour change: `./scripts/verify.sh` exits 0, every gate score
+       identical, diff confined to `docs/` and any harness `--verbose` output
+       needed to produce it.
 
 - [ ] **The `plain` writer is plainer than pandoc's** — `samples/10` differs by
   47 lines: block quotes are not indented two spaces, tables are tab-separated
@@ -202,49 +255,42 @@ in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
        alignment, code indent, list spacing.
     3. `./scripts/verify.sh` exits 0 with no threshold lowered.
 
-- [ ] **Four things two critics measured false** — all raised as MINOR, against
-  `f3a6807` and `5b18ff9`, and carried rather than waved through: *done includes
-  the paperwork* makes every number and every stated pandoc behaviour in the
-  tree fair game. Two of these are **statements about pandoc that are wrong**,
-  which is the failure `CLAUDE.md`'s "never guess pandoc behavior — probe it
-  first" exists to prevent, and a comment is not exempt from it.
-  - `corpus/epub-spec/generate.sh:6` still says `diff-html-read`, 632/658 in a
-    tracked comment. The divergence count (26) is right; the fraction is stale.
-  - The `COMPATIBILITY.md` HTML-reader bullet claims pandoc "drops the element
-    *and* breaks the block around it" **everywhere else**, and that
-    generalisation is false in both directions, measured: in a `<td>` pandoc
-    does **not** split and ferrodoc matches it byte-for-byte, while in an `<h2>`
-    pandoc loses the `Header` *entirely* — worse than "breaks the block" —
-    where ferrodoc keeps it.
-  - `crates/ferrodoc-markdown/src/write.rs:905` says pandoc "writes a
-    three-backtick fence here and loses the rest of the block", and it is the
-    **sole justification** for the one assertion in the new test that
-    deliberately diverges from pandoc. Measured false: pandoc writes the short
-    fence *and reads its own output straight back*, losing nothing. Pandoc sizes
-    a fence by the longest line that is **only** backticks — `"````"`, `"   ````"`
-    and `"```` "` all take a five-backtick fence — and stays at three only where
-    the inner run cannot close a fence. ferrodoc's fence is strictly wider,
-    never narrower, so the assertion is right; only its stated reason is wrong.
-  - An **entirely empty** `Attr` is the one class-related shape still spelled
-    differently: pandoc writes an *indented* code block, ferrodoc a bare fence.
-    Pre-existing and not caused by `5b18ff9`, but live in three of the 47
-    remaining lines of `samples/05-html-to-markdown/diff.txt`. Any non-empty
-    `Attr` — even `["sourceCode"]` alone, or only an id, or only key-values —
-    fences in both, so the divergence is exactly the empty case.
+- [ ] **`crates/ferrodoc-html/CLAUDE.md` is at 85 lines against a 40-line
+  budget** — measured by the worker on the last paperwork item and flagged
+  rather than hidden. `## When to run /tend` says that past double budget the
+  answer is **re-filing, not compression**: package facts into nested
+  `CLAUDE.md` files, long-form detail into `docs/` behind a plain pointer,
+  never an `@import`. The crate governs 4 files, so its budget is 40 and it is
+  at 213% of it.
   - **Eval:**
-    1. `grep -rn '632/658\|fail-under 95' .` returns nothing outside `.iterate/`.
-    2. The `COMPATIBILITY.md` sentence states the `<td>` and `<h2>` behaviours
-       as measured, each with its reproducing command.
-    3. The `write.rs:905` rationale is corrected or deleted, and the six
-       assertions and the `longest.max(2) + 1` expression are left alone.
-    4. The empty-`Attr` divergence is recorded — a `COMPATIBILITY.md` row or a
-       `## Smaller things` line — so the next reader of that diff does not
-       rediscover it.
-    5. `crates/ferrodoc-html/CLAUDE.md` records the *writer's* task-list rule.
-       It documents the reader's in detail and gained nothing for the writer,
-       so the rule lives only in `COMPATIBILITY.md` and two doc-comments —
-       and the two halves are now a matched pair that must stay consistent.
-    6. `./scripts/verify.sh` exits 0 with no threshold lowered.
+    1. `crates/ferrodoc-html/CLAUDE.md` is **at or under 40 lines**, measured
+       with `wc -l`.
+    2. **No fact is lost.** Every line removed is either relocated — to a
+       nested `CLAUDE.md`, to `docs/`, or to `COMPATIBILITY.md` — or is named
+       in the commit message as deliberately dropped with the reason. A
+       reviewer must be able to trace each removed line to where it went.
+    3. Nothing relocated is behind an `@import`, which would load it anyway
+       and defeat the point.
+    4. `./scripts/verify.sh` exits 0. This item changes no code.
+
+- [ ] **Two paperwork MINORs a critic raised and the clock did not allow** —
+  from the `75cd12e` review, recorded rather than dropped.
+  - `COMPATIBILITY.md` records the empty-`Attr` divergence and names
+    `samples/05-html-to-markdown/diff.txt`, but `samples/README.md` — the file
+    a reader of that diff actually opens, which enumerates five other things
+    visible in these diffs — carries **no pointer back**. The link runs one
+    way, so the record sits where the reader is not.
+  - The three checkbox divergence bullets each assert something about
+    *ferrodoc* ("one `Para` here", "matches it byte for byte", "ferrodoc keeps
+    `Header 2`") but their reproducing commands show only **pandoc's** half.
+    The reader must swap the binary themselves. The empty-`Attr` block, right
+    beside them, gives both lines.
+  - **Eval:**
+    1. `samples/README.md` points at the empty-`Attr` record.
+    2. Each of the three checkbox bullets carries both halves of its
+       comparison, and **each command is run and its stated output matches
+       what it really prints**.
+    3. `./scripts/verify.sh` exits 0. This item changes no code.
 
 ## Done
 
