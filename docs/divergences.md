@@ -47,21 +47,29 @@ $H diff-epub-write corpus > epubwrite.txt
 
 | # | group | docs | status |
 |---|---|---:|---|
-| **G1** | An element still open when its container closes (`<a>` never closed, or written `<a/>`) is reconstructed here and dropped by pandoc | **16** | 13 **declared deliberate**, 3 actionable |
+| **G1** | An element still open when its container closes (`<a>` never closed, or written `<a/>`) is reconstructed here and dropped by pandoc | **16** | 11 **declared deliberate** + 2 by extension, 3 actionable |
 | **G2** | Pandoc's **EPUB** reader runs its HTML reader with `raw_html` **on**; ferrodoc's does not, so raw HTML pandoc keeps verbatim is normalised away | **11** | actionable, undeclared |
 | **G3** | Trailing whitespace *inside* `<em>`/`<strong>` — pandoc hoists it out as `Space`, ferrodoc drops it | **3** | actionable, undeclared |
 | **G4** | A start tag with no closing `>` — pandoc's tagsoup still builds a `Div` from the junk, ferrodoc emits nothing | **3** | actionable, declared as a family |
 | **G5** | EPUB writer will not emit a reference the book cannot satisfy | **3** | **declared deliberate** |
 | **G6** | `<![CDATA[…]]>` boundaries | **2** | actionable, declared as a family |
 | **G7** | Pandoc reads every ODT list twice, so its identifier suffix is one higher | **2** | **declared deliberate** |
-| — | eleven groups of one (listed in full below) | **11** | 3 deliberate, 8 actionable |
+| — | eleven groups of one (listed in full below) | **11** | 2 deliberate, 9 actionable |
 
-**Largest group: G1, 16 of 51 documents (31%).** But 13 of those 16 are a
-*declared deliberate* decision — `COMPATIBILITY.md`, "HTML reader": an
-`<a href="…"></a>` with no text is kept, because dropping it would match
-pandoc on unclosed `<a>` tags at the price of deleting the well-formed
-empty anchors real pages use as jump targets. Reversing that is a policy
-change, not a bug fix.
+**Largest group: G1, 16 of 51 documents (31%).** But 13 of those 16 rest
+on a *declared deliberate* decision — `COMPATIBILITY.md`, "HTML reader":
+an `<a href="…"></a>` with no text is kept, because dropping it would
+match pandoc on unclosed `<a>` tags at the price of deleting the
+well-formed empty anchors real pages use as jump targets. Reversing that
+is a policy change, not a bug fix.
+
+Two of the 13 stretch that declaration rather than sit inside it: the
+declared rule names `<a>`, and example 494 is on `<b>` while example 613
+is on `<bab>`/`<c2c>`. The mechanism is identical and the count is
+defensible, but the *decision* on record covers `<a>` only — the
+surrounding html5ever-versus-tagsoup prose in `COMPATIBILITY.md` is
+descriptive, not a choice anyone recorded making. Read the count as **11
+declared, 2 by extension**.
 
 **Largest actionable group: G2, 11 documents** — ten of the fourteen
 `epub-spec` chunks plus `corpus/epub/corpus-truncation-cases.epub`.
@@ -76,8 +84,10 @@ documents are proven to have nothing behind the first cause:
   and the documents are identical.
 - `raw_html` — `epub-spec/spec-10.epub`, `epub-spec/spec-17.epub`,
   `corpus/epub/corpus-truncation-cases.epub`. Their content XHTML already
-  reads **byte-identically** to `pandoc -f html`; the entire failure is
-  the extension difference.
+  reads to **the same `blocks`** as `pandoc -f html`; the entire failure
+  is the extension difference. (`blocks`, not the whole document: the
+  `meta` objects differ in every HTML comparison here, for a reason of
+  its own — see the closing section.)
 
 For the other eight `epub-spec` chunks, G2 is a *prerequisite* rather
 than a fix: a second divergence is measurably behind it (table below).
@@ -112,14 +122,20 @@ has no counterpart for.
 
 **2. Two chunks contain no HTML reader divergence at all.** Unzip
 `spec-10.epub` and `spec-17.epub` and read their `EPUB/text/ch001.xhtml`
-with both readers: the ASTs are identical. Their whole failure is G2.
+with both readers: the `blocks` are identical. Their whole failure is G2.
 
 ```sh
 unzip -qo corpus/epub-spec/spec-10.epub -d /tmp/s10
-pandoc            -f html -t json /tmp/s10/EPUB/text/ch001.xhtml > /tmp/p.json
-./target/release/ferrodoc -f html -t json /tmp/s10/EPUB/text/ch001.xhtml > /tmp/f.json
-diff /tmp/p.json /tmp/f.json && echo "identical"
+diff <(pandoc -f html -t json /tmp/s10/EPUB/text/ch001.xhtml | jq -S .blocks) \
+     <(./target/release/ferrodoc -f html -t json /tmp/s10/EPUB/text/ch001.xhtml | jq -S .blocks) \
+  && echo "blocks identical"
 ```
+
+Compare `.blocks`, not the whole document: `meta` differs on every HTML
+file in this corpus, independently of anything above, and comparing the
+whole document hides the result being demonstrated behind a divergence
+that has nothing to do with it. That third divergence is stated in the
+closing section.
 
 **3. Four chunks fail on HTML reader divergences that are not among the
 26 and cannot be** — `diff-html-read` reads the CommonMark spec's
@@ -144,12 +160,22 @@ falsified part is the arithmetic: closing the 26 as `diff-html-read`
 defines them would move `epub-spec` by **zero** documents on its own,
 because every one of those seven also needs G2 first.
 
-**And "costs three ways"?** Two of the three hold, one does not.
-`diff-epub`'s two misses are HTML reader divergences (though not the 26 —
-one is G2, one is the `<br />` space). The EPUB writer's three misses are
-**not** the HTML reader at all: all three are the declared rule that this
-writer does not emit a reference the book cannot satisfy (G5). So the
-HTML reader costs two gates, not three.
+**And "costs three ways"?** One of the three holds cleanly, one holds
+half, one does not.
+
+- `diff-epub`'s two misses: **one** is an HTML reader divergence — the
+  space before `<br />` in `corpus-code-and-raw.epub`, though not one of
+  the 26. The other, `corpus-truncation-cases.epub`, is **not**: its
+  XHTML produces the same `blocks` under both readers, so nothing the
+  HTML reader does is wrong there. G2 is a missing extension in the EPUB
+  path, not a divergence of the HTML reader as `diff-html-read` scores
+  it, and the same distinction applies wherever G2 appears above.
+- `corpus/epub-spec`: refuted, as measured throughout this section.
+- The EPUB writer's three misses are **not** the HTML reader at all: all
+  three are the declared rule that this writer does not emit a reference
+  the book cannot satisfy (G5).
+
+So the HTML reader costs one gate and one document, not three gates.
 
 ---
 
@@ -175,8 +201,8 @@ HTML reader costs two gates, not three.
 | example 344 (Code spans) | `/blocks/0/c/0/c` | G1 (`<a href="`">`) — *deliberate* |
 | example 476 (Emphasis) | `/blocks/0/c` (2 vs 1) | G1 — *deliberate* |
 | example 477 (Emphasis) | `/blocks/0/c` (2 vs 1) | G1 — *deliberate* |
-| example 494 (Links) | `/blocks/0/c` (6 vs 5) | G1, on `<b>` rather than `<a>` — *deliberate* |
-| example 613 (Raw HTML) | `/blocks` (2 vs 0) | G1 (`<a><bab><c2c>`) — *deliberate* |
+| example 494 (Links) | `/blocks/0/c` (6 vs 5) | G1, on `<b>` rather than `<a>` — *deliberate by extension*: the declared rule names `<a>` |
+| example 613 (Raw HTML) | `/blocks` (2 vs 0) | G1, on `<bab>`/`<c2c>` — *deliberate by extension*: the declared rule names `<a>` |
 | example 614 (Raw HTML) | `/blocks` (2 vs 1) | G1 duplicate: `<a/>` stays open here, so the block is emitted twice |
 | example 615 (Raw HTML) | `/blocks` (2 vs 1) | G1 duplicate |
 | example 616 (Raw HTML) | `/blocks` (2 vs 1) | G1 duplicate |
@@ -219,12 +245,20 @@ divergence the gate reports, and what the same chunk's XHTML does under
 | `spec-20.epub` | `/blocks/1/c/1/1/c/0/c` | G2 (`<5001 foo>`) | G1 duplicate trailing `Plain[Span]` |
 | `spec-21.epub` | `/blocks/1/c/1/1/c/0` | G2 | G1 unclosed `<a href="\*">` |
 
-Repro for the residual column, per chunk:
+Repro for the residual column. It walks **every** content document in the
+chunk: `spec-00.epub` is the one chunk pandoc split into two, and its
+residual is in `ch002.xhtml` while `ch001.xhtml` matches — checking
+`ch001` alone would report the row as wrong.
 
 ```sh
-unzip -qo corpus/epub-spec/spec-13.epub -d /tmp/s13
-diff <(pandoc -f html -t json /tmp/s13/EPUB/text/ch001.xhtml) \
-     <(./target/release/ferrodoc -f html -t json /tmp/s13/EPUB/text/ch001.xhtml)
+chunk=13   # or 00, where the residual is in the second content document
+rm -rf /tmp/s$chunk && unzip -qo corpus/epub-spec/spec-$chunk.epub -d /tmp/s$chunk
+for f in /tmp/s$chunk/EPUB/text/ch*.xhtml; do
+    printf '%s: ' "$(basename "$f")"
+    diff -q <(pandoc -f html -t json "$f" | jq -S .blocks) \
+            <(./target/release/ferrodoc -f html -t json "$f" | jq -S .blocks) >/dev/null \
+        && echo "blocks identical" || echo "blocks differ — the residual is here"
+done
 printf '<p><em>foo </em>bar</p>\n' | pandoc -f html -t json   # Emph, Space, Str — the Space is the divergence
 ```
 
@@ -238,7 +272,7 @@ comparison. They are excluded above.
 | document | first diverging path | cause |
 |---|---|---|
 | `corpus/epub/corpus-code-and-raw.epub` | `/blocks/1/c/1/8/c/19/t` | a space before `<br />` — pandoc trims it, ferrodoc keeps `Space, LineBreak`. Not one of the 26. Probe: `printf '<p>a <br /> b</p>\n' \| pandoc -f html -t json` |
-| `corpus/epub/corpus-truncation-cases.epub` | `/blocks/1/c/1/9/c/0/c` | G2 — an HTML comment pandoc keeps as `RawInline`; its XHTML matches `pandoc -f html` exactly |
+| `corpus/epub/corpus-truncation-cases.epub` | `/blocks/1/c/1/9/c/0/c` | G2 — an HTML comment pandoc keeps as `RawInline`; its XHTML produces the same `blocks` under both readers, so this is not an HTML reader divergence |
 
 ### EPUB writer — `diff-epub-write corpus`, 8 of 11
 
@@ -289,11 +323,45 @@ Stated as findings, not as a plan — ranking belongs in `TODO.md`.
   both attribute the chunk failures to the 26; `COMPATIBILITY.md` says
   the EPUB gate's two misses "are in the 26" and neither is.
 - **The 26 are 10 causes, not one**, and 13 of the 26 documents are a
-  decision already taken rather than work outstanding. The actionable
+  decision already taken rather than work outstanding — 11 of them
+  declared, 2 covered only by extension of it. The actionable
   HTML reader count is **13**, in nine groups, the largest of which
   (`<a/>` duplicate emission) is three documents.
-- **Two HTML reader divergences exist that no gate measures** — the
-  trailing space inside `<em>`/`<strong>` (G3) and the space before
-  `<br />` — both found only because the EPUB corpus contains HTML the
-  CommonMark spec's expected output never writes. That is the third time
-  a new format has found a bug in the old code.
+- **Three HTML reader divergences exist that no gate measures**, all
+  three invisible to `diff-html-read` because the CommonMark spec's
+  expected HTML never contains the construct:
+  - trailing space inside `<em>`/`<strong>` (G3), pandoc hoists it out;
+  - a space before `<br />`, pandoc trims it and ferrodoc keeps it;
+  - **`<head>` metadata**: pandoc's HTML reader populates `meta` from
+    `<title>` and the `<meta>` elements, and ferrodoc emits `{}`. The
+    spec's expected HTML is fragments with no `<head>`, so no case in
+    the corpus reaches it — although
+    `crates/ferrodoc-harness/src/main.rs:434` does compare the whole
+    JSON document, `meta` included, so a corpus with one full page in it
+    would score this today. Probe:
+
+    ```sh
+    printf '<html><head><title>T</title></head><body><p>x</p></body></html>' > /tmp/h.html
+    pandoc -f html -t json /tmp/h.html   # "meta":{"title":{"t":"MetaInlines",…}}
+    ./target/release/ferrodoc -f html -t json /tmp/h.html   # "meta":{}
+    ```
+
+  Two of the three were found only because the EPUB corpus contains HTML
+  the spec's expected output never writes — the third time a new format
+  has found a bug in the old code. The `<head>` one was found by this
+  document getting it wrong, which is the next entry.
+
+- **This document was itself the eighth instance of the defect it
+  catalogues**, and the entry is left here rather than quietly fixed.
+  Seven documented claims in this repo have turned out wider than the
+  code behind them; `COMPATIBILITY.md`'s "the two documents it misses
+  are both HTML reader divergences … in the 26" is one of them, found
+  above. The first revision of *this* file then claimed, in bold, that
+  three documents read "byte-identically" to `pandoc -f html`, and
+  printed a `diff` as the proof. Run as printed, that command fails —
+  because of the `<head>` metadata divergence, which nobody had noticed
+  precisely because no gate measures it. The `blocks` claim was true and
+  the conclusion held; the word and the repro were wider than the
+  evidence. **A repro that has not been run as printed is a claim, not
+  evidence** — which is the rule the rest of this census is built on,
+  applied to the census.
