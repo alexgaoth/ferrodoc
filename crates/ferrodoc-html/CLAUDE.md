@@ -68,9 +68,12 @@ Reads and writes HTML. Gated by `diff-html` (writer) and `diff-html-read`
   and tagsoup only sees it when the tag closes itself — `<input …>` with no
   `/` stays open for pandoc and swallows the rest of the list, so a fixture
   must use the `<input … />` its own writer emits.
-- Pandoc counts `<output>`, `<canvas>` and `<textarea>` block-level and
-  splits a paragraph around them. This reader does not: all three are
-  phrasing content. Deliberate, and in `COMPATIBILITY.md`.
+- The **writer** half is narrower than the reader's: only a `Str "☒"`/`Str
+  "☐"` heading the item's first `Plain`/`Para` *and followed by a `Space`*
+  becomes an `<input>` (both consumed), and `class="task-list"` needs *every*
+  item to be one — an `<ol>` never takes it but still gets the boxes. No gate
+  reaches this (`- ☒ a` and `- [x] a` are one AST, and the CommonMark spec
+  has no task lists), so literal-byte tests in `lib.rs` are the only check.
 - **Sweep the element vocabulary in a context where each element is
   valid.** Testing every tag inside a `<p>` mostly measures how two
   parsers recover from invalid markup: 35 tags "differed" that way, of

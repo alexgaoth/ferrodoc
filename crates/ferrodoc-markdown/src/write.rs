@@ -902,8 +902,13 @@ mod tests {
         // `numberLines` is not filtered: only `sourceCode` is.
         assert_eq!(fenced(&["numberLines", "python"]), "``` numberLines\nx\n```\n");
         assert_eq!(fenced(&["a", "b"]), "``` a\nx\n```\n");
-        // The fence still outgrows the backticks inside it — pandoc writes
-        // a three-backtick fence here and loses the rest of the block.
+        // The fence still outgrows the backticks inside it, which pandoc
+        // does not need to do: it sizes a fence by the longest line that is
+        // *only* backticks (contents `"````"`, `"   ````"` and `"```` "`
+        // each get a five-backtick fence), so a three-backtick fence closes
+        // this block and pandoc reads its own output straight back, losing
+        // nothing. Counting any run instead is strictly wider, never
+        // narrower — the one assertion here that diverges on purpose.
         let attr = ferrodoc_ast::Attr {
             identifier: String::new(),
             classes: vec!["sourceCode".to_owned(), "bash".to_owned()],

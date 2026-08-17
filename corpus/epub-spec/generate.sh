@@ -3,7 +3,7 @@
 #
 # Kept apart from `corpus/epub` because it measures something different.
 # Each file bundles 30 examples, so *one* of the HTML reader's 26 known
-# divergences (`diff-html-read`, 632/658) fails the whole document — and
+# divergences (`diff-html-read`, 633/659) fails the whole document — and
 # with 30 examples per file, most files contain one. The score here is
 # therefore a compounding of a divergence already measured elsewhere, and
 # averaging it into the EPUB gate would report the HTML reader's fidelity

@@ -363,6 +363,21 @@ and definition lists degrade to their content; emphasis directly inside
 emphasis inside a word; two ordered lists in a row sharing a delimiter; an
 unterminated raw HTML block swallowing the blank line after it.
 
+One divergence beside those limits, pre-existing and deliberate to record
+rather than to fix: a `CodeBlock` whose `Attr` is **entirely empty** is
+written as a bare ```` ``` ```` fence here and as an *indented* block by
+pandoc. It is the last class-related shape still spelled differently, and it
+is three lines of `samples/05-html-to-markdown/diff.txt`, which is where a
+reader meets it. Any non-empty `Attr` agrees: `["sourceCode"]` alone, an id
+alone, or key-values alone all fence in both. No round trip can see it,
+because the two spellings read back to the same `CodeBlock`, and pandoc
+indents unconditionally — a blank line or a backtick run in the content does
+not make it fence. Measured on `-t markdown`, `-t gfm` and `-t commonmark`:
+
+    block='{"pandoc-api-version":[1,23,1],"meta":{},"blocks":[{"t":"CodeBlock","c":[["",[],[]],"x"]}]}'
+    printf '%s' "$block" | pandoc   -f json -t gfm
+    printf '%s' "$block" | ferrodoc -f json -t gfm
+
 ### GFM — a chosen subset, and what a pipe table cannot hold
 
 ferrodoc reads and writes the five extensions the **GFM specification**
@@ -489,11 +504,23 @@ only where matching would mean reproducing a parse failure*:
   reads it — `Str "☒"` or `Str "☐"` then `Space`, written where the element
   stands — which is what makes a task list survive a round trip through
   HTML, because `<li><label><input type="checkbox" checked="" />done</label>`
-  is what pandoc's own HTML writer emits for one. Everywhere else pandoc
-  drops the element *and* breaks the block around it, so
-  `<p>loose <input type="checkbox" /> in a paragraph</p>` is two blocks to
-  pandoc and one `Para` here. Matching that would mean reproducing a parse
-  failure. One more consequence of `tagsoup`: pandoc reads the box only
+  is what pandoc's own HTML writer emits for one. What pandoc does with the
+  element *outside* a list item is not one rule but three, measured one
+  context at a time, and only the first is a divergence:
+  - In a `<p>` pandoc drops the element **and breaks the block around it**,
+    so `<p>loose <input type="checkbox" /> in a paragraph</p>` is two blocks
+    to pandoc and one `Para` here. Matching that would mean reproducing a
+    parse failure. Reproduce with
+    `printf '<p>loose <input type="checkbox" /> in a paragraph</p>' | pandoc -f html -t json`
+  - In a `<td>` pandoc drops the element and leaves the block whole, and
+    ferrodoc matches it byte for byte — one `Plain` either way. Reproduce with
+    `printf '<table><tr><td><input type="checkbox" checked="" />plain cell text</td></tr></table>' | pandoc -f html -t json`
+  - In an `<h2>` pandoc loses the `Header` **entirely**, emitting two
+    `Plain`s rather than a broken heading, where ferrodoc keeps `Header 2`.
+    Reproduce with
+    `printf '<h2>head <input type="checkbox" /> box</h2>' | pandoc -f html -t json`
+
+  One more consequence of `tagsoup`: pandoc reads the box only
   when the tag closes itself. Written `<input type="checkbox" checked="">`,
   with no `/`, the tag stays open for pandoc and takes the rest of the list
   with it — `<ol><li><label><input type="checkbox" checked="">a</label></li></ol>`
