@@ -17,13 +17,16 @@ published sources describe a later pandoc than this binary.
 | HTML | yes | yes (fragment, or `-s` for a whole page) |
 | DOCX | yes | yes |
 | ODT | yes | yes |
-| EPUB | yes | — (`TODO.md` item 4) |
+| EPUB | yes | — (`TODO.md` item 4b) |
+| LaTeX | — (never: a `.tex` expands macros) | yes |
+| reStructuredText | — | yes |
+| AsciiDoc | — (pandoc cannot read it either) | yes |
 | pandoc JSON AST | yes | yes |
 | plain text | — | yes |
 
 Reachable from Rust, Python (`pip install ferrodoc`), JavaScript
-(`npm install ferrodoc` — browser, Node and edge, 0.6 MB gzipped) and the
-command line. Every binding converts through the same crates and is held
+(`npm install ferrodoc` — browser, Node and edge, 0.6 MB gzipped), any
+language with an FFI (a C ABI in `bindings/c`), and the command line. Every binding converts through the same crates and is held
 to the numbers below.
 
 Everything else pandoc supports — LaTeX, EPUB, RST, Org, presentations, the
@@ -62,6 +65,8 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-odt-write` | ODT writer survives a round trip through pandoc | **11/11** |
 | `diff-epub` | EPUB reader produces pandoc's AST | **10/12** |
 | `diff-epub` (hand-authored) | ...on books in shapes pandoc's writer never emits | **3/3** |
+| `diff-latex` | LaTeX writer round-trips the document | **1/11** (pandoc: 0/11) |
+| `diff-rst` | RST writer round-trips the document | **2/11** (pandoc: 3/11) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
@@ -456,6 +461,35 @@ Content a browser may never display is content, and is read: a
 than into the element's children) and a `<noscript>`'s (which the reader
 asks for as markup, by parsing with scripting disabled, because pandoc has
 no notion of scripting at all). Both were silently returning nothing.
+
+### The write-only formats — judged by their toolchains, not by pandoc
+
+LaTeX, RST and AsciiDoc are written and never read, deliberately: people
+author them by hand and convert *out of* them far more often than in, and
+a `.tex` file expands user-defined macros, which is a language rather than
+a format.
+
+That changes how they are gated, and the numbers above need reading with
+care:
+
+- **a LaTeX round trip is lossy for everybody.** Pandoc's own scores
+  **0/11** on this corpus — its reader turns a code block with a language
+  into two empty divs, drops link titles, and invents a heading identifier
+  where the document had none. The 1/11 is a measure of the *format*
+  through pandoc's reader, not of the writer. What is checked instead is
+  that **`pdflatex` compiles every corpus document**, in CI, which is what
+  anyone actually does with LaTeX;
+- **RST cannot nest inline markup at all**, and has no link title and no
+  strikeout, so a document using any of them cannot return unchanged.
+  `sphinx-build -W` — warnings as errors — is the real check, because a
+  short title underline or a misaligned grid table is a warning and both
+  mean the document is wrong;
+- **AsciiDoc has no gate at all, and cannot have one.** Pandoc writes
+  AsciiDoc and does not read it, so there is no oracle to compare against.
+  `asciidoctor --failure-level=WARN` accepts every corpus document in CI,
+  and the writer's own tests hold the shapes a toolchain accepts and then
+  silently mis-renders — markers the opposite way round from markdown, a
+  fence that must clear any run inside it, headings starting at `==`.
 
 ## Resource limits worth knowing
 

@@ -42,8 +42,8 @@ an exit test, so "are we there" is checkable rather than a matter of taste.
 
 | | what it means | exit test | state |
 |---|---|---|---|
-| **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ **JavaScript ✅** · JVM/Go/C# ❌ |
-| **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT ✅ **EPUB in ✅** · EPUB out ❌ · PDF/LaTeX out ❌ |
+| **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ JavaScript ✅ **C ABI ✅** (Go, JVM, C#, Ruby) — **met** |
+| **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT, EPUB in ✅ LaTeX/PDF, RST, AsciiDoc out ✅ · **EPUB out ❌** |
 | **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ peak RSS gated ✅ · **one superlinear path** |
 | **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 14 gates ✅ two independent corpora ✅ · standing work, never "done" |
 
@@ -152,9 +152,24 @@ is.
 
 ## Next, in order
 
-Derived by applying the three rules to today's pool. The derivation is shown
-so that disagreeing with the order means disagreeing with a rule, not with a
-mood.
+**Re-ranked after seven items landed.** H1 is met — every ecosystem that
+holds document pipelines can install this — so rule 1 has nothing left to
+promote, and the queue is what rule 2 and rule 3 leave.
+
+1. **EPUB, write** (item 4b below) — the last gap in H2. A team can now
+   get *out* of every format they hold, and into all but one.
+2. **Close the HTML reader's 26 divergences** (`## Smaller things`) —
+   promoted by evidence rather than taste: they are the *only* reason the
+   EPUB reader misses two documents, so they now cost twice.
+3. **PDF without TeX** — unchanged, and still waiting on a demonstrated
+   need rather than an opinion.
+
+Everything else on this page is done, parked with a measurement, or a
+declared non-goal. When one of these lands, run step 2 again.
+
+---
+
+## What landed, and what each item cost
 
 ### ~~1. A published resource bound, and the one superlinear path~~ — landed, one criterion missed
 
@@ -303,86 +318,64 @@ must too, or every document differs at the first heading.
 - `Format::Epub` becomes writable, reaches `--help`, and `writable_format`
   stops special-casing it.
 
-### 5. A LaTeX writer, and deliberately no LaTeX reader
+### ~~5. A LaTeX writer~~ — landed; PDF for anyone with TeX
 
-*H2, and it is nearly free.*
+`ferrodoc report.docx -t latex | pdflatex`, and the binary did not grow by
+a crate. `-s` gives a whole document with a minimal preamble.
 
-Writing LaTeX is bounded work: escape the ten special characters, map each
-AST node to a macro, and stop. *Reading* LaTeX means expanding arbitrary
-user-defined macros — interpreting a language rather than parsing a format,
-and where a converter goes to die.
+| criterion | committed | measured |
+|---|---|---|
+| the output compiles | required | ✅ `pdflatex -halt-on-error` on every corpus document, in CI |
+| every special character has a fixture | required | ✅ and mutation-tested |
+| in the README only after CI | required | ✅ |
+| `diff-latex` ≥ 95% spec / 100% corpus | **not met — 1/11** | see below |
 
-A LaTeX writer **is** PDF output for everyone with a TeX installation:
-`ferrodoc report.docx -t latex | pdflatex`. The binary does not grow by a
-single crate, which is exactly what the PDF item below cannot manage.
+**The fidelity criterion was impossible and the number is not the point.**
+Pandoc's *own* LaTeX round trip scores **0/11** on the same corpus: its
+reader turns a code block with a language into two empty divs, drops a
+link title, and derives a heading identifier where the document had none.
+So the gate was changed to the one `diff-md` already uses — fidelity, with
+pandoc's score printed beside it — and the real judge is `pdflatex`, which
+is what anyone actually does with LaTeX.
 
-- Gate: `diff-latex`, round trip — write LaTeX, have **pandoc** read it back,
-  require the AST to survive. The same shape as `diff-write`.
+### ~~6. A C ABI~~ — landed early, against the roadmap's own advice
 
-**Done when**
+*Rule 2 said wait: Go, JVM and C# pipelines can shell out today, so this
+was inconvenient rather than impossible, and nobody had asked. It was
+built anyway on instruction. Recording that here rather than pretending
+the ranking chose it.*
 
-- `diff-latex` scores **≥ 95%** over the spec examples and **100%** over
-  `corpus`, committed before measuring. LaTeX can express more of this AST
-  than ODT can, so the bar is higher than ODT's.
-- **The output compiles.** `pdflatex -halt-on-error` succeeds on every
-  corpus document, in CI where TeX is installed. A writer whose output
-  pandoc reads back but TeX refuses has missed the entire point of the item.
-- Every one of the ten special characters is covered by a fixture that
-  fails without its escape — mutation-tested, not asserted.
-- `ferrodoc report.docx -t latex | pdflatex` is in the README **only after**
-  it is in CI.
+| criterion | committed | measured |
+|---|---|---|
+| a header and a worked example in a non-Rust language, compiled and run in CI | required | ✅ `example/convert.c`, `-Wall -Wextra -Werror` |
+| no leaks, no double frees | required | ✅ valgrind `--error-exitcode=1` in CI |
+| no unwinding across the boundary | required | ✅ caught and returned as a failed conversion |
+| `unsafe_code = "allow"` in the ABI crate only | required | ✅ the workspace still forbids it |
 
-### 6. A C ABI, when a second ecosystem asks
+Plus one the crate imposes on itself: **every `unsafe` block is one
+dereference wide**, checked by a test that fails the build otherwise. It
+caught a four-line block in the test helper before it caught anything
+else.
 
-*Rule 1 says a binding outranks a format, but rule 2 says wait: Go, JVM and
-C# pipelines can shell out today, so this is inconvenient, not impossible.*
+### ~~7. Writers for reStructuredText and AsciiDoc~~ — landed; judged by their toolchains
 
-One `extern "C"` surface unlocks Go, Java, C#, Ruby and Julia at once, which
-is the highest multiplier left. It is ranked below EPUB anyway because
-nobody has yet said they cannot proceed without it. **Promote it the moment
-somebody does** — that is step 1 of the procedure, not a change of plan.
+| criterion | committed | measured |
+|---|---|---|
+| `sphinx-build` accepts the RST | required | ✅ with `-W`, warnings as errors, in CI |
+| `asciidoctor` accepts the `AsciiDoc` | required | ✅ `--failure-level=WARN`, in CI |
+| both in `--help` and `Format::NAMES` | required | ✅ |
+| `diff-rst` ≥ 90% spec / 100% corpus | **not met — 2/11** | pandoc manages 3/11 |
+| `diff-asciidoc` ≥ 90% | **impossible** | see below |
 
-**Done when**
+**Pandoc writes AsciiDoc and cannot read it** — "Pandoc can convert to
+asciidoc, but not from asciidoc" — so there is no oracle and no
+differential gate can exist. That writer is judged by `asciidoctor` and by
+tests holding the shapes a toolchain accepts and silently mis-renders.
 
-- A C header and a `cdylib`, with **one worked example in a language that is
-  not Rust** compiled and run in CI. A header nobody has called through is
-  not an ABI, it is a guess.
-- **No memory is leaked and none is freed twice**: the example runs under
-  `valgrind --error-exitcode=1` (or ASan) in CI. This is the whole risk of
-  the item; without that check the criterion is decorative.
-- Every entry point is `#[unsafe(no_mangle)] extern "C"` and **cannot
-  unwind** across the boundary — a panic caught at the edge and returned as
-  an error code, proved by a test that converts garbage and checks the
-  process survives.
-- The crate declares `unsafe_code = "allow"` **only in the ABI crate**, and
-  the workspace `forbid` stays untouched everywhere else.
-
-### 7. Writers for reStructuredText and AsciiDoc, when a pipeline asks
-
-Both are bounded writer work and both unlock a documentation toolchain
-(Sphinx, Antora) that currently shells out to pandoc. Neither is worth a
-reader: people write these by hand in editors that already understand them,
-and convert *out of* them far more often than in.
-
-**Done when**
-
-- `diff-rst` and `diff-asciidoc` round-trip through pandoc at **≥ 90%** over
-  the spec examples and **100%** over `corpus`, committed before measuring.
-- **The toolchain accepts it**: `sphinx-build` on the RST output and
-  `asciidoctor` on the AsciiDoc output both exit 0 with no warnings, in CI.
-  That is the reason either format is on this list, so it is the test.
-- Both appear in `--help` and in `Format::NAMES`; a writer users cannot
-  reach is not shipped.
-
-### 8. Learn from real documents and users — standing
-
-Do not widen the surface on speculation. A corpus failure from a real
-document, a measured resource problem, or a workflow somebody cannot
-complete outranks every format on this page. Pin each finding as a
-regression fixture before fixing it.
-
-The named small gaps live in `## Smaller things worth doing when they block
-someone` below, and are promoted from there by step 1, not by tidiness.
+RST's ceiling is the format: it cannot nest inline markup, and has no link
+title and no strikeout. `sphinx-build -W` is the check that means
+something, because a short title underline or a misaligned grid table is a
+*warning* — and both mean the document is wrong rather than untidy.
 
 ### Later, and only for a demonstrated need: PDF without a TeX installation
 

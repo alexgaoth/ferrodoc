@@ -11,8 +11,10 @@ moves**; a threshold changed here and nowhere else is a gate that has quietly
 stopped gating.
 
 ```sh
-./scripts/verify.sh          # tests, clippy, wasm32, and all 14 gates
+./scripts/verify.sh          # tests, clippy, wasm32, resource bounds, all gates
 ./scripts/verify.sh --fuzz   # and 500k mutations on top
+./scripts/verify.sh --wasm   # the npm package, including a headless browser
+./scripts/verify.sh --c      # the C ABI, and its example under valgrind
 ```
 
 **`scripts/verify.sh` is where every threshold lives, and the only place.**
@@ -37,6 +39,16 @@ The gates, and what each one proves:
 | `diff-gfm` / `diff-gfm-md` | the same, for GFM |
 | `diff-docx` / `diff-odt` | the office readers produce pandoc's AST, over *two* corpora each: pandoc's own output, and a word processor's |
 | `diff-write` / `diff-odt-write` | the office writers survive a round trip — ours through pandoc against pandoc's through pandoc, which is what isolates the writer from the format |
+| `diff-epub` | the EPUB reader produces pandoc's AST, over three corpora that measure three different things |
+| `diff-latex` / `diff-rst` | the text writers round-trip the document, with pandoc's score on the same corpus printed beside it |
+| `bench-rss` | no conversion path exceeds its published multiple of the input |
+
+Some checks are not differential because there is no oracle, and those
+are the ones a *toolchain* judges: `pdflatex` compiles the LaTeX,
+`sphinx-build -W` reads the RST, `asciidoctor` reads the AsciiDoc,
+`epubcheck` validates the EPUB fixtures, a headless browser runs the npm
+package, and valgrind runs the C example. Pandoc cannot read AsciiDoc at
+all, so for that writer the toolchain is the *only* judge.
 
 ## Reading a failure
 

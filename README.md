@@ -1,8 +1,9 @@
 # ferrodoc
 
 Convert documents — markdown (CommonMark and GFM), HTML, DOCX, ODT and
-EPUB — semantically and in your own process, with output checked against
-pandoc document by document.
+EPUB in; those plus LaTeX, reStructuredText and AsciiDoc out —
+semantically and in your own process, with output checked against pandoc
+document by document.
 
 ```sh
 pip install ferrodoc          # Python
@@ -10,6 +11,9 @@ npm install ferrodoc          # JavaScript — browser, Node, edge
 cargo add ferrodoc            # Rust
 cargo install ferrodoc        # or the CLI
 ```
+
+Any other language with an FFI links the C ABI in
+[`bindings/c`](bindings/c) — one header, one function.
 
 ## Why you would switch
 
@@ -106,6 +110,9 @@ nothing is trusted because it looks right.
 | `ferrodoc-odt` reader | **32/34** corpus documents produce identical ASTs, and **8/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-odt` writer | **640/652** spec examples survive an ODT round trip identically, with embedded images |
 | `ferrodoc-epub` reader | **10/12** corpus documents produce identical ASTs, and **3/3** hand-authored books in layouts pandoc never emits (validated by `epubcheck`) |
+| `ferrodoc-latex` writer | every corpus document **compiles with `pdflatex`** in CI |
+| `ferrodoc-rst` writer | every corpus document is accepted by **`sphinx-build -W`** |
+| `ferrodoc-asciidoc` writer | every corpus document is accepted by **`asciidoctor --failure-level=WARN`** |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
 | `ferrodoc-html` reader | **632/658** HTML documents produce identical ASTs |
@@ -245,14 +252,14 @@ cargo build --release --target wasm32-unknown-unknown \
 
 Every gate, every known loss and every deliberate divergence is listed one
 by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
-produces it. CI runs all fourteen against a pinned pandoc, and builds and tests on
+produces it. CI runs all nineteen against a pinned pandoc, and builds and tests on
 Linux, macOS and Windows, plus a wasm32 build and a 500,000-mutation fuzz
 campaign.
 
 ## Where pandoc is still ahead
 
 The table above is not the whole picture, and pretending otherwise would make
-the rest less believable. Pandoc supports ~40 formats to ferrodoc's six, plus
+the rest less believable. Pandoc supports ~40 formats to ferrodoc's nine, plus
 citations, templates, Lua filters, PDF output and fifteen years of edge cases.
 Our DOCX writer still drops raw blocks, which have no OOXML equivalent, and
 embeds eight image formats — PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF —
