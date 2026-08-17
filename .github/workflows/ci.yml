@@ -99,15 +99,24 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy
       - uses: Swatinem/rust-cache@v2
+      # 22, not 20: the browser driver speaks to Chrome over a WebSocket,
+      # and Node only exposes one globally from 22. That is the driver's
+      # requirement, not the package's — the tarball step below runs on 18,
+      # which is the floor `package.json` claims.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: install typescript for the declaration check
         run: cd bindings/wasm && npm install --no-save typescript
       - name: build, test, type-check, and drive a browser
         run: ./scripts/verify.sh --wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
       # A package that builds and cannot be installed is the failure this
-      # step exists for; the Python job caught exactly that once.
+      # step exists for; the Python job caught exactly that once. Run on
+      # the oldest Node `engines` admits, so the claim is tested and not
+      # merely written down.
       - name: install the tarball into an empty project and run it
         run: |
           cd bindings/wasm && npm pack

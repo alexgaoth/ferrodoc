@@ -50,6 +50,13 @@ for (let i = 0; i < 100 && !target; i++) {
 }
 if (!target) await fail("headless Chrome never opened the page");
 
+// Node only exposes `WebSocket` globally from 22 on, and CI ran 20: the
+// driver died on a bare `ReferenceError` that said nothing about which
+// Node was needed. This is a limit of the *driver*, not of the package —
+// `package.json` says node >= 18 and means it.
+if (typeof WebSocket === "undefined") {
+  await fail("this driver needs Node 22+ for a global WebSocket (the package itself needs 18+)");
+}
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
 
