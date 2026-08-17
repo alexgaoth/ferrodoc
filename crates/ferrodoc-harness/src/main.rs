@@ -15,6 +15,7 @@
 //!   ferrodoc-harness fuzz [--iters N] [--seed N] <file-or-dir>...
 //!   ferrodoc-harness bench [--iters N] <file>...
 //!   ferrodoc-harness bench-docx [--iters N] <file>...
+//!   ferrodoc-harness bench-rss [--max-rss-ratio N] <file>...
 
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
@@ -27,6 +28,9 @@ fn main() -> Result<()> {
     let verbose = take_flag(&mut args, "--verbose");
     let fail_under = take_option(&mut args, "--fail-under")?
         .map(|v| v.parse::<f64>().context("--fail-under expects a number"))
+        .transpose()?;
+    let max_rss_ratio = take_option(&mut args, "--max-rss-ratio")?
+        .map(|v| v.parse::<f64>().context("--max-rss-ratio expects a number"))
         .transpose()?;
     let iters = take_option(&mut args, "--iters")?
         .map(|v| v.parse::<u32>().context("--iters expects a number"))
@@ -47,10 +51,12 @@ fn main() -> Result<()> {
         Some("diff-html-read") => diff_html_read(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         Some("bench-sizes") => bench_sizes(&args[1..], iters),
+        Some("bench-rss") => bench_rss(&args[1..], max_rss_ratio),
+        Some("rss-one") => rss_one(&args[1..]),
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-write|diff-odt-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-write|diff-odt-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -732,6 +738,151 @@ fn bench_sizes(paths: &[String], iters: u32) -> Result<()> {
         });
     }
     Ok(())
+}
+
+
+/// The conversion paths `bench-rss` measures, by the name it takes on the
+/// command line. Kept beside `bench_sizes`' list on purpose: a path that is
+/// timed but never weighed is how `docx -> markdown` reached 1.12 GB
+/// unnoticed.
+const RSS_PATHS: &[&str] = &[
+    "markdown-to-ast",
+    "markdown-to-html",
+    "markdown-to-docx",
+    "markdown-to-odt",
+    "docx-to-markdown",
+    "odt-to-markdown",
+    "html-to-ast",
+];
+
+/// Peak resident memory of each conversion path, as a multiple of the input.
+///
+/// Every measurement runs in a **child process**, because peak RSS is a
+/// high-water mark the kernel never lowers: measuring two paths in one
+/// process reports the larger for both. The child converts once and prints
+/// its own `VmHWM`.
+///
+/// The ratio is only meaningful once the document dominates the process, so
+/// inputs below [`RSS_FLOOR`] are measured and printed but not gated — at
+/// 10 KB the interpreter and the binary itself are most of the resident set
+/// and every path would "exceed" any sane bound.
+fn bench_rss(paths: &[String], max_ratio: Option<f64>) -> Result<()> {
+    if paths.is_empty() {
+        bail!("bench-rss expects at least one markdown file");
+    }
+    let exe = std::env::current_exe().context("finding this executable")?;
+    println!("{:>10}  {:<18}  {:>10}  {:>8}  gated", "input", "path", "peak RSS", "ratio");
+    let mut worst: Option<(String, String, f64)> = None;
+    for p in paths {
+        let bytes = std::fs::metadata(p).with_context(|| format!("reading {p}"))?.len();
+        let label = human(usize::try_from(bytes).unwrap_or(usize::MAX));
+        for path in RSS_PATHS {
+            let output = Command::new(&exe)
+                .args(["rss-one", path])
+                .arg(p)
+                .output()
+                .context("running the measuring child")?;
+            if !output.status.success() {
+                bail!(
+                    "{path} on {p}: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            let peak: u64 = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .with_context(|| format!("{path} reported no peak RSS"))?;
+            #[expect(clippy::cast_precision_loss, reason = "reporting, not arithmetic")]
+            let ratio = peak as f64 / bytes.max(1) as f64;
+            let gated = bytes >= RSS_FLOOR;
+            println!(
+                "{label:>10}  {path:<18}  {:>10}  {ratio:>7.1}x  {}",
+                human(usize::try_from(peak).unwrap_or(usize::MAX)),
+                if gated { "yes" } else { "no (too small)" }
+            );
+            if gated && worst.as_ref().is_none_or(|(_, _, w)| ratio > *w) {
+                worst = Some(((*path).to_owned(), p.clone(), ratio));
+            }
+        }
+    }
+    if let (Some(limit), Some((path, file, ratio))) = (max_ratio, worst) {
+        if ratio > limit {
+            bail!(
+                "{path} on {file} peaked at {ratio:.1}x its input, above the {limit:.1}x bound"
+            );
+        }
+        println!("worst gated path: {path} at {ratio:.1}x, within the {limit:.1}x bound");
+    }
+    Ok(())
+}
+
+/// Below this an input does not dominate the process and the ratio measures
+/// the binary rather than the conversion.
+const RSS_FLOOR: u64 = 1 << 20;
+
+/// One conversion, in this process, reporting this process's peak RSS.
+///
+/// The whole point of the child: `VmHWM` never falls, so each measurement
+/// needs a process of its own.
+fn rss_one(args: &[String]) -> Result<()> {
+    let [path, file] = args else {
+        bail!("rss-one expects a path name and a file");
+    };
+    let markdown = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
+    let ast = || ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"));
+    // Each arm ends holding only what that path produces, so the peak is
+    // the path's own cost and not the setup's.
+    match path.as_str() {
+        "markdown-to-ast" => {
+            let _ = ast()?;
+        }
+        "markdown-to-html" => {
+            let _ = ferrodoc_html::write_html(&ast()?);
+        }
+        "markdown-to-docx" => {
+            let _ = ferrodoc_docx::write_docx(&ast()?).map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+        "markdown-to-odt" => {
+            let _ = ferrodoc_odt::write_odt(&ast()?).map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+        "docx-to-markdown" => {
+            let docx = ferrodoc_docx::write_docx(&ast()?).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let back = ferrodoc_docx::read_docx(&docx).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let _ = ferrodoc_markdown::write_markdown(&back);
+        }
+        "odt-to-markdown" => {
+            let odt = ferrodoc_odt::write_odt(&ast()?).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let back = ferrodoc_odt::read_odt(&odt).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let _ = ferrodoc_markdown::write_markdown(&back);
+        }
+        "html-to-ast" => {
+            let html = ferrodoc_html::write_html(&ast()?);
+            let _ = ferrodoc_html::read_html(&html).map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+        other => bail!("unknown path {other}; known: {}", RSS_PATHS.join(", ")),
+    }
+    println!("{}", peak_rss()?);
+    Ok(())
+}
+
+/// This process's high-water resident set, in bytes.
+///
+/// Linux only: `VmHWM` is what makes a peak measurable at all without a
+/// sampling thread that would itself perturb the number. Elsewhere the gate
+/// reports that it cannot measure rather than guessing.
+fn peak_rss() -> Result<u64> {
+    let status = std::fs::read_to_string("/proc/self/status")
+        .context("peak RSS needs /proc/self/status, which this platform has not got")?;
+    let line = status
+        .lines()
+        .find(|l| l.starts_with("VmHWM:"))
+        .context("no VmHWM in /proc/self/status")?;
+    let kb: u64 = line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|v| v.parse().ok())
+        .context("VmHWM was not a number")?;
+    Ok(kb * 1024)
 }
 
 /// Time `body` over `runs` iterations and report the per-run cost.

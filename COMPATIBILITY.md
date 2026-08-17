@@ -398,6 +398,60 @@ than into the element's children) and a `<noscript>`'s (which the reader
 asks for as markup, by parsing with scripting disabled, because pandoc has
 no notion of scripting at all). Both were silently returning nothing.
 
+## Resource limits worth knowing
+
+Memory is a product feature here, not hygiene: the reason to link this
+rather than spawn pandoc is that it fits inside your process, and a browser
+tab or a 128 MB edge worker has a hard ceiling. So the bound is measured,
+published, and gated in CI.
+
+```sh
+./scripts/verify.sh --limits      # fails if any path exceeds the bound
+```
+
+Peak resident memory, as a multiple of the input, on 10 MB of generated
+prose (`bash corpus/bench/generate.sh`):
+
+| path | peak RSS | ratio |
+|---|---|---|
+| markdown → AST | 386 MB | 38.6× |
+| markdown → HTML | 386 MB | 38.6× |
+| markdown → ODT | 386 MB | 38.6× |
+| ODT → markdown | 403 MB | 40.3× |
+| HTML → AST | 405 MB | 40.5× |
+| markdown → DOCX | 680 MB | 68.0× |
+| **DOCX → markdown** | **772 MB** | **77.2×** |
+
+CI holds the worst path at **85×**, which is a regression bound rather than
+an aspiration: nothing may quietly get hungrier.
+
+**What this means in practice.** A 1 MB document needs roughly 80 MB and
+fits anywhere. A 10 MB document needs about 800 MB and does not fit a small
+edge worker; convert it in a process with room, or split it. The ratio is
+stable across sizes, so it multiplies out honestly.
+
+**Why the floor is around 38×.** Holding a pandoc AST costs what it costs:
+every word is a separate `Str` with its own heap allocation, and every
+element of a `Vec<Inline>` is as wide as the widest variant. Boxing the two
+widest payloads took `Inline` from 152 to 56 bytes and cut peak memory by
+1.6–1.9× across every path; the remainder is one allocation per word, which
+no amount of boxing reaches.
+
+Two further limits worth planning around. The DOCX body is read one part at
+a time, so its XML tree never exists in full — streaming it cut peak RSS
+2.7× and was ~12% *faster*, measured interleaved against a baseline build.
+And an image part is read only when the output can embed it, so a `.docx`
+carrying a part that inflates a thousandfold costs 5 MB through
+`-t markdown` and 840 MB through `-o out.docx`, which has to hold it.
+
+**Time is linear per document but not per byte.** Reading eight 1 MB DOCX
+files takes 4.74 s; reading one 8 MB file takes 8.40 s — the same content,
+1.77× the time. That is not an algorithmic defect in the mapping (the
+per-document cost is constant) and it is not byte volume either (cutting
+memory 1.6× left the curve unchanged). It is the *number* of live
+allocations. `docx → AST` therefore grows about 20× for 10× the input, and
+that is the one path where size costs more than proportionally.
+
 ## Where ferrodoc behaves differently on purpose
 
 - **Deterministic output.** The same AST always produces the same `.docx`
@@ -409,21 +463,6 @@ no notion of scripting at all). Both were silently returning nothing.
   without its `data-` prefix and written back with it, so a round trip
   cannot turn `data-onclick` into an event handler that runs. Pandoc's
   writer does the same.
-
-## Resource limits worth knowing
-
-Measured with `ferrodoc-harness bench-sizes` and `/usr/bin/time`; the full
-table is in `TODO.md`. The one to plan around:
-
-**`docx → markdown` peaks at ~1.12 GB of RSS for a 10 MB source document.**
-The body is read one part at a time, so its XML tree never exists in full —
-what is left is the AST, which is the answer, and the part being decompressed.
-Streaming it cut peak RSS 2.7× and was ~12% *faster*, measured interleaved
-against a baseline build; pandoc needs 12× more on the same input.
-
-An image part is read only when the output can embed it, so a `.docx`
-carrying a part that inflates a thousandfold costs 5 MB through
-`-t markdown` and 840 MB through `-o out.docx`, which has to hold it.
 
 ## How to check any of this yourself
 

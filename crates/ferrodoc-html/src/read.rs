@@ -377,7 +377,7 @@ impl Reader {
         } {
             let mut attr = attributes(node);
             attr.classes.insert(0, class.to_owned());
-            out.push(Inline::Span(attr, self.inlines(kids)?));
+            out.push(Inline::Span(Box::new(attr), self.inlines(kids)?));
             return Ok(());
         }
         match tag {
@@ -395,7 +395,7 @@ impl Reader {
                 }
                 // Inline code is still inline: a run of whitespace in the
                 // source is one space, as everywhere else in HTML.
-                out.push(Inline::Code(attr, collapse_spaces(&text)));
+                out.push(Inline::Code(Box::new(attr), collapse_spaces(&text)));
             }
             "br" => out.push(Inline::LineBreak),
             "a" => {
@@ -412,7 +412,7 @@ impl Reader {
                 let Some(url) = attribute(node, "href") else {
                     // An anchor that goes nowhere is not a link; pandoc
                     // keeps it as a span so its attributes survive.
-                    out.push(Inline::Span(attr, inner));
+                    out.push(Inline::Span(Box::new(attr), inner));
                     return Ok(());
                 };
                 let target = Target {
@@ -420,7 +420,7 @@ impl Reader {
                     title: attribute(node, "title").unwrap_or_default(),
                 };
                 attr.attributes.retain(|(k, _)| k != "href" && k != "title");
-                out.push(Inline::Link(attr, inner, target));
+                out.push(Inline::Link(Box::new(attr), inner, Box::new(target)));
             }
             "img" => {
                 let target = Target {
@@ -432,11 +432,13 @@ impl Reader {
                 let mut attr = attributes(node);
                 attr.attributes
                     .retain(|(k, _)| k != "src" && k != "title" && k != "alt");
-                out.push(Inline::Image(attr, alt, target));
+                out.push(Inline::Image(Box::new(attr), alt, Box::new(target)));
             }
             // `<bdo>` is a span whose whole point is its `dir`
             // attribute: read as its children, the override is gone.
-            "span" | "bdo" => out.push(Inline::Span(attributes(node), self.inlines(kids)?)),
+            "span" | "bdo" => {
+                out.push(Inline::Span(Box::new(attributes(node)), self.inlines(kids)?));
+            }
             // An inline `<svg>` is a picture. Read as its children it
             // becomes nothing at all — a chart written into the page
             // rather than linked from it simply disappears. Pandoc
@@ -945,9 +947,9 @@ fn is_block(name: &str) -> bool {
 /// The picture an `<svg>` element is, carried as its own bytes.
 fn svg_image(node: &Handle) -> Option<Inline> {
     Some(Inline::Image(
-        Attr::default(),
+        Box::default(),
         Vec::new(),
-        Target { url: svg_data_url(node)?, title: String::new() },
+        Box::new(Target { url: svg_data_url(node)?, title: String::new() }),
     ))
 }
 
@@ -1563,7 +1565,7 @@ mod tests {
         let [Inline::Image(attr, alt, target)] = inlines.as_slice() else {
             panic!("expected one image, got {inlines:?}")
         };
-        assert_eq!((attr, alt), (&Attr::default(), &Vec::new()));
+        assert_eq!((attr.as_ref(), alt), (&Attr::default(), &Vec::new()));
         assert_eq!(target.url, format!(
             "data:image/svg+xml;base64,{}",
             base64(br#"<svg width="9" height="9"><circle r="4"></circle></svg>"#)
@@ -1634,10 +1636,10 @@ mod tests {
         assert_eq!(
             blocks(r#"<p><bdo dir="rtl">text</bdo></p>"#),
             vec![Block::Para(vec![Inline::Span(
-                Attr {
+                Box::new(Attr {
                     attributes: vec![("dir".to_owned(), "rtl".to_owned())],
                     ..Attr::default()
-                },
+                }),
                 vec![Inline::Str("text".to_owned())],
             )])]
         );
@@ -1671,7 +1673,7 @@ mod tests {
     fn an_abbreviation_and_small_print_keep_their_tag_as_a_class() {
         let span = |class: &str, text: &str| {
             Block::Para(vec![Inline::Span(
-                Attr { classes: vec![class.to_owned()], ..Attr::default() },
+                Box::new(Attr { classes: vec![class.to_owned()], ..Attr::default() }),
                 vec![Inline::Str(text.to_owned())],
             )])
         };

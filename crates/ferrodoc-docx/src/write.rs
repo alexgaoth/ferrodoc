@@ -1119,9 +1119,9 @@ mod tests {
                 blocks: vec![Block::Plain(vec![Inline::Str("caption".to_owned())])],
             },
             vec![Block::Plain(vec![Inline::Image(
-                Attr::default(),
+                Box::default(),
                 Vec::new(),
-                Target { url: "f.png".to_owned(), title: String::new() },
+                Box::new(Target { url: "f.png".to_owned(), title: String::new() }),
             )])],
         )]);
         let bytes = write_docx_with_media(&doc, &|_| Some(swatch())).expect("writable");
@@ -1139,27 +1139,27 @@ mod tests {
         let doc = Pandoc::new(vec![
             Block::Para(vec![
                 Inline::Link(
-                    Attr::default(),
+                    Box::default(),
                     vec![Inline::Str("body link".to_owned())],
-                    Target { url: "https://example.com".to_owned(), title: String::new() },
+                    Box::new(Target { url: "https://example.com".to_owned(), title: String::new() }),
                 ),
                 Inline::Note(vec![Block::Para(vec![
                     Inline::Image(
-                        Attr::default(),
+                        Box::default(),
                         Vec::new(),
-                        Target { url: "n.png".to_owned(), title: String::new() },
+                        Box::new(Target { url: "n.png".to_owned(), title: String::new() }),
                     ),
                     Inline::Link(
-                        Attr::default(),
+                        Box::default(),
                         vec![Inline::Str("note link".to_owned())],
-                        Target { url: "https://example.org".to_owned(), title: String::new() },
+                        Box::new(Target { url: "https://example.org".to_owned(), title: String::new() }),
                     ),
                 ])]),
             ]),
             Block::Para(vec![Inline::Image(
-                Attr::default(),
+                Box::default(),
                 Vec::new(),
-                Target { url: "b.png".to_owned(), title: String::new() },
+                Box::new(Target { url: "b.png".to_owned(), title: String::new() }),
             )]),
             // A figure, so the styles it needs are exercised too.
             Block::Figure(
@@ -1169,9 +1169,9 @@ mod tests {
                     blocks: vec![Block::Plain(vec![Inline::Str("caption".to_owned())])],
                 },
                 vec![Block::Plain(vec![Inline::Image(
-                    Attr::default(),
+                    Box::default(),
                     Vec::new(),
-                    Target { url: "f.png".to_owned(), title: String::new() },
+                    Box::new(Target { url: "f.png".to_owned(), title: String::new() }),
                 )])],
             ),
         ]);
@@ -1228,9 +1228,9 @@ mod tests {
     fn every_media_part_the_package_holds_has_a_content_type() {
         for (extension, bytes) in crate::media::samples() {
             let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-                Attr::default(),
+                Box::default(),
                 vec![Inline::Str("alt".to_owned())],
-                Target { url: format!("pic.{extension}"), title: String::new() },
+                Box::new(Target { url: format!("pic.{extension}"), title: String::new() }),
             )])]);
             let package = write_docx_with_media(&doc, &|_| Some(bytes.clone())).expect("writable");
 
@@ -1264,9 +1264,9 @@ mod tests {
     fn an_svg_is_referenced_the_way_pandoc_reads_it() {
         let document = |extension: &str, bytes: Vec<u8>| {
             let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-                Attr::default(),
+                Box::default(),
                 Vec::new(),
-                Target { url: format!("pic.{extension}"), title: String::new() },
+                Box::new(Target { url: format!("pic.{extension}"), title: String::new() }),
             )])]);
             entry(
                 &write_docx_with_media(&doc, &|_| Some(bytes.clone())).expect("writable"),
@@ -1355,9 +1355,9 @@ mod tests {
     /// parts the package ended up holding.
     fn picture(attributes: Vec<(String, String)>, bytes: &[u8]) -> (bool, usize) {
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-            Attr { attributes, ..Attr::default() },
+            Box::new(Attr { attributes, ..Attr::default() }),
             vec![Inline::Str("alt".to_owned())],
-            Target { url: "pic.png".to_owned(), title: String::new() },
+            Box::new(Target { url: "pic.png".to_owned(), title: String::new() }),
         )])]);
         let package = write_docx_with_media(&doc, &|_| Some(bytes.to_vec())).expect("writable");
         let document = entry(&package, "word/document.xml");
@@ -1436,9 +1436,9 @@ mod tests {
 
     fn image(attributes: Vec<(String, String)>) -> Block {
         Block::Para(vec![Inline::Image(
-            Attr { attributes, ..Attr::default() },
+            Box::new(Attr { attributes, ..Attr::default() }),
             vec![Inline::Str("alt".to_owned())],
-            Target { url: "swatch.png".to_owned(), title: String::new() },
+            Box::new(Target { url: "swatch.png".to_owned(), title: String::new() }),
         )])
     }
 

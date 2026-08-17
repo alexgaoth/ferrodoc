@@ -44,7 +44,7 @@ an exit test, so "are we there" is checkable rather than a matter of taste.
 |---|---|---|---|
 | **H1 Reachable** | callable from the language the pipeline is already in | the ecosystems that hold document pipelines can `install` it | Rust ✅ Python ✅ CLI ✅ · **JavaScript ❌ · JVM/Go/C# ❌** |
 | **H2 Sufficient** | the square covers what an editorial team actually holds | a team gets from what they hold to what they publish without reaching for pandoc once | markdown, GFM, HTML, DOCX, ODT ✅ · **EPUB ❌ · PDF/LaTeX out ❌** |
-| **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ · **no checked memory bound, one superlinear path** |
+| **H3 Trustworthy** | stated resource bounds that hold on *any* input | every path publishes a bound CI checks | never-panics ✅ deterministic ✅ bounded recursion ✅ peak RSS gated ✅ · **one superlinear path** |
 | **H4 Believed** | the numbers are reproducible by someone who does not trust us | every README claim has a command in the repo and a CI job | 14 gates ✅ two independent corpora ✅ · standing work, never "done" |
 
 H1 and H2 are the reach of the thing. H3 is why anyone would embed it rather
@@ -156,53 +156,64 @@ Derived by applying the three rules to today's pool. The derivation is shown
 so that disagreeing with the order means disagreeing with a rule, not with a
 mood.
 
-### 1. A published resource bound, and the one superlinear path
+### ~~1. A published resource bound, and the one superlinear path~~ — landed, one criterion missed
 
-*Rule 3: the guarantee is unchecked. And item 2 depends on it.*
+*Rule 3: the guarantee was unchecked.*
 
-`docx → AST` takes **16.9× the time for 10× the input**, and `docx →
-markdown` peaks at **1.12 GB of RSS for a 10 MB document**. Every other path
-is linear. Nothing in CI would notice if a second path stopped being.
+**Shipped.** `bench-rss` measures peak RSS per path in a child process
+(`VmHWM` is a high-water mark the kernel never lowers, so one process per
+measurement), `scripts/verify.sh --limits` gates it, CI runs it, and
+`COMPATIBILITY.md` publishes the table.
 
-This is ranked first for a reason worth writing down: **the environments a
-wasm build unlocks are the memory-constrained ones.** A browser tab or a
-128 MB edge worker cannot absorb 1.12 GB, so shipping item 2 on top of an
-unbounded path would put the package's worst behaviour in front of exactly
-the audience it was built for.
+Boxing `Attr` and `Target` inside `Inline` took the type from **152 to 56
+bytes** and cut peak memory **1.6–1.9× on every path** — every `Str` and
+`Space` in a document pays the width of the widest variant, and `Link` was
+setting it. The JSON is unchanged, which `diff-ast` proves at 100%.
 
-- Gate: `bench-sizes` measures **latency only** — every peak-RSS figure
-  quoted in this repository was taken by hand, outside it, and nothing
-  re-measures them. So the work is: teach `bench-sizes` peak RSS, add the
-  ODT paths it does not cover, make it *fail* when a path exceeds a stated
-  multiple of its input, and put the multiples in `COMPATIBILITY.md` under
-  "Resource limits worth knowing".
-- **Ablate before optimizing.** Deleting the DOCX tree won 5× where interning
-  its names would have won 8%. And the last time a path was called
-  superlinear it was the benchmark timing a *rejection* — measure the
-  measurement first.
+| path | before | after |
+|---|---|---|
+| markdown → AST | 71.9× | **38.6×** |
+| DOCX → markdown | 122.8× | **77.2×** |
+
+**The pre-committed 20× was not met, and that is recorded rather than
+adjusted.** The floor for holding a pandoc AST is about 38×: one heap
+allocation per word, and no amount of boxing reaches it. The gate is set at
+**85×** and is explicitly a *regression* bound, not the aspiration.
+
+**The time criterion was also missed** — `docx → AST` grows ~20× for 10×
+the input, against the 12× committed. But it was diagnosed, which is worth
+more than the number: reading eight 1 MB files takes 4.74 s and one 8 MB
+file 8.40 s, so the per-document cost is constant and the mapping holds no
+quadratic. Cutting memory 1.6× left the curve unchanged, so it is not byte
+volume either. **It is the number of live allocations** — which promotes
+the item below.
+
+### 2. One allocation per word is the floor under both limits
+
+*Rule 3, promoted by what item 1 measured.*
+
+A 10 MB document becomes ~1.7M `Inline::Str` values, each with its own heap
+allocation. That single fact sets the 38× memory floor *and* the
+superlinear time, and it is now the largest measured lever left.
+
+The shape of a fix is a `Str` that borrows or interns rather than owning —
+`Box<str>` saves 8 bytes a word and nothing else; the real win is not
+allocating per word at all. It is a deep change to a published type, so it
+wants measuring before it is attempted.
 
 **Done when**
 
-- `ferrodoc-harness bench-sizes` reports **peak RSS as well as latency**, for
-  every path including the two ODT ones, and `--max-rss-ratio N` makes it
-  exit non-zero when any path's peak RSS exceeds N× its input size.
-- `scripts/verify.sh` runs it at a threshold that **holds for a 10 MB
-  input**, and CI runs it. Committed before measuring: **`--max-rss-ratio
-  20`** — a 10 MB document must convert inside 200 MB, because that is what
-  fits the 128–512 MB edge-worker range item 2 targets, with headroom.
-- `docx → AST` is **linear enough to state**: time for 10× the input is
-  **under 12×** (it is 16.9× today). If ablation shows the cost is
-  irreducible, that is a real finding — record the measurement and the
-  reason in `COMPATIBILITY.md`, and lower the claim rather than the gate.
-- `COMPATIBILITY.md` gains a **"Resource limits worth knowing"** table with
-  a bound per path and the command that reproduces it.
-- Every ratio is taken **interleaved against a baseline**, per
-  `docs/benchmarking.md` — this machine drifts ~2× within a session.
+- `bench-rss` reports the worst path at **≤ 45×** on 10 MB, and
+  `scripts/verify.sh` holds it there.
+- `docx → AST` grows **≤ 12×** for 10× the input, measured interleaved.
+- `diff-ast` still scores **100%**: the JSON representation is the contract
+  and may not move, whatever the in-memory one does.
+- The allocation count per megabyte is reported by the harness, so the next
+  person does not have to rediscover the cause.
 
-**Iterate: yes.** No differential gate sees memory, and this adds a gate —
-two of the conditions the loop exists for.
+**Iterate: yes.** It touches memory, and no differential gate sees it.
 
-### 2. A JavaScript package (wasm) — `/iterate`
+### 3. A JavaScript package (wasm) — `/iterate`
 
 *Rules 1 and 2, both pointing the same way: it is a binding, and it is the
 only item that makes something currently impossible possible.*
@@ -244,7 +255,7 @@ and npm has the same failure mode.
 **Iterate: yes** — a published surface, and a new install path that can pass
 its build and fail its use.
 
-### 3. EPUB, read then write — `/iterate`
+### 4. EPUB, read then write — `/iterate`
 
 *Rule 2 within H2: a publishing pipeline with EPUBs cannot convert them in
 process at all today.*
@@ -287,7 +298,7 @@ manifest, a spine and a nav document. Images come from the media bag
 **Iterate: yes** — a package another program must open, and silent loss is
 one wrong spine entry away.
 
-### 4. A LaTeX writer, and deliberately no LaTeX reader
+### 5. A LaTeX writer, and deliberately no LaTeX reader
 
 *H2, and it is nearly free.*
 
@@ -316,7 +327,7 @@ single crate, which is exactly what the PDF item below cannot manage.
 - `ferrodoc report.docx -t latex | pdflatex` is in the README **only after**
   it is in CI.
 
-### 5. A C ABI, when a second ecosystem asks
+### 6. A C ABI, when a second ecosystem asks
 
 *Rule 1 says a binding outranks a format, but rule 2 says wait: Go, JVM and
 C# pipelines can shell out today, so this is inconvenient, not impossible.*
@@ -341,7 +352,7 @@ somebody does** — that is step 1 of the procedure, not a change of plan.
 - The crate declares `unsafe_code = "allow"` **only in the ABI crate**, and
   the workspace `forbid` stays untouched everywhere else.
 
-### 6. Writers for reStructuredText and AsciiDoc, when a pipeline asks
+### 7. Writers for reStructuredText and AsciiDoc, when a pipeline asks
 
 Both are bounded writer work and both unlock a documentation toolchain
 (Sphinx, Antora) that currently shells out to pandoc. Neither is worth a
@@ -358,7 +369,7 @@ and convert *out of* them far more often than in.
 - Both appear in `--help` and in `Format::NAMES`; a writer users cannot
   reach is not shipped.
 
-### 7. Learn from real documents and users — standing
+### 8. Learn from real documents and users — standing
 
 Do not widen the surface on speculation. A corpus failure from a real
 document, a measured resource problem, or a workflow somebody cannot
@@ -370,7 +381,7 @@ someone` below, and are promoted from there by step 1, not by tidiness.
 
 ### Later, and only for a demonstrated need: PDF without a TeX installation
 
-Item 4 gives PDF to anyone who has TeX, at no cost. What remains is PDF for
+Item 5 gives PDF to anyone who has TeX, at no cost. What remains is PDF for
 someone with nothing installed, and that is where the arithmetic bites:
 `typst` + `typst-pdf` takes the dependency tree from **63 crates to 283**,
 before the fonts and ICU data Typst needs, and the binary whose 33×

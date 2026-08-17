@@ -22,8 +22,10 @@ pub enum Modifier {
     Underline,
     Superscript,
     Subscript,
-    Link(Attr, Target),
-    Span(Attr),
+    // Boxed to match `Inline`, so unstacking and restacking a
+    // modifier moves the box rather than cloning what it holds.
+    Link(Box<Attr>, Box<Target>),
+    Span(Box<Attr>),
 }
 
 impl Modifier {

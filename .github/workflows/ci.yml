@@ -63,6 +63,19 @@ jobs:
       - name: every gate, at the thresholds scripts/verify.sh holds
         run: ./scripts/verify.sh --gates
 
+  # Memory is a product feature here, not hygiene: the browser and edge
+  # targets have hard limits, and nothing else in CI would notice a path
+  # getting hungrier.
+  limits:
+    name: resource limits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: peak RSS per conversion path
+        run: ./scripts/verify.sh --limits
+
   # Readers promise to refuse hostile input rather than panic. `cargo test`
   # runs a short fixed-seed loop; this runs a long one with a fresh seed, so
   # the search keeps moving instead of re-checking the same inputs forever.

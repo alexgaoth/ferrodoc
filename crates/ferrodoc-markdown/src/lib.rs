@@ -641,7 +641,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
         NodeValue::Text(t) => text_tokens(t, out),
         NodeValue::SoftBreak => out.push(Inline::SoftBreak),
         NodeValue::LineBreak => out.push(Inline::LineBreak),
-        NodeValue::Code(c) => out.push(Inline::Code(Attr::default(), c.literal.clone())),
+        NodeValue::Code(c) => out.push(Inline::Code(Box::default(), c.literal.clone())),
         NodeValue::HtmlInline(h) => {
             out.push(Inline::RawInline(Format("html".to_owned()), h.clone()));
         }
@@ -649,14 +649,14 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
         NodeValue::Strong => out.push(Inline::Strong(inlines(node.children()))),
         NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children()))),
         NodeValue::Link(l) => out.push(Inline::Link(
-            Attr::default(),
+            Box::default(),
             inlines(node.children()),
-            Target { url: l.url.clone(), title: l.title.clone() },
+            Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
         )),
         NodeValue::Image(l) => out.push(Inline::Image(
-            Attr::default(),
+            Box::default(),
             inlines(node.children()),
-            Target { url: l.url.clone(), title: l.title.clone() },
+            Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
         )),
         _ => {}
     }

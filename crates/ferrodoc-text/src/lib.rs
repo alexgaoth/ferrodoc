@@ -137,9 +137,9 @@ mod tests {
                 Inline::Emph(vec![Inline::Str("em".into())]),
                 Inline::Space,
                 Inline::Link(
-                    Attr::default(),
+                    Box::default(),
                     vec![Inline::Str("link".into())],
-                    Target { url: "u".into(), title: String::new() },
+                    Box::new(Target { url: "u".into(), title: String::new() }),
                 ),
             ]),
             Block::BulletList(vec![

@@ -11,6 +11,7 @@
 #   scripts/verify.sh --gates      only the differential gates
 #   scripts/verify.sh --quick      only tests, clippy and wasm — no pandoc
 #   scripts/verify.sh --fuzz-only  only the fuzz run — no pandoc
+#   scripts/verify.sh --limits     only the resource bound — no pandoc
 #
 # Only the gates need pandoc, and they need exactly 3.8.2.1: a different
 # one produces spurious diffs, so this refuses to score against it rather
@@ -21,14 +22,20 @@ cd "$(dirname "$0")/.."
 PANDOC_PINNED=3.8.2.1
 HARNESS=./target/release/ferrodoc-harness
 
-want_gates=1 want_checks=1 want_fuzz=0
+# Peak resident memory, as a multiple of the input, on a 10 MB document.
+# Set from the measured worst path (docx -> markdown, 77.2x) with room to
+# move. It is a *regression* bound: nothing here may quietly get hungrier.
+MAX_RSS_RATIO=85
+
+want_gates=1 want_checks=1 want_fuzz=0 want_limits=1
 case "${1-}" in
-    --fuzz)      want_fuzz=1 ;;
-    --gates)     want_checks=0 ;;
-    --quick)     want_gates=0 ;;
-    --fuzz-only) want_checks=0 want_gates=0 want_fuzz=1 ;;
-    "")          ;;
-    *)           echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only]" >&2; exit 2 ;;
+    --fuzz)       want_fuzz=1 ;;
+    --gates)      want_checks=0 want_limits=0 ;;
+    --quick)      want_gates=0 want_limits=0 ;;
+    --fuzz-only)  want_checks=0 want_gates=0 want_limits=0 want_fuzz=1 ;;
+    --limits)     want_checks=0 want_gates=0 ;;
+    "")           ;;
+    *) echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only|--limits]" >&2; exit 2 ;;
 esac
 
 failures=0
@@ -79,8 +86,20 @@ if [ "$want_gates" = 1 ]; then
         exit 2
     fi
 fi
-if [ "$want_gates" = 1 ] || [ "$want_fuzz" = 1 ]; then
+if [ "$want_gates" = 1 ] || [ "$want_fuzz" = 1 ] || [ "$want_limits" = 1 ]; then
     cargo build --quiet --release -p ferrodoc-harness
+fi
+
+if [ "$want_limits" = 1 ]; then
+    echo "== resource limits"
+    # The fixture is 10 MB of generated prose; below about 1 MB the binary
+    # itself is most of the resident set and the ratio measures nothing.
+    fixture="$HOME/.cache/ferrodoc-bench/large.md"
+    if [ ! -f "$fixture" ]; then
+        bash corpus/bench/generate.sh >/dev/null
+    fi
+    gate "peak RSS <= ${MAX_RSS_RATIO}x input" \
+        $HARNESS bench-rss "$fixture" --max-rss-ratio "$MAX_RSS_RATIO"
 fi
 
 if [ "$want_gates" = 1 ]; then

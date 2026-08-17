@@ -7,6 +7,18 @@ use serde::{Deserialize, Serialize};
 ///
 /// Mirrors pandoc-types `Inline`; serializes as `{"t": <constructor>}` or
 /// `{"t": <constructor>, "c": <contents>}`.
+///
+/// **[`Attr`] and [`Target`] are boxed wherever they appear**, and that is
+/// not a style choice. An enum is as wide as its widest variant, and every
+/// `Str` and `Space` in a document pays that width: unboxed, `Link` made
+/// this type 152 bytes, so a 10 MB document spent 517 MB on the slots
+/// alone and peaked at 718 MB — 72× its own size. Boxing the two big
+/// payloads takes the type to 56 bytes. `Block::Table` is boxed for the
+/// same reason.
+///
+/// The boxes are invisible in JSON: `serde` writes through them, so the
+/// wire format is still exactly pandoc's, which `diff-ast` proves on every
+/// run.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]
 pub enum Inline {
@@ -31,7 +43,10 @@ pub enum Inline {
     /// A citation: the citations plus their textual rendering.
     Cite(Vec<Citation>, Vec<Inline>),
     /// Inline code with attributes.
-    Code(Attr, String),
+    ///
+    /// The attributes are boxed, as they are on every variant that carries
+    /// them. See the note on [`Inline`] itself.
+    Code(Box<Attr>, String),
     /// An inter-word space.
     Space,
     /// A soft line break (reflowable).
@@ -43,13 +58,13 @@ pub enum Inline {
     /// Raw content in the given format, passed through verbatim.
     RawInline(Format, String),
     /// A hyperlink: attributes, link text, target.
-    Link(Attr, Vec<Inline>, Target),
+    Link(Box<Attr>, Vec<Inline>, Box<Target>),
     /// An image: attributes, alt text, source.
-    Image(Attr, Vec<Inline>, Target),
+    Image(Box<Attr>, Vec<Inline>, Box<Target>),
     /// A footnote or endnote.
     Note(Vec<Block>),
     /// A generic inline container with attributes.
-    Span(Attr, Vec<Inline>),
+    Span(Box<Attr>, Vec<Inline>),
 }
 
 /// The style of quotation marks around [`Inline::Quoted`] text.

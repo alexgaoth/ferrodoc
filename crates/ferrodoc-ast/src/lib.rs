@@ -97,7 +97,7 @@ mod tests {
             attributes: vec![("k".into(), "v".into())],
         };
         assert_eq!(
-            serde_json::to_value(Inline::Code(attr, "x".into())).unwrap(),
+            serde_json::to_value(Inline::Code(Box::new(attr), "x".into())).unwrap(),
             json!({"t": "Code", "c": [["id", ["a"], [["k", "v"]]], "x"]})
         );
     }

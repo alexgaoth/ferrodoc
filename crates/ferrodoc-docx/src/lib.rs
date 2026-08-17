@@ -1556,11 +1556,11 @@ impl Ctx {
                         let id = state.ident_from(name);
                         state.anchors.insert(name.to_owned(), id.clone());
                         out.push(vec![Inline::Span(
-                            Attr {
+                            Box::new(Attr {
                                 identifier: id,
                                 classes: vec!["anchor".to_owned()],
                                 attributes: Vec::new(),
-                            },
+                            }),
                             Vec::new(),
                         )]);
                     }
@@ -1591,9 +1591,9 @@ impl Ctx {
                     let mut inner = Vec::new();
                     self.inline_sequences(node, &mut inner, state);
                     out.push(vec![Inline::Link(
-                        Attr::default(),
+                        Box::default(),
                         smush_inlines(inner),
-                        Target { url, title: String::new() },
+                        Box::new(Target { url, title: String::new() }),
                     )]);
                 }
                 // Minimal OMML support: concatenated math-run text.
@@ -1628,7 +1628,7 @@ impl Ctx {
             if text.is_empty() {
                 return Vec::new();
             }
-            tokens.push(Inline::Code(Attr::default(), text));
+            tokens.push(Inline::Code(Box::default(), text));
         }
         for node in r.elems().filter(|_| !is_code) {
             match node.name.as_str() {
@@ -1708,11 +1708,11 @@ impl Ctx {
                 .and_then(|p| p.child("highlight"))
                 .is_some_and(|h| h.attr("w:val") != Some("none"))
         {
-            modifiers.push(Modifier::Span(Attr {
+            modifiers.push(Modifier::Span(Box::new(Attr {
                 identifier: String::new(),
                 classes: vec!["mark".to_owned()],
                 attributes: Vec::new(),
-            }));
+            })));
         }
         stack(&modifiers, tokens)
     }
@@ -1754,9 +1754,9 @@ impl Ctx {
         let mut alt_tokens = Vec::new();
         text_tokens(alt, &mut alt_tokens);
         Some(Inline::Image(
-            Attr { attributes, ..Attr::default() },
+            Box::new(Attr { attributes, ..Attr::default() }),
             alt_tokens,
-            Target { url: target.clone(), title: title.to_owned() },
+            Box::new(Target { url: target.clone(), title: title.to_owned() }),
         ))
     }
 
@@ -2252,9 +2252,9 @@ mod tests {
     fn every_embeddable_format_survives_docx_to_docx() {
         for (extension, bytes) in crate::media::samples() {
             let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-                Attr::default(),
+                Box::default(),
                 vec![Inline::Str("alt".to_owned())],
-                Target { url: format!("pic.{extension}"), title: String::new() },
+                Box::new(Target { url: format!("pic.{extension}"), title: String::new() }),
             )])]);
             let package = write_docx_with_media(&doc, &|_| Some(bytes.clone())).expect("writable");
 
@@ -2286,9 +2286,9 @@ mod tests {
             b'E', b'N', b'D', 0xae, 0x42, 0x60, 0x82,
         ];
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-            Attr::default(),
+            Box::default(),
             vec![Inline::Str("alt".to_owned())],
-            Target { url: "pic.png".to_owned(), title: String::new() },
+            Box::new(Target { url: "pic.png".to_owned(), title: String::new() }),
         )])]);
         let bytes = write_docx_with_media(&doc, &|url| {
             (url == "pic.png").then(|| png.to_vec())
@@ -2343,9 +2343,9 @@ mod tests {
     fn a_note_resolves_its_relationships_against_its_own_part() {
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Note(vec![Block::Para(vec![
             Inline::Image(
-                Attr::default(),
+                Box::default(),
                 Vec::new(),
-                Target { url: "n.png".to_owned(), title: String::new() },
+                Box::new(Target { url: "n.png".to_owned(), title: String::new() }),
             ),
         ])])])]);
         let bytes = write_docx_with_media(&doc, &|_| Some(one_pixel_png())).expect("writable");
@@ -2489,9 +2489,9 @@ mod tests {
     fn one_image_docx() -> Vec<u8> {
         let png = one_pixel_png();
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-            Attr::default(),
+            Box::default(),
             Vec::new(),
-            Target { url: "pic.png".to_owned(), title: String::new() },
+            Box::new(Target { url: "pic.png".to_owned(), title: String::new() }),
         )])]);
         write_docx_with_media(&doc, &|_| Some(png.clone())).expect("writable")
     }
@@ -2545,9 +2545,9 @@ mod tests {
     fn image_urls_are_collected_from_every_container() {
         let image = |name: &str| {
             Inline::Image(
-                Attr::default(),
+                Box::default(),
                 Vec::new(),
-                Target { url: name.to_owned(), title: String::new() },
+                Box::new(Target { url: name.to_owned(), title: String::new() }),
             )
         };
         let doc = Pandoc::new(vec![
@@ -2618,9 +2618,9 @@ mod tests {
             })),
             Block::Para(vec![Inline::Note(vec![Block::Para(vec![image("n.png")])])]),
             Block::Para(vec![Inline::Emph(vec![Inline::Link(
-                Attr::default(),
+                Box::default(),
                 vec![image("e.png")],
-                Target::default(),
+                Box::default(),
             )])]),
         ]);
         let mut urls = Vec::new();
@@ -2708,11 +2708,11 @@ mod tests {
     #[test]
     fn heading_anchor_becomes_the_identifier() {
         let anchor = Inline::Span(
-            Attr {
+            Box::new(Attr {
                 identifier: "custom".to_owned(),
                 classes: vec!["anchor".to_owned()],
                 attributes: Vec::new(),
-            },
+            }),
             Vec::new(),
         );
         let (id, rest) = take_anchor(vec![anchor, Inline::Str("Title".to_owned())]);

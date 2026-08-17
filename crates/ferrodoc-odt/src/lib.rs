@@ -690,7 +690,7 @@ impl Ctx {
                     // a `text:s` asking for two spaces contributes two, and
                     // a whitespace run in the source contributes one.
                     let inner = self.inlines(node, props, state);
-                    out.push(Inline::Code(Attr::default(), plain_text(&inner)));
+                    out.push(Inline::Code(Box::default(), plain_text(&inner)));
                     return;
                 }
                 let props = props.overlay(self.styles.text_props(name));
@@ -700,9 +700,12 @@ impl Ctx {
             "a" => {
                 let inner = self.inlines(node, props, state);
                 out.push(Inline::Link(
-                    Attr::default(),
+                    Box::default(),
                     inner,
-                    Target { url: href(node.attr("xlink:href").unwrap_or_default()), title: String::new() },
+                    Box::new(Target {
+                        url: href(node.attr("xlink:href").unwrap_or_default()),
+                        title: String::new(),
+                    }),
                 ));
             }
             "line-break" => out.push(Inline::LineBreak),
@@ -731,7 +734,7 @@ impl Ctx {
                 if let Some(name) = node.attr("text:name") {
                     let identifier = state.anchor(name);
                     out.push(Inline::Span(
-                        Attr { identifier, ..Attr::default() },
+                        Box::new(Attr { identifier, ..Attr::default() }),
                         Vec::new(),
                     ));
                 }
@@ -741,9 +744,9 @@ impl Ctx {
                 let target = format!("#{}", state.anchor(name));
                 let inner = self.inlines(node, props, state);
                 out.push(Inline::Link(
-                    Attr::default(),
+                    Box::default(),
                     inner,
-                    Target { url: target, title: String::new() },
+                    Box::new(Target { url: target, title: String::new() }),
                 ));
             }
             "frame" => Self::image(node, out),
@@ -780,9 +783,9 @@ impl Ctx {
             .map(|t| slug(&t.text()))
             .unwrap_or_default();
         out.push(Inline::Image(
-            Attr { attributes, ..Attr::default() },
+            Box::new(Attr { attributes, ..Attr::default() }),
             Vec::new(),
-            Target { url: url.to_owned(), title },
+            Box::new(Target { url: url.to_owned(), title }),
         ));
     }
 }
@@ -1315,9 +1318,9 @@ mod tests {
     fn odt_to_odt_keeps_its_pictures_byte_for_byte() {
         let png = one_pixel_png();
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-            Attr::default(),
+            Box::default(),
             vec![Inline::Str("alt".into())],
-            Target { url: "swatch.png".into(), title: String::new() },
+            Box::new(Target { url: "swatch.png".into(), title: String::new() }),
         )])]);
         let written = write_odt_with_media(&doc, &|_| Some(png.clone())).unwrap();
         let (back, media) = read_odt_with_media(&written).unwrap();
@@ -1334,9 +1337,9 @@ mod tests {
     #[test]
     fn an_unembeddable_image_falls_back_to_its_alt_text() {
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Image(
-            Attr::default(),
+            Box::default(),
             vec![Inline::Str("alt".into())],
-            Target { url: "nowhere.png".into(), title: String::new() },
+            Box::new(Target { url: "nowhere.png".into(), title: String::new() }),
         )])]);
         let bytes = write_odt(&doc).unwrap();
         let back = read_odt(&bytes).unwrap();
@@ -1359,7 +1362,7 @@ mod tests {
                 Block::Header(1, Attr::default(), vec![Inline::Str("H".into())]),
                 Block::BlockQuote(vec![Block::CodeBlock(Attr::default(), "x".into())]),
                 Block::BulletList(vec![vec![Block::Plain(vec![Inline::Code(
-                    Attr::default(),
+                    Box::default(),
                     "c".into(),
                 )])]]),
                 Block::DefinitionList(vec![(
