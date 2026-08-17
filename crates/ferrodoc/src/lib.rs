@@ -106,14 +106,6 @@ impl Format {
         !matches!(self, Format::Plain | Format::Latex | Format::Rst | Format::Asciidoc)
     }
 
-    /// Whether documents can be written to this format.
-    ///
-    /// EPUB is read-only for now: people have books they want as markdown
-    /// far more often than the reverse, so the reader shipped first. The
-    /// writer is item 4 in `TODO.md`, with its acceptance criteria.
-    pub fn writable_format(self) -> bool {
-        !matches!(self, Format::Epub)
-    }
 
     /// Whether writing this format embeds image bytes.
     ///
@@ -125,8 +117,12 @@ impl Format {
     }
 
     /// Whether documents can be written to this format.
+    ///
+    /// Every format is, now that EPUB has a writer. Kept because callers
+    /// pair it with [`Format::readable`], which still has an answer other
+    /// than yes.
     pub fn writable(self) -> bool {
-        self.writable_format()
+        true
     }
 
     /// The name used in messages.
@@ -158,8 +154,6 @@ impl fmt::Display for Format {
 pub enum Error {
     /// The input format cannot be read (only written).
     NotReadable(Format),
-    /// The output format cannot be written (only read).
-    NotWritable(Format),
     /// The input was not valid for its format.
     Invalid {
         /// The format the input was supposed to be in.
@@ -174,9 +168,6 @@ impl fmt::Display for Error {
         match self {
             Error::NotReadable(format) => {
                 write!(f, "cannot read {format}: it is an output-only format")
-            }
-            Error::NotWritable(format) => {
-                write!(f, "cannot write {format}: it is an input-only format")
             }
             Error::Invalid { format, detail } => write!(f, "invalid {format} input: {detail}"),
         }
@@ -384,7 +375,13 @@ pub fn render_with_media(
                 detail: e.to_string(),
             })
         }
-        Format::Epub => Err(Error::NotWritable(Format::Epub)),
+        Format::Epub => {
+            let resolve = |url: &str| data_url(url).or_else(|| media(url));
+            ferrodoc_epub::write_epub_with_media(doc, &resolve).map_err(|e| Error::Invalid {
+                format: to,
+                detail: e.to_string(),
+            })
+        }
         Format::Json => {
             let mut json = serde_json::to_vec(doc).map_err(|e| Error::Invalid {
                 format: to,

@@ -46,6 +46,7 @@ fn main() -> Result<()> {
         Some("diff-epub") => diff_epub(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-odt-write") => diff_odt_write(&args[1..], verbose, fail_under),
+        Some("diff-epub-write") => diff_epub_write(&args[1..], verbose, fail_under),
         Some("diff-latex") => diff_latex(&args[1..], verbose, fail_under),
         Some("diff-rst") => diff_rst(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
@@ -1069,6 +1070,13 @@ fn diff_odt_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> R
     }, verbose, fail_under)
 }
 
+fn diff_epub_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_round_trip(paths, "epub", &|ast, base| {
+        ferrodoc_epub::write_epub_with_media(ast, &|url| std::fs::read(base.join(url)).ok())
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }, verbose, fail_under)
+}
+
 /// Score a binary writer by round trip: ours through pandoc's reader
 /// against pandoc's own output through the same reader.
 ///
@@ -1117,6 +1125,15 @@ fn diff_round_trip(
         if matches!(format, "latex" | "rst") {
             command.arg("--wrap=preserve");
         }
+        // The same flag the HTML gate passes, for the same reason:
+        // pandoc's EPUB writer runs its syntax highlighter and emits a
+        // `<div class="sourceCode" id="cbN">` around every code block
+        // with a language. Highlighting is a rendering choice this
+        // project does not make, so scoring against it would measure
+        // skylighting rather than the writer.
+        if format == "epub" {
+            command.arg("--syntax-highlighting=none");
+        }
         let status = command
             .args(["-f", "json", "-t", format, "--resource-path"])
             .arg(&base)
@@ -1146,6 +1163,45 @@ fn diff_round_trip(
         let mut ours = ours;
         normalize_media(&mut ours, &mut Vec::new());
         normalize_media(&mut theirs, &mut Vec::new());
+        if format == "epub" {
+            // Pandoc stamps `dcterms:modified` with the current time, so
+            // its books differ from each other run to run and no writer
+            // can match one. Both sides drop it rather than the gate
+            // reporting a clock. Everything else in the metadata is
+            // compared, including the `dc:title` pandoc omits and this
+            // does not.
+            drop_meta(&mut ours, "date");
+            drop_meta(&mut theirs, "date");
+            // Same again for the book's UUID, which pandoc draws at
+            // random — this writer derives one from the content so a book
+            // is reproducible, and neither can match the other. Only a
+            // *well-formed* `urn:uuid:` is dropped, so a book that lost
+            // its identifier still fails here rather than passing on a
+            // normalization.
+            drop_uuid(&mut ours);
+            drop_uuid(&mut theirs);
+            // And the default language, which pandoc takes from the
+            // machine's locale: `de_DE.UTF-8` writes `de-DE`, `C` writes
+            // `C`. A writer that matched that would produce a different
+            // book on every machine. When the document *does* set `lang`,
+            // both sides are compared — that is a value with an answer.
+            if !ast.meta.contains_key("lang") {
+                drop_meta(&mut ours, "language");
+                drop_meta(&mut theirs, "language");
+            }
+            // A document with no title of its own. EPUB 3 *requires* one
+            // `dc:title`; pandoc writes none, and `epubcheck` rejects its
+            // book for it (`RSC-005`). Copying that to score higher would
+            // be trading a valid book for a number, so the fallback is
+            // dropped from both sides — and only the exact fallback, so a
+            // title invented from anywhere else still fails here.
+            if !ast.meta.contains_key("title")
+                && ours.pointer("/meta/title/c/0/c").and_then(Value::as_str) == Some("Untitled")
+            {
+                drop_meta(&mut ours, "title");
+                drop_meta(&mut theirs, "title");
+            }
+        }
 
         if ours == theirs {
             matched += 1;
@@ -1154,6 +1210,28 @@ fn diff_round_trip(
         }
     }
     report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Remove one metadata field from a pandoc JSON document.
+fn drop_meta(doc: &mut Value, field: &str) {
+    if let Some(meta) = doc.get_mut("meta").and_then(Value::as_object_mut) {
+        meta.remove(field);
+    }
+}
+
+/// Drop `meta.identifier` if, and only if, it is a well-formed
+/// `urn:uuid:`.
+fn drop_uuid(doc: &mut Value) {
+    let is_uuid = doc
+        .pointer("/meta/identifier/c/0/c")
+        .and_then(Value::as_str)
+        .is_some_and(|text| {
+            let Some(rest) = text.strip_prefix("urn:uuid:") else { return false };
+            rest.len() == 36 && rest.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+        });
+    if is_uuid {
+        drop_meta(doc, "identifier");
+    }
 }
 
 /// Read a file with `pandoc -f <format> -t json`.

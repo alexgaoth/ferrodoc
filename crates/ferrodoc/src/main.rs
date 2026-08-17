@@ -42,6 +42,7 @@ EXAMPLES:
     ferrodoc report.docx -t plain
     ferrodoc minutes.odt -t gfm             # LibreOffice in, markdown out
     ferrodoc book.epub -t gfm               # an e-book in, markdown out
+    ferrodoc manual.md -o manual.epub       # markdown in, an e-book out
     ferrodoc report.docx -t latex | pdflatex # DOCX in, PDF out, via TeX
     ferrodoc README.md -o readme.odt        # markdown in, LibreOffice out
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx

@@ -72,6 +72,21 @@ jobs:
             java -jar epubcheck-5.1.0/epubcheck.jar "$book" 2>&1 | tee /tmp/check
             grep -q "0 fatals / 0 errors" /tmp/check || exit 1
           done
+      # And the books this writes. This is the bar that matters for the
+      # writer, and it is one **pandoc's own EPUB output does not clear**
+      # on this corpus: it omits the required `dc:title`, and it emits
+      # references to files that are not in the book. `diff-epub-write`
+      # is scored below 100 because of exactly those disagreements, so
+      # this step is what says which side of them is right.
+      - name: epubcheck accepts every book this writes
+        run: |
+          cargo build --release -p ferrodoc
+          for doc in corpus/*.md; do
+            name=$(basename "$doc" .md)
+            ./target/release/ferrodoc "$doc" -o "$RUNNER_TEMP/$name.epub"
+            java -jar epubcheck-5.1.0/epubcheck.jar "$RUNNER_TEMP/$name.epub" 2>&1 | tee /tmp/check
+            grep -q "0 fatals / 0 errors" /tmp/check || { echo "epubcheck rejected $name"; exit 1; }
+          done
 
   # Memory is a product feature here, not hygiene: the browser and edge
   # targets have hard limits, and nothing else in CI would notice a path

@@ -152,17 +152,23 @@ is.
 
 ## Next, in order
 
-**Re-ranked after seven items landed.** H1 is met — every ecosystem that
-holds document pipelines can install this — so rule 1 has nothing left to
-promote, and the queue is what rule 2 and rule 3 leave.
+**Re-ranked after eight items landed.** H1 is met — every ecosystem that
+holds document pipelines can install this — and H2 is met as of the EPUB
+writer: every format this reads, it can now also write. So rules 1 and 2
+have nothing left to promote, and the queue is what rule 3 leaves.
 
-1. **EPUB, write** (item 4b below) — the last gap in H2. A team can now
-   get *out* of every format they hold, and into all but one.
-2. **Close the HTML reader's 26 divergences** (`## Smaller things`) —
-   promoted by evidence rather than taste: they are the *only* reason the
-   EPUB reader misses two documents, so they now cost twice.
-3. **PDF without TeX** — unchanged, and still waiting on a demonstrated
+1. **Close the HTML reader's 26 divergences** (`## Smaller things`) —
+   promoted by evidence rather than taste, and it now costs three ways
+   rather than one: it is the only reason `diff-epub` misses two
+   documents, the only reason `corpus/epub-spec` sits at 8/22, and the
+   EPUB *writer* renders through the same crate. One fix, three gates.
+2. **PDF without TeX** — unchanged, and still waiting on a demonstrated
    need rather than an opinion.
+3. **The four known writer divergences from pandoc** (`COMPATIBILITY.md`)
+   — each is deliberate and each is *right*, so this is a watching brief,
+   not work: if a later pandoc fixes its own `dc:title` or its dangling
+   references, `diff-epub-write` should rise on its own and the table
+   should shrink. It is listed so that nobody re-derives the reasoning.
 
 Everything else on this page is done, parked with a measurement, or a
 declared non-goal. When one of these lands, run step 2 again.
@@ -294,29 +300,47 @@ generates no heading identifiers at all, and that the per-file anchor is
 named for the raw href rather than the decoded one. It also found two bugs
 in the **HTML** reader that `diff-html-read` could not see.
 
-### 4b. EPUB, write — `/iterate`
+### ~~4b. EPUB, write~~ — landed, and **one committed criterion was wrong**
 
-*H2. Reading shipped first because people have books they want as markdown
-far more often than the reverse; that asymmetry is why this is a separate
-item rather than half a finished one.*
+`ferrodoc manual.md -o manual.epub`. The HTML writer plus a manifest, a
+spine, a nav document and an NCX, chapters split at level-1 headings.
 
-Writing is the HTML writer plus a manifest, a spine and a nav document,
-and chapters split at level-1 headings. The shape is known: pandoc's own
-writer wraps each chapter's content in `<section>` divs, and this writer
-must too, or every document differs at the first heading.
+| criterion | committed | measured |
+|---|---|---|
+| `diff-epub-write` at **100%** on `corpus` | required | ❌ **8/11 (72.7%)** — see below; 100% is only reachable by writing invalid books |
+| `epubcheck` reports 0 errors on every written book | required | ✅ **0 fatals, 0 errors, 0 warnings** on all six, in CI — pandoc's own books do not reach this |
+| round-trips through this crate's reader, spine order intact | required | ✅ `a_written_book_comes_back_in_spine_order`, plus three more |
+| `Format::Epub` writable, in `--help`, no special case | required | ✅ `writable_format` deleted, and `Error::NotWritable` with it |
 
-**Done when**
+**The 100% was not achievable and should not have been written down
+without measuring.** The project's own first rule says a roadmap item's
+premise is a claim like any other; this one was a guess and it was wrong.
+What the measurement found:
 
-- `diff-epub-write` at **100%** on `corpus`, the same shape as
-  `diff-odt-write` — ours through pandoc against pandoc's through pandoc.
-- **`epubcheck` reports 0 errors** on every written book, in CI. It has
-  already earned its place: it caught an incomplete `toc.ncx`, a missing
-  navigation document and an unreachable non-linear item in the fixtures.
-- A written book **round-trips through this crate's own reader** with the
-  spine order intact, proved on a document whose chapter order would sort
-  differently by file name.
-- `Format::Epub` becomes writable, reaches `--help`, and `writable_format`
-  stops special-casing it.
+- three documents differ because **this writer will not emit a reference
+  the book cannot satisfy** — a picture with no bytes becomes its alt
+  text, a relative link naming no file in the book becomes its text.
+  Pandoc emits both, and `epubcheck` rejects pandoc's book for exactly
+  them (`RSC-007`). Matching pandoc here means shipping invalid books;
+- four metadata fields **cannot be matched by anything**: pandoc's random
+  `dc:identifier`, its `dcterms:modified` clock, its locale-derived
+  `dc:language` — `de_DE.UTF-8` writes `de-DE` — and the `dc:title` it
+  omits although EPUB 3 requires one. The gate drops each *only in its
+  exact unmatchable form*, so a book that loses its identifier or invents
+  a title still fails.
+
+So the replacement criterion, which is the one that now holds and is the
+harder of the two: **`diff-epub-write` ≥ 72 on `corpus`, with every
+divergence enumerated in `COMPATIBILITY.md`, and `epubcheck` clean on
+every written book in CI.** A new divergence fails the gate; an old one
+cannot be quietly reclassified, because each is named in the table.
+
+Found along the way, none of it visible from the gate: an unterminated
+HTML comment is fatal in XML and the book will not open (`RSC-016`);
+repairing it over the rendered chapter instead of the raw fragment ate
+the writer's own `</li></ul>` and traded one fatal for another; and
+scraping media out of the emitted XHTML never rewrote the `src`, so every
+picture was bundled and then lost.
 
 ### ~~5. A LaTeX writer~~ — landed; PDF for anyone with TeX
 
@@ -417,7 +441,7 @@ critic verdicts behind them.
 | Standalone HTML | `-s` writes a whole page — doctype, charset, `lang`, title, authors — and `--css` inlines a stylesheet |
 | **H1** Python | `pip install ferrodoc` — one typed function, abi3 wheels for 3.9+ on Linux, macOS and Windows, GIL released so a thread pool overlaps. **72× a pandoc subprocess** per document |
 | **H3** DOCX memory | the body streams, so its XML tree never exists in full: **2.7× less peak RSS and ~12% faster**, interleaved against a baseline |
-| **H4** Verifiability | 19 differential gates in CI on three platforms against pinned pandoc, plus a gated memory bound, a 500k-mutation fuzz run, and six judges that are not us: `pdflatex`, `sphinx-build -W`, `asciidoctor`, `epubcheck`, a headless browser and valgrind |
+| **H4** Verifiability | 20 differential gates in CI on three platforms against pinned pandoc, plus a gated memory bound, a 500k-mutation fuzz run, and six judges that are not us: `pdflatex`, `sphinx-build -W`, `asciidoctor`, `epubcheck`, a headless browser and valgrind |
 | **H4** Independent corpora | 7/8 DOCX and **8/8 ODT** documents *LibreOffice* wrote read identically to pandoc — the only evidence either reader generalises beyond pandoc's own output |
 | Released | **0.1.0 is on crates.io** and `v0.1.0` is tagged on GitHub with binaries for Linux musl, both macOS architectures, Windows and wasm32 |
 

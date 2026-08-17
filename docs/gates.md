@@ -40,14 +40,16 @@ The gates, and what each one proves:
 | `diff-docx` / `diff-odt` | the office readers produce pandoc's AST, over *two* corpora each: pandoc's own output, and a word processor's |
 | `diff-write` / `diff-odt-write` | the office writers survive a round trip — ours through pandoc against pandoc's through pandoc, which is what isolates the writer from the format |
 | `diff-epub` | the EPUB reader produces pandoc's AST, over three corpora that measure three different things |
+| `diff-epub-write` | the EPUB writer survives a round trip — and is **deliberately** below 100: it refuses to emit a reference the book cannot satisfy, where pandoc emits one and `epubcheck` rejects the result |
 | `diff-latex` / `diff-rst` | the text writers round-trip the document, with pandoc's score on the same corpus printed beside it |
 | `bench-rss` | no conversion path exceeds its published multiple of the input |
 
 Some checks are not differential because there is no oracle, and those
 are the ones a *toolchain* judges: `pdflatex` compiles the LaTeX,
 `sphinx-build -W` reads the RST, `asciidoctor` reads the AsciiDoc,
-`epubcheck` validates the EPUB fixtures, a headless browser runs the npm
-package, and valgrind runs the C example. Pandoc cannot read AsciiDoc at
+`epubcheck` validates the EPUB fixtures **and every book the writer
+produces**, a headless browser runs the npm package, and valgrind runs the
+C example. Pandoc cannot read AsciiDoc at
 all, so for that writer the toolchain is the *only* judge.
 
 ## Reading a failure

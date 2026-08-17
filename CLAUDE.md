@@ -15,7 +15,7 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   Conformance claims are pinned to pandoc 3.8.2.1; a different pandoc will
   produce spurious diffs.
 - **`./scripts/verify.sh` decides whether the tree is releasable** — tests,
-  clippy, wasm32, the memory bound and all 19 differential gates. The
+  clippy, wasm32, the memory bound and all 20 differential gates. The
   bindings live outside the workspace and need their own runs: `--wasm`
   (npm, including a headless browser), `--c` (the C ABI under valgrind),
   `--fuzz` (500k mutations, after any reader change). Every threshold is in

@@ -17,7 +17,7 @@ published sources describe a later pandoc than this binary.
 | HTML | yes | yes (fragment, or `-s` for a whole page) |
 | DOCX | yes | yes |
 | ODT | yes | yes |
-| EPUB | yes | — (`TODO.md` item 4b) |
+| EPUB | yes | yes |
 | LaTeX | — (never: a `.tex` expands macros) | yes |
 | reStructuredText | — | yes |
 | AsciiDoc | — (pandoc cannot read it either) | yes |
@@ -45,6 +45,7 @@ cargo run -p ferrodoc-harness -- diff-write     corpus --fail-under 90
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt --fail-under 94
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt-libreoffice --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100
+cargo run -p ferrodoc-harness -- diff-epub-write corpus --fail-under 72
 cargo run -p ferrodoc-harness -- diff-md        corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/commonmark-spec-0.31.2.json --fail-under 99.8
@@ -65,6 +66,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-odt-write` | ODT writer survives a round trip through pandoc | **11/11** |
 | `diff-epub` | EPUB reader produces pandoc's AST | **10/12** |
 | `diff-epub` (hand-authored) | ...on books in shapes pandoc's writer never emits | **3/3** |
+| `diff-epub-write` | EPUB writer survives a round trip through pandoc | **8/11** |
 | `diff-latex` | LaTeX writer round-trips the document | **1/11** (pandoc: 0/11) |
 | `diff-rst` | RST writer round-trips the document | **2/11** (pandoc: 3/11) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
@@ -302,9 +304,45 @@ What pandoc's EPUB reader does that is worth knowing:
 - an **image** src is resolved against its chapter's directory, a **link**
   href is left exactly as written.
 
-There is no EPUB writer yet. Reading came first because people have books
-they want as markdown far more often than the reverse; `TODO.md` item 4
-carries the writer's acceptance criteria.
+### EPUB writer — 3 corpus documents, all one deliberate rule
+
+`diff-epub-write` scores **8/11**, and the three that differ differ for the
+same reason: **this writer does not emit a reference the book cannot
+satisfy.**
+
+- an image whose bytes cannot be found becomes its alt text
+  (`corpus/images.md`, `corpus/readme-style.md`);
+- a relative link naming a file that is not in the book becomes its text
+  (`corpus/nested-structures.md`). A fragment (`#section`) is a link *into*
+  the book and is kept, as is anything with a scheme.
+
+Pandoc writes both references, and `epubcheck` rejects the resulting book
+for exactly them (`RSC-007`). Raising the number would mean copying that,
+so the check that settles it runs beside the gate: **`epubcheck` accepts
+every book this writer produces — 0 fatals, 0 errors, 0 warnings — and
+does not accept pandoc's** on the same corpus.
+
+Three more differences are not scored at all, because no writer could
+match them and matching would cost something worth more:
+
+| | pandoc | ferrodoc |
+|---|---|---|
+| `dc:title`, document untitled | omitted — `epubcheck` errors, EPUB 3 requires one | `Untitled` |
+| `dc:identifier` | a fresh random UUID every run | derived from the content, so a book is reproducible |
+| `dcterms:modified` | the current time | fixed, for the same reason |
+| `dc:language`, unspecified | the machine's locale (`de-DE` under `de_DE.UTF-8`) | `en` |
+
+The gate drops those four fields rather than report a clock, a dice roll
+or a locale — and only in their exact unmatchable form, so a book that
+lost its identifier or invented a title still fails.
+
+An unterminated HTML comment is **closed**, not dropped: XML has none of
+HTML's tolerance, and left as written the book will not open at all.
+Pandoc does the same. A well-formed comment is untouched.
+
+Syntax highlighting is not done, so a code block carries no `cbN`
+identifier and no per-token markup; the gate passes
+`--syntax-highlighting=none`, exactly as the HTML gate does.
 
 ### Markdown writer — 4 limits of CommonMark itself
 

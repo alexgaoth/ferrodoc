@@ -136,6 +136,17 @@ if [ "$want_gates" = 1 ]; then
     # layer — see corpus/epub-spec/generate.sh. A *drop* is still a
     # regression, so the level is held.
     gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 36
+    # 8/11, and the three that differ all differ the same way: **this
+    # writer does not emit a reference the book cannot satisfy.** An
+    # image whose bytes are missing becomes its alt text and a relative
+    # link naming no file in the book becomes its text; pandoc writes
+    # both, and `epubcheck` rejects pandoc's book for exactly them
+    # (RSC-007). Raising this number means writing invalid books, so the
+    # bar that matters is beside it: CI runs `epubcheck` over every
+    # written book and requires 0 fatals and 0 errors, which pandoc's own
+    # output does not reach. Every remaining case is listed in
+    # COMPATIBILITY.md.
+    gate "EPUB writer"                 $HARNESS diff-epub-write corpus --fail-under 72
     # Fidelity, not agreement with pandoc: pandoc's own LaTeX round trip
     # scores 0/11 on this corpus, so matching it would gate us on copying
     # losses. The number is low because the *format* is lossy through
