@@ -34,6 +34,24 @@ pub const MAX_NESTING: usize = 200;
 /// [`MAX_NESTING`]. Malformed markup is not an error — it is repaired the
 /// way a browser repairs it.
 pub fn read_html(input: &str) -> Result<Pandoc, Error> {
+    read(input, true)
+}
+
+/// Read HTML **without generating identifiers for headings**.
+///
+/// A heading keeps only the `id` the markup gives it. This is how pandoc
+/// reads the XHTML inside an EPUB: a book's chapters are one document once
+/// the spine is concatenated, and identifiers invented per chapter would
+/// be invented against the wrong namespace. `ferrodoc-epub` is the caller.
+///
+/// # Errors
+///
+/// The same as [`read_html`].
+pub fn read_html_without_generated_identifiers(input: &str) -> Result<Pandoc, Error> {
+    read(input, false)
+}
+
+fn read(input: &str, generate_identifiers: bool) -> Result<Pandoc, Error> {
     let source = restore_verbatim_newline(&expand_tabs(input));
     // Scripting off, so a `<noscript>` holds markup rather than the raw
     // text a browser would leave unparsed. Its content is content — it is
@@ -49,7 +67,7 @@ pub fn read_html(input: &str) -> Result<Pandoc, Error> {
     let dom = html5ever::parse_document(RcDom::default(), options)
         .from_utf8()
         .one(source.as_bytes());
-    let mut reader = Reader::default();
+    let mut reader = Reader { generate_identifiers, ..Reader::default() };
     let body = body(&dom.document).unwrap_or_else(|| dom.document.clone());
     // A page that marks its main content is read as that content alone,
     // which is how pandoc reads one — and the whole reason this is useful
@@ -64,7 +82,6 @@ pub fn read_html(input: &str) -> Result<Pandoc, Error> {
     Ok(Pandoc { blocks: result?, ..Pandoc::default() })
 }
 
-#[derive(Default)]
 struct Reader {
     depth: usize,
     /// How many `<q>` elements enclose the one being read. The marks
@@ -74,6 +91,22 @@ struct Reader {
     used_idents: HashSet<String>,
     /// The next suffix to try for a base identifier already handed out.
     next_suffix: HashMap<String, u32>,
+    /// Whether a heading with no `id` gets one made from its text. Off
+    /// when reading an EPUB's chapters — see
+    /// [`read_html_without_generated_identifiers`].
+    generate_identifiers: bool,
+}
+
+impl Default for Reader {
+    fn default() -> Self {
+        Self {
+            depth: 0,
+            quotes: 0,
+            used_idents: HashSet::new(),
+            next_suffix: HashMap::new(),
+            generate_identifiers: true,
+        }
+    }
 }
 
 /// Whether loose text in a container becomes `Para` when something
@@ -175,12 +208,17 @@ impl Reader {
             // `<section>` becomes one too but takes a `section` class,
             // ahead of any of its own. Measured, one element at a time.
             "div" | "header" => {
-                out.push(Block::Div(attributes(node), self.division(&kids)?));
+                let attr = attributes(node);
+                let mut inner = self.division(&kids)?;
+                unwrap_section_heading(&attr, &mut inner);
+                out.push(Block::Div(attr, inner));
             }
             "section" => {
                 let mut attr = attributes(node);
                 attr.classes.insert(0, "section".to_owned());
-                out.push(Block::Div(attr, self.division(&kids)?));
+                let mut inner = self.division(&kids)?;
+                unwrap_section_heading(&attr, &mut inner);
+                out.push(Block::Div(attr, inner));
             }
             // The rest of the sectioning elements carry no meaning of
             // their own: pandoc keeps their content and drops the wrapper.
@@ -343,6 +381,10 @@ impl Reader {
         Ok(())
     }
 
+    // Two lines over clippy's limit, and splitting it would put the
+    // element vocabulary in two places — which is exactly how `<small>`
+    // went missing once.
+    #[expect(clippy::too_many_lines, reason = "one match over the element vocabulary")]
     fn element(
         &mut self,
         tag: &str,
@@ -437,7 +479,20 @@ impl Reader {
             // `<bdo>` is a span whose whole point is its `dir`
             // attribute: read as its children, the override is gone.
             "span" | "bdo" => {
-                out.push(Inline::Span(Box::new(attributes(node)), self.inlines(kids)?));
+                let attr = attributes(node);
+                let inner = self.inlines(kids)?;
+                // `class="smallcaps"` is what pandoc's *own* HTML writer
+                // emits for `SmallCaps`, and its reader takes it back —
+                // the round trip would otherwise lose the small caps and
+                // leave a class nobody styles.
+                if attr.identifier.is_empty()
+                    && attr.attributes.is_empty()
+                    && attr.classes == ["smallcaps"]
+                {
+                    out.push(Inline::SmallCaps(inner));
+                } else {
+                    out.push(Inline::Span(Box::new(attr), inner));
+                }
             }
             // An inline `<svg>` is a picture. Read as its children it
             // becomes nothing at all — a chart written into the page
@@ -622,6 +677,9 @@ impl Reader {
         if !explicit.is_empty() {
             self.used_idents.insert(explicit.to_owned());
             return explicit.to_owned();
+        }
+        if !self.generate_identifiers {
+            return String::new();
         }
         let filtered: String = plain_text(inlines)
             .chars()
@@ -1037,6 +1095,28 @@ fn plain_text(inlines: &[Inline]) -> String {
         }
     }
     out
+}
+
+/// Undo `--section-divs`: a wrapper whose id is exactly the identifier its
+/// first heading would generate is that heading's id, moved outward.
+///
+/// Pandoc recognizes the shape its own writer emits — `<section id="x">`
+/// around an `<h1>` whose text slugs to `x` — and leaves the heading's
+/// identifier empty rather than repeating it. The slug stays *consumed*,
+/// so a second heading with the same text still becomes `x-1`.
+///
+/// Only the **first** block counts. A heading further down a section, even
+/// one whose slug matches, keeps its own identifier; measured one shape at
+/// a time against the binary, because none of this follows from the HTML.
+fn unwrap_section_heading(attr: &Attr, blocks: &mut [Block]) {
+    if attr.identifier.is_empty() {
+        return;
+    }
+    if let Some(Block::Header(_, heading, _)) = blocks.first_mut()
+        && heading.identifier == attr.identifier
+    {
+        heading.identifier.clear();
+    }
 }
 
 /// Split text into the `Str`/`Space`/`SoftBreak` tokens pandoc produces: a

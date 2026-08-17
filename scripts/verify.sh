@@ -123,6 +123,16 @@ if [ "$want_gates" = 1 ]; then
     gate "ODT reader"           $HARNESS diff-odt        corpus/odt --fail-under 94
     gate "ODT reader (LO)"      $HARNESS diff-odt        corpus/odt-libreoffice --fail-under 100
     gate "ODT writer"           $HARNESS diff-odt-write  corpus --fail-under 100
+    gate "EPUB reader"          $HARNESS diff-epub       corpus/epub --fail-under 83
+    # Books in shapes pandoc's own writer never emits: EPUB 2, an OEBPS
+    # layout, a spine that is not the file order, a non-linear cover, a
+    # percent-encoded href. Gated at 100 because it is small and every one
+    # of its rules was found by it failing.
+    gate "EPUB reader (hand-authored)" $HARNESS diff-epub corpus/epub-handmade --fail-under 100
+    # The spec chunks measure the HTML reader compounding, not the EPUB
+    # layer — see corpus/epub-spec/generate.sh. A *drop* is still a
+    # regression, so the level is held.
+    gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 36
 fi
 
 if [ "$want_fuzz" = 1 ]; then

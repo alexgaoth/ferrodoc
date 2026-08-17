@@ -85,6 +85,7 @@ version = "0.1.0"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-docx",
+ "ferrodoc-epub",
  "ferrodoc-html",
  "ferrodoc-markdown",
  "ferrodoc-odt",
@@ -106,6 +107,16 @@ version = "0.1.0"
 dependencies = [
  "ferrodoc-ast",
  "quick-xml",
+ "zip",
+]
+
+[[package]]
+name = "ferrodoc-epub"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
+ "ferrodoc-docx",
+ "ferrodoc-html",
  "zip",
 ]
 

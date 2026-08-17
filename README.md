@@ -1,8 +1,8 @@
 # ferrodoc
 
-Convert documents — markdown (CommonMark and GFM), HTML, DOCX and ODT —
-semantically and in your own process, with output checked against pandoc
-document by document.
+Convert documents — markdown (CommonMark and GFM), HTML, DOCX, ODT and
+EPUB — semantically and in your own process, with output checked against
+pandoc document by document.
 
 ```sh
 pip install ferrodoc          # Python
@@ -105,6 +105,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-odt` reader | **32/34** corpus documents produce identical ASTs, and **8/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-odt` writer | **640/652** spec examples survive an ODT round trip identically, with embedded images |
+| `ferrodoc-epub` reader | **10/12** corpus documents produce identical ASTs, and **3/3** hand-authored books in layouts pandoc never emits (validated by `epubcheck`) |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
 | `ferrodoc-html` reader | **632/658** HTML documents produce identical ASTs |
@@ -195,7 +196,7 @@ cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
-Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `json` (the
+Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`, `json` (the
 pandoc AST). Outputs: those plus `plain`. `-s`/`--standalone` wraps HTML
 output in a complete page — doctype, charset, `lang`, and the title and
 authors the document carries — and `--css FILE` inlines a stylesheet into
@@ -251,7 +252,7 @@ campaign.
 ## Where pandoc is still ahead
 
 The table above is not the whole picture, and pretending otherwise would make
-the rest less believable. Pandoc supports ~40 formats to ferrodoc's five, plus
+the rest less believable. Pandoc supports ~40 formats to ferrodoc's six, plus
 citations, templates, Lua filters, PDF output and fifteen years of edge cases.
 Our DOCX writer still drops raw blocks, which have no OOXML equivalent, and
 embeds eight image formats — PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF —

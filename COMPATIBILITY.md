@@ -17,6 +17,7 @@ published sources describe a later pandoc than this binary.
 | HTML | yes | yes (fragment, or `-s` for a whole page) |
 | DOCX | yes | yes |
 | ODT | yes | yes |
+| EPUB | yes | — (`TODO.md` item 4) |
 | pandoc JSON AST | yes | yes |
 | plain text | — | yes |
 
@@ -59,6 +60,8 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-odt` | ODT reader produces pandoc's AST | **32/34** |
 | `diff-odt` (LibreOffice) | ...on documents *another* writer produced | **8/8** |
 | `diff-odt-write` | ODT writer survives a round trip through pandoc | **11/11** |
+| `diff-epub` | EPUB reader produces pandoc's AST | **10/12** |
+| `diff-epub` (hand-authored) | ...on books in shapes pandoc's writer never emits | **3/3** |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
 | `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
@@ -246,6 +249,57 @@ One divergence is ferrodoc's own: a `Div`'s attributes are dropped rather
 than written as a `text:section`, because pandoc's writer drops them too
 and reading one back would produce a `Div` pandoc's own round trip does
 not.
+
+### EPUB reader — 2 corpus documents, and a corpus that measures something else
+
+An EPUB's content documents are XHTML, so this reader's fidelity is the
+HTML reader's fidelity plus the spine. That has a consequence worth stating
+before the numbers: **the two documents it misses are both HTML reader
+divergences** (an unterminated comment, and a line break inside code), not
+EPUB ones. They are in the 26 listed under the HTML reader below.
+
+Three corpora, because they measure three different things:
+
+| corpus | what it is | score |
+|---|---|---|
+| `corpus/epub` | pandoc's own output, 12 documents | **10/12** |
+| `corpus/epub-handmade` | books in shapes pandoc's writer never emits | **3/3** |
+| `corpus/epub-spec` | 22 files of 30 spec examples each | 8/22 |
+
+The last is not a fidelity claim and is not averaged into the others. Each
+of its files bundles 30 spec examples, so **one** of the HTML reader's 26
+known divergences fails a whole document — and at 30 examples per file most
+files contain one. Reporting it as "the EPUB reader scores 36%" would be
+reporting the HTML reader's score under another name. It is still gated,
+because a *drop* there is a real regression.
+
+`corpus/epub-handmade` is the one that found things. It is hand-authored
+rather than produced by another program — EPUB 2 with a `toc.ncx`, an
+`OEBPS/` layout, a package document at the archive root, a spine whose
+order is not the file order, a `linear="no"` cover, a percent-encoded
+href — and it is validated by **epubcheck** in CI. Two rules came out of it
+failing: pandoc's EPUB reader generates no heading identifiers at all, and
+the anchor it emits per file is named for the *raw* href, not the decoded
+one.
+
+What pandoc's EPUB reader does that is worth knowing:
+
+- **a `linear="no"` item contributes nothing**, not even its anchor, and a
+  title page contributes its anchor and nothing else — both are furniture
+  a reading system shows around the text;
+- **every identifier is prefixed with the file it came from**
+  (`ch001.xhtml_intro`), because the spine makes one document out of many
+  files and two chapters may each define `#intro`. Links are rewritten to
+  match;
+- **footnotes are put back together**: an EPUB keeps a note in an `<aside>`
+  at the end of the file with a link to it, and read literally that is a
+  link to the bottom of the chapter;
+- an **image** src is resolved against its chapter's directory, a **link**
+  href is left exactly as written.
+
+There is no EPUB writer yet. Reading came first because people have books
+they want as markdown far more often than the reverse; `TODO.md` item 4
+carries the writer's acceptance criteria.
 
 ### Markdown writer — 4 limits of CommonMark itself
 

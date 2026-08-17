@@ -51,6 +51,8 @@ pub enum Format {
     /// `OpenDocument` text, what `LibreOffice` and `OpenOffice` write.
     /// Readable and writable.
     Odt,
+    /// EPUB, the e-book format. Readable; see `TODO.md` for the writer.
+    Epub,
     /// The pandoc JSON AST. Readable and writable.
     Json,
     /// Unformatted text extraction. Writable.
@@ -60,7 +62,7 @@ pub enum Format {
 impl Format {
     /// Every format name accepted on the command line, in help order.
     pub const NAMES: &'static [&'static str] = &[
-        "markdown", "commonmark", "gfm", "html", "docx", "odt", "json", "plain",
+        "markdown", "commonmark", "gfm", "html", "docx", "odt", "epub", "json", "plain",
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
@@ -71,6 +73,7 @@ impl Format {
             "html" | "htm" => Some(Format::Html),
             "docx" => Some(Format::Docx),
             "odt" => Some(Format::Odt),
+            "epub" | "epub2" | "epub3" => Some(Format::Epub),
             "json" => Some(Format::Json),
             "plain" | "text" | "txt" => Some(Format::Plain),
             _ => None,
@@ -87,20 +90,27 @@ impl Format {
         !matches!(self, Format::Plain)
     }
 
+    /// Whether documents can be written to this format.
+    ///
+    /// EPUB is read-only for now: people have books they want as markdown
+    /// far more often than the reverse, so the reader shipped first. The
+    /// writer is item 4 in `TODO.md`, with its acceptance criteria.
+    pub fn writable_format(self) -> bool {
+        !matches!(self, Format::Epub)
+    }
+
     /// Whether writing this format embeds image bytes.
     ///
     /// Reading a document's media costs memory proportional to it — a
     /// `.docx` can hold a part that inflates a thousandfold — so
     /// [`convert`] asks for it only when the answer here is yes.
     pub fn embeds_media(self) -> bool {
-        matches!(self, Format::Docx | Format::Odt)
+        matches!(self, Format::Docx | Format::Odt | Format::Epub)
     }
 
     /// Whether documents can be written to this format.
     pub fn writable(self) -> bool {
-        // Every format here has a writer; `Plain` is the only one-way one,
-        // and it is one-way in the other direction.
-        true
+        self.writable_format()
     }
 
     /// The name used in messages.
@@ -111,6 +121,7 @@ impl Format {
             Format::Html => "html",
             Format::Docx => "docx",
             Format::Odt => "odt",
+            Format::Epub => "epub",
             Format::Json => "json",
             Format::Plain => "plain",
         }
@@ -179,6 +190,10 @@ pub fn parse_with_media(input: &[u8], from: Format) -> Result<(Pandoc, Media), E
             format: from,
             detail: e.to_string(),
         }),
+        Format::Epub => ferrodoc_epub::read_epub_with_media(input).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
         _ => Ok((parse(input, from)?, Media::new())),
     }
 }
@@ -205,6 +220,10 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
             detail: e.to_string(),
         }),
         Format::Odt => ferrodoc_odt::read_odt(input).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
+        Format::Epub => ferrodoc_epub::read_epub(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
@@ -340,6 +359,7 @@ pub fn render_with_media(
                 detail: e.to_string(),
             })
         }
+        Format::Epub => Err(Error::NotWritable(Format::Epub)),
         Format::Json => {
             let mut json = serde_json::to_vec(doc).map_err(|e| Error::Invalid {
                 format: to,

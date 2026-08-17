@@ -19,6 +19,7 @@ ferrodoc-html = { workspace = true }
 ferrodoc-text = { workspace = true }
 ferrodoc-docx = { workspace = true }
 ferrodoc-odt = { workspace = true }
+ferrodoc-epub = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

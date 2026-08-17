@@ -43,6 +43,7 @@ fn main() -> Result<()> {
         Some("diff-html") => diff_html(&args[1..], verbose, fail_under),
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("diff-odt") => diff_odt(&args[1..], verbose, fail_under),
+        Some("diff-epub") => diff_epub(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-odt-write") => diff_odt_write(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
@@ -56,7 +57,7 @@ fn main() -> Result<()> {
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-write|diff-odt-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-write|diff-odt-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -1069,6 +1070,12 @@ fn pandoc_file(path: &Path, format: &str) -> Result<Value> {
 fn diff_docx(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
     diff_binary(paths, "docx", &|bytes| {
         Ok(serde_json::to_value(ferrodoc_docx::read_docx(bytes)?)?)
+    }, verbose, fail_under)
+}
+
+fn diff_epub(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_binary(paths, "epub", &|bytes| {
+        Ok(serde_json::to_value(ferrodoc_epub::read_epub(bytes)?)?)
     }, verbose, fail_under)
 }
 

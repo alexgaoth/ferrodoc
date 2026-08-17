@@ -16,7 +16,7 @@
 
 mod read;
 
-pub use read::{MAX_NESTING, read_html};
+pub use read::{MAX_NESTING, read_html, read_html_without_generated_identifiers};
 
 /// What can go wrong reading HTML.
 #[derive(Debug, PartialEq, Eq)]

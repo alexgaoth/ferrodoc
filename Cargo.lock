@@ -91,6 +91,7 @@ version = "0.1.0"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-docx",
+ "ferrodoc-epub",
  "ferrodoc-html",
  "ferrodoc-markdown",
  "ferrodoc-odt",
@@ -117,6 +118,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrodoc-epub"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
+ "ferrodoc-docx",
+ "ferrodoc-html",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
 name = "ferrodoc-harness"
 version = "0.1.0"
 dependencies = [
@@ -124,6 +136,7 @@ dependencies = [
  "comrak",
  "ferrodoc-ast",
  "ferrodoc-docx",
+ "ferrodoc-epub",
  "ferrodoc-html",
  "ferrodoc-markdown",
  "ferrodoc-odt",

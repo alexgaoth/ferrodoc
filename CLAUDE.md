@@ -92,9 +92,14 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   `bindings/python` is outside the workspace and exempt — see its own
   `CLAUDE.md`.
 - `ferrodoc-docx` exposes `xml` and `media` as `#[doc(hidden)] pub`, and
-  `ferrodoc-odt` is built on them: an ODF package is a zip of XML parts
-  sized the same way an OOXML one is. Extend them there rather than
-  copying, and keep them out of the rendered documentation.
+  `ferrodoc-odt` and `ferrodoc-epub` are built on them: all three formats
+  are zips of XML parts. Extend them there rather than copying, and keep
+  them out of the rendered documentation.
+- **A new format finds bugs in the old code.** EPUB found two in the HTML
+  reader that `diff-html-read` could not see — a `<section id>` leaking
+  its identifier onto the heading, and `<span class="smallcaps">` not
+  becoming `SmallCaps`. Run the other gates after adding one; the win is
+  usually not confined to the new crate.
 - All readers bound their recursion and must return `Err`, never abort or
   truncate. Keep bounds low: a test thread gets 2 MiB, so 500 overflows the
   suite the bound exists to protect; 200 works.
