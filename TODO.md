@@ -175,6 +175,114 @@ declared non-goal. When one of these lands, run step 2 again.
 
 ---
 
+## Now
+
+Working queue. Every item carries an **Eval** — the test that decides, frozen
+before any work starts, in the sense `## What "done" means` defines. The four
+rules there apply to each without being restated, in particular: *nothing else
+may regress*, and *done includes the paperwork*.
+
+These are here by **procedure step 1**, not by taste. `samples/` is a real
+document that failed to convert, and its own `README.md` already names one of
+these as "not deliberate; found by these samples, unfixed". Every rule below
+was probed against pandoc 3.8.2.1 before being written down — the probes are
+in `.iterate/odyssey-20260817-1122/ODYSSEY.md`.
+
+- [ ] **The markdown writer emits `sourceCode` as the code language** —
+  `write.rs:139` is `attr.classes.first()`, blind. Pandoc's HTML writer tags
+  every code block `class="sourceCode bash"`, so `html → gfm` writes
+  ```` ```sourceCode ```` where pandoc writes ```` ``` bash ```` — the language
+  is wrong on **every** code block in **every** document that came through
+  pandoc's HTML. Invisible to `diff-md`/`diff-gfm-md`, which round-trip through
+  ferrodoc's own reader, and CommonMark info strings carry one word.
+  - **Eval:**
+    1. Literal-output unit tests, one per probed case, matching pandoc exactly:
+       `["sourceCode","bash"]` → `` ``` bash ``; `["bash"]` → `` ``` bash ``;
+       `["sourceCode"]` → `` ``` `` with no infostring; `["python","numberLines"]`
+       → `` ``` python ``; `["numberLines","python"]` → `` ``` numberLines ``;
+       `["a","b"]` → `` ``` a ``. Note the **space** after the fence, which
+       ferrodoc also omits today — both halves of the divergence, or the item is
+       not done.
+    2. `samples/05-html-to-markdown/diff.txt`, regenerated, contains no
+       ```` ```sourceCode ```` line.
+    3. `diff-md` stays **652/652** and `diff-gfm-md` stays **655/655** — a
+       fidelity gate must not fall to buy a byte-match.
+    4. `./scripts/verify.sh` exits 0 with no threshold lowered.
+    5. `COMPATIBILITY.md` updated if any row's number moves.
+
+- [ ] **The HTML writer does not render a task list** — the reverse of the
+  first item. `Str "☒"` leading a bullet item is written literally, where pandoc
+  writes `<ul class="task-list">` and `<label><input type="checkbox" checked=""
+  />`. `samples/README.md` lists this as a real gap and marks it *not
+  deliberate*. Probed shapes: the class appears only when **every** item is a
+  task; a mixed list gets a bare `<ul>` while the task item still gets its
+  `<label><input>`; an `<ol>`'s items transform but the `<ol>` takes no class.
+  - **Eval:**
+    1. Literal-output unit tests for all four probed shapes, byte-identical to
+       pandoc 3.8.2.1's output for the same AST.
+    2. `samples/06-markdown-to-html/diff.txt`, regenerated, contains none of the
+       `<ul class="task-list">` / `<input type="checkbox">` lines.
+    3. `diff-html` stays **652/652** — the CommonMark spec has no task lists, so
+       this must move nothing there.
+    4. `./scripts/verify.sh` exits 0 with no threshold lowered.
+    5. `samples/README.md`'s gap table loses this row; `COMPATIBILITY.md`
+       updated.
+
+- [ ] **The `plain` writer is plainer than pandoc's** — `samples/10` differs by
+  47 lines: block quotes are not indented two spaces, tables are tab-separated
+  where pandoc column-aligns them, indented code blocks lose their four-space
+  indent, ordered lists write `1. ` rather than `1.  ` with sub-items
+  unindented, and every list comes out loose. Minor format, lowest rank, listed
+  so it is not rediscovered.
+  - **Eval:**
+    1. `samples/10-markdown-to-plain/diff.txt`, regenerated, is **under 12
+       lines** (baseline 47), with every surviving divergence named in
+       `COMPATIBILITY.md`.
+    2. Literal-output unit tests for each rule changed — quote indent, table
+       alignment, code indent, list spacing.
+    3. `./scripts/verify.sh` exits 0 with no threshold lowered.
+
+- [ ] **Two paperwork corrections a critic measured** — raised as MINOR against
+  `f3a6807` and carried forward rather than waved through, because *done
+  includes the paperwork* makes every number in the tree fair game.
+  - `corpus/epub-spec/generate.sh:6` still says `diff-html-read`, 632/658 in a
+    tracked comment. The divergence count (26) is right; the fraction is stale.
+  - The `COMPATIBILITY.md` HTML-reader bullet claims pandoc "drops the element
+    *and* breaks the block around it" **everywhere else**, and that
+    generalisation is false in both directions, measured: in a `<td>` pandoc
+    does **not** split and ferrodoc matches it byte-for-byte, while in an `<h2>`
+    pandoc loses the `Header` *entirely* — worse than "breaks the block" —
+    where ferrodoc keeps it.
+  - **Eval:**
+    1. `grep -rn '632/658\|fail-under 95' -- . ` returns nothing outside
+       `.iterate/`.
+    2. The `COMPATIBILITY.md` sentence states the `<td>` and `<h2>` behaviours
+       as measured, each with its reproducing command.
+    3. `./scripts/verify.sh` exits 0 with no threshold lowered.
+
+## Done
+
+- [x] **The HTML reader loses a task list's checkbox state** (2026-08-17) —
+  eval met: `f3a6807`. `diff-html-read` 632/658 → **633/659**, threshold raised
+  95 → 96 and load-bearing (rule disabled → 95.9%, exit 1); new fixture
+  `corpus/task-lists.html` 1/1 identical to pandoc; literal-AST test
+  `a_task_list_keeps_which_boxes_are_ticked` proved able to fail; `verify.sh`
+  exit 0 unpiped, `--fuzz-only` exit 0; `samples/05` no longer differs on the
+  checklist. A fresh critic rebuilt `b33d121` in a worktree and `comm`'d the
+  mismatch sets at both revisions — **26 failures before, 26 after, the two
+  sets identical**, so the +1/+1 is the new fixture passing and nothing else
+  moving, not a regression masked by two new passes. It also probed 25 shapes
+  against pandoc 3.8.2.1 directly; all matched.
+
+  Two things found on the way, neither visible from the gate: the trailing `/`
+  in `<input … />` is **load-bearing for pandoc** — written the ordinary HTML
+  way the tag stays open in tagsoup and swallows the rest of the list, so a
+  naturally-authored fixture would have pinned that parse failure as if it were
+  the rule; and the box is read below a `<li>` however deep, but not in a
+  `<dd>`, which is why the flag belongs in `items()` and not `item()`.
+
+---
+
 ## What landed, and what each item cost
 
 ### ~~1. A published resource bound, and the one superlinear path~~ — landed, one criterion missed
