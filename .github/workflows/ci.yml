@@ -192,6 +192,23 @@ jobs:
             echo "asciidoctor accepted $name"
           done
 
+  # The C ABI, which is how Go, Java, C#, Ruby and Julia would link this.
+  # Memory is the whole risk of the item: a leak of one result per
+  # document is invisible in one conversion and fatal in a batch, and it
+  # would be a leak in every language binding through this ABI.
+  c-abi:
+    name: C ABI, under valgrind
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      - name: build, test, and run the C example under valgrind
+        run: ./scripts/verify.sh --c
+
   # Readers promise to refuse hostile input rather than panic. `cargo test`
   # runs a short fixed-seed loop; this runs a long one with a fresh seed, so
   # the search keeps moving instead of re-checking the same inputs forever.

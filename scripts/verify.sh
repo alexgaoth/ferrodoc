@@ -13,6 +13,7 @@
 #   scripts/verify.sh --fuzz-only  only the fuzz run — no pandoc
 #   scripts/verify.sh --limits     only the resource bound — no pandoc
 #   scripts/verify.sh --wasm       only the npm package — no pandoc
+#   scripts/verify.sh --c          only the C ABI — no pandoc
 #
 # Only the gates need pandoc, and they need exactly 3.8.2.1: a different
 # one produces spurious diffs, so this refuses to score against it rather
@@ -30,7 +31,7 @@ HARNESS=./target/release/ferrodoc-harness
 # has stopped gating.
 MAX_RSS_RATIO=80
 
-want_gates=1 want_checks=1 want_fuzz=0 want_limits=1 want_wasm=0
+want_gates=1 want_checks=1 want_fuzz=0 want_limits=1 want_wasm=0 want_c=0
 case "${1-}" in
     --fuzz)       want_fuzz=1 ;;
     --gates)      want_checks=0 want_limits=0 ;;
@@ -38,8 +39,10 @@ case "${1-}" in
     --fuzz-only)  want_checks=0 want_gates=0 want_limits=0 want_fuzz=1 ;;
     --limits)     want_checks=0 want_gates=0 ;;
     --wasm)       want_checks=0 want_gates=0 want_limits=0 want_wasm=1 ;;
+    --c)          want_checks=0 want_gates=0 want_limits=0 want_c=1 ;;
     "")           ;;
-    *) echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only|--limits|--wasm]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--fuzz|--gates|--quick|--fuzz-only|--limits|--wasm|--c]" >&2
+       exit 2 ;;
 esac
 
 failures=0
@@ -176,6 +179,20 @@ if [ "$want_wasm" = 1 ]; then
         step "tsc --noEmit" ok env -C bindings/wasm npx --no-install tsc --noEmit
     else
         printf '%-46s %s\n' "tsc --noEmit" "skipped (npm i typescript)"
+    fi
+fi
+
+if [ "$want_c" = 1 ]; then
+    echo "== C ABI"
+    step "cargo test (safety rules)" ok env -C bindings/c cargo test --quiet
+    step "cargo clippy -D warnings" ok \
+        env -C bindings/c cargo clippy --all-targets -- -D warnings
+    # A header nobody has called through is a guess, not an interface.
+    step "the C example compiles and runs" ok env -C bindings/c ./build.sh
+    if command -v valgrind >/dev/null 2>&1; then
+        step "no leaks under valgrind" ok env -C bindings/c env VALGRIND=1 ./build.sh
+    else
+        printf '%-46s %s\n' "valgrind" "skipped (not installed)"
     fi
 fi
 

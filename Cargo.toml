@@ -22,7 +22,7 @@ members = [
 # `unsafe_code = "allow"` for its `#[unsafe(no_mangle)]` exports, and the
 # workspace forbids that — see `bindings/wasm/src/lib.rs` for why it still
 # contains no `unsafe` block.
-exclude = ["bindings/python", "bindings/wasm"]
+exclude = ["bindings/python", "bindings/wasm", "bindings/c"]
 
 [workspace.package]
 version = "0.1.0"
