@@ -1,0 +1,27 @@
+[package]
+name = "ferrodoc-odt"
+description = "ODT (OpenDocument Text) reader and writer producing the ferrodoc (pandoc-compatible) AST"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+readme = "../../README.md"
+
+[dependencies]
+ferrodoc-ast = { workspace = true }
+# For `xml` and `media`: an ODF package is a zip of XML parts sized the same
+# way an OOXML one is, and duplicating either module would leave two copies
+# to fix separately. See that crate's `#[doc(hidden)] pub mod` comment.
+ferrodoc-docx = { workspace = true }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

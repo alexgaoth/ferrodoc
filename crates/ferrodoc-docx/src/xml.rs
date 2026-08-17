@@ -147,7 +147,12 @@ pub fn parse(xml: &str) -> Result<Node, Error> {
     root.ok_or_else(|| Error::Xml("document has no root element".into()))
 }
 
-/// The children of the first `<w:body>`, one subtree at a time.
+/// The children of the container `path` names, one subtree at a time.
+///
+/// `path` is the chain of local element names to descend, each searched for
+/// after the one before it: `["body"]` for `word/document.xml`,
+/// `["body", "text"]` for an ODF `content.xml`, whose blocks live one level
+/// further down in `<office:body><office:text>`.
 ///
 /// The tree of a whole `word/document.xml` costs about twenty times the
 /// XML — it is millions of small allocations — and nothing needs it: the
@@ -158,27 +163,56 @@ pub fn parse(xml: &str) -> Result<Node, Error> {
 /// # Errors
 ///
 /// The same malformed-XML errors [`parse`] reports, raised as the reader
-/// reaches them rather than up front.
-pub fn body_children(xml: &str) -> Result<BodyChildren<'_>, Error> {
+/// reaches them rather than up front, plus [`Error::MissingPart`] when the
+/// document holds no such container.
+pub fn body_children<'a>(xml: &'a str, path: &[&'static str]) -> Result<BodyChildren<'a>, Error> {
     let mut reader = Reader::from_str(xml);
-    // Everything up to the body's first child is skipped, but neither a
-    // malformed prologue nor a missing body may pass silently: an empty
-    // document is a wrong answer where an error is a true one.
+    // Everything up to the container's first child is skipped, but neither
+    // a malformed prologue nor a missing container may pass silently: an
+    // empty document is a wrong answer where an error is a true one.
+    for name in path {
+        loop {
+            match reader.read_event().map_err(|e| Error::Xml(e.to_string()))? {
+                Event::Start(e) if local_name(e.name().as_ref()) == *name => {
+                    // Parsed and thrown away: the container's own attributes
+                    // carry nothing, but a malformed one is malformed XML
+                    // and the whole-tree parser this replaced said so.
+                    node_from_start(&e)?;
+                    break;
+                }
+                // A self-closing container is a document with nothing in it.
+                Event::Empty(e) if local_name(e.name().as_ref()) == *name => {
+                    node_from_start(&e)?;
+                    return Ok(BodyChildren { reader, done: true });
+                }
+                Event::Eof => return Err(Error::MissingPart(name)),
+                _ => {}
+            }
+        }
+    }
+    Ok(BodyChildren { reader, done: false })
+}
+
+/// The byte offset at which the first element with this local name opens.
+///
+/// A part's styles sit ahead of its body and a whole-tree parse of the part
+/// is what streaming exists to avoid, so the prologue is cut off here and
+/// parsed on its own. Scanned as XML rather than searched for as text: the
+/// name may appear inside an attribute value or a comment first, and
+/// cutting there would split the document mid-element.
+///
+/// # Errors
+///
+/// The same malformed-XML errors [`parse`] reports.
+pub fn element_offset(xml: &str, name: &str) -> Result<Option<usize>, Error> {
+    let mut reader = Reader::from_str(xml);
     loop {
+        let before = reader.buffer_position();
         match reader.read_event().map_err(|e| Error::Xml(e.to_string()))? {
-            Event::Start(e) if local_name(e.name().as_ref()) == "body" => {
-                // Parsed and thrown away: the body's own attributes carry
-                // nothing, but a malformed one is malformed XML and the
-                // whole-tree parser this replaced said so.
-                node_from_start(&e)?;
-                return Ok(BodyChildren { reader, done: false });
+            Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == name => {
+                return Ok(usize::try_from(before).ok());
             }
-            // A self-closing body is a document with nothing in it.
-            Event::Empty(e) if local_name(e.name().as_ref()) == "body" => {
-                node_from_start(&e)?;
-                return Ok(BodyChildren { reader, done: true });
-            }
-            Event::Eof => return Err(Error::MissingPart("w:body")),
+            Event::Eof => return Ok(None),
             _ => {}
         }
     }

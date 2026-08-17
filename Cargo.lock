@@ -93,6 +93,7 @@ dependencies = [
  "ferrodoc-docx",
  "ferrodoc-html",
  "ferrodoc-markdown",
+ "ferrodoc-odt",
  "ferrodoc-text",
  "serde_json",
 ]
@@ -125,6 +126,7 @@ dependencies = [
  "ferrodoc-docx",
  "ferrodoc-html",
  "ferrodoc-markdown",
+ "ferrodoc-odt",
  "ferrodoc-text",
  "serde",
  "serde_json",
@@ -148,6 +150,16 @@ dependencies = [
  "comrak",
  "ferrodoc-ast",
  "serde_json",
+]
+
+[[package]]
+name = "ferrodoc-odt"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
+ "ferrodoc-docx",
+ "serde_json",
+ "zip",
 ]
 
 [[package]]

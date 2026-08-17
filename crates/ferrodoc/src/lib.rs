@@ -48,6 +48,9 @@ pub enum Format {
     Html,
     /// Office Open XML word processing documents. Readable and writable.
     Docx,
+    /// `OpenDocument` text, what `LibreOffice` and `OpenOffice` write.
+    /// Readable and writable.
+    Odt,
     /// The pandoc JSON AST. Readable and writable.
     Json,
     /// Unformatted text extraction. Writable.
@@ -57,7 +60,7 @@ pub enum Format {
 impl Format {
     /// Every format name accepted on the command line, in help order.
     pub const NAMES: &'static [&'static str] = &[
-        "markdown", "commonmark", "gfm", "html", "docx", "json", "plain",
+        "markdown", "commonmark", "gfm", "html", "docx", "odt", "json", "plain",
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
@@ -67,6 +70,7 @@ impl Format {
             "gfm" | "markdown_github" => Some(Format::Gfm),
             "html" | "htm" => Some(Format::Html),
             "docx" => Some(Format::Docx),
+            "odt" => Some(Format::Odt),
             "json" => Some(Format::Json),
             "plain" | "text" | "txt" => Some(Format::Plain),
             _ => None,
@@ -89,7 +93,7 @@ impl Format {
     /// `.docx` can hold a part that inflates a thousandfold — so
     /// [`convert`] asks for it only when the answer here is yes.
     pub fn embeds_media(self) -> bool {
-        matches!(self, Format::Docx)
+        matches!(self, Format::Docx | Format::Odt)
     }
 
     /// Whether documents can be written to this format.
@@ -106,6 +110,7 @@ impl Format {
             Format::Gfm => "gfm",
             Format::Html => "html",
             Format::Docx => "docx",
+            Format::Odt => "odt",
             Format::Json => "json",
             Format::Plain => "plain",
         }
@@ -170,6 +175,10 @@ pub fn parse_with_media(input: &[u8], from: Format) -> Result<(Pandoc, Media), E
             format: from,
             detail: e.to_string(),
         }),
+        Format::Odt => ferrodoc_odt::read_odt_with_media(input).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
         _ => Ok((parse(input, from)?, Media::new())),
     }
 }
@@ -192,6 +201,10 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
             detail: e.to_string(),
         }),
         Format::Docx => ferrodoc_docx::read_docx(input).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
+        Format::Odt => ferrodoc_odt::read_odt(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
@@ -316,6 +329,13 @@ pub fn render_with_media(
             // a URL nothing can resolve and comes out as alt text.
             let resolve = |url: &str| data_url(url).or_else(|| media(url));
             ferrodoc_docx::write_docx_with_media(doc, &resolve).map_err(|e| Error::Invalid {
+                format: to,
+                detail: e.to_string(),
+            })
+        }
+        Format::Odt => {
+            let resolve = |url: &str| data_url(url).or_else(|| media(url));
+            ferrodoc_odt::write_odt_with_media(doc, &resolve).map_err(|e| Error::Invalid {
                 format: to,
                 detail: e.to_string(),
             })

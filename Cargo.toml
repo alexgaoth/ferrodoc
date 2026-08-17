@@ -8,6 +8,7 @@ members = [
     "crates/ferrodoc-text",
     "crates/ferrodoc-harness",
     "crates/ferrodoc-docx",
+    "crates/ferrodoc-odt",
 ]
 # The Python binding is built by maturin, not by cargo, and it depends on
 # `ferrodoc` from crates.io so that maturin's source distribution — which
@@ -37,6 +38,7 @@ ferrodoc-markdown = { path = "crates/ferrodoc-markdown", version = "0.1.0" }
 ferrodoc-html = { path = "crates/ferrodoc-html", version = "0.1.0" }
 ferrodoc-text = { path = "crates/ferrodoc-text", version = "0.1.0" }
 ferrodoc-docx = { path = "crates/ferrodoc-docx", version = "0.1.0" }
+ferrodoc-odt = { path = "crates/ferrodoc-odt", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip makes parsed doubles bit-identical to their source text,
 # so comparing our AST against pandoc's JSON never reports a phantom

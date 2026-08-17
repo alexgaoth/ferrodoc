@@ -3,11 +3,20 @@
 Reads and writes OOXML word processing documents. Gated by `diff-docx`
 (reader) and `diff-write` (writer) — see the root `CLAUDE.md`.
 
-- The body is **streamed**: `xml::body_children` yields one `w:p`/`w:tbl`
-  subtree at a time and `blocks_inner` consumes an iterator with one
-  element of lookahead, so `document.xml`'s tree never exists in full. It
-  cost about twenty times the XML. Do not reintroduce a whole-body
+- **`xml` and `media` are shared with `ferrodoc-odt`** (`#[doc(hidden)] pub`,
+  no stability guarantee). A change to either lands in both readers and both
+  writers, so `cargo test -p ferrodoc-docx` alone no longer covers it — run
+  the ODT gates too. Keep them out of the rendered documentation.
+- The body is **streamed**: `xml::body_children(xml, &["body"])` yields one
+  `w:p`/`w:tbl` subtree at a time and `blocks_inner` consumes an iterator
+  with one element of lookahead, so `document.xml`'s tree never exists in
+  full. It cost about twenty times the XML. Do not reintroduce a whole-body
   `xml::parse`, and keep the scan forward-only with at most one lookahead.
+  The path argument descends a chain of local names — ODF needs
+  `&["body", "text"]`, one level deeper.
+- Pandoc's published sources disagree with the 3.8.2.1 binary on exactly the
+  numbering questions that matter here: numbering keyed on `numId` versus
+  `abstractNumId`, `ColWidth 0`, and `isRestart`. The binary decides.
 - Streaming moves errors from before the walk to during it, so both ends
   need guarding: a malformed prologue, a missing body and an unclosed
   element at EOF are all `Err`, never a short document. Pinned by

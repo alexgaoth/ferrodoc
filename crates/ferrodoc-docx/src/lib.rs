@@ -90,9 +90,17 @@
 //!   drops the remaining content rather than recursing without limit.
 
 mod combine;
-mod media;
 mod write;
-mod xml;
+
+// `ferrodoc-odt` reads a zip of XML parts and embeds pictures the same way
+// this crate does, so these two modules serve both. They are internal to
+// the ferrodoc workspace with no stability guarantee — hidden from the
+// documentation rather than duplicated into a second crate, where the two
+// copies would drift and only one would get each fix.
+#[doc(hidden)]
+pub mod media;
+#[doc(hidden)]
+pub mod xml;
 
 pub use write::{write_docx, write_docx_with_media};
 
@@ -215,7 +223,7 @@ fn read(bytes: &[u8], want_media: bool) -> Result<(Pandoc, Media), Error> {
     // A malformed part stops the stream and is reported, never returned
     // as a truncated document.
     let mut failure: Option<Error> = None;
-    let body = xml::body_children(&document)?;
+    let body = xml::body_children(&document, &["body"])?;
     let doc = {
         let failure = &mut failure;
         let parts = body

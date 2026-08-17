@@ -15,19 +15,26 @@
 
 /// What the writer needs to know about an image it is about to embed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Image {
+pub struct Image {
+    /// The file extension the media part should carry.
     pub extension: &'static str,
+    /// The MIME type to declare for it.
     pub content_type: &'static str,
+    /// The size the file itself states.
     pub size: Size,
 }
 
 /// An image's intrinsic size: a pixel count, and the resolution those
 /// pixels are counted at.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) struct Size {
+pub struct Size {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// Horizontal resolution those pixels are counted at.
     pub dpi_x: u32,
+    /// Vertical resolution those pixels are counted at.
     pub dpi_y: u32,
 }
 
@@ -50,7 +57,7 @@ const SVG_HEAD: usize = 65_536;
 
 /// Identify an image and read its intrinsic size, or `None` if the bytes
 /// are not a format this writer can embed.
-pub(crate) fn inspect(bytes: &[u8]) -> Option<Image> {
+pub fn inspect(bytes: &[u8]) -> Option<Image> {
     let (size, extension, content_type) = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         (png_size(bytes)?, "png", "image/png")
     } else if bytes.starts_with(b"\xff\xd8") {
@@ -582,7 +589,7 @@ fn le16i(bytes: &[u8], at: usize) -> Option<i16> {
 /// tests that write and read whole packages can cover all of them
 /// without a fixture directory.
 #[cfg(test)]
-pub(crate) fn samples() -> Vec<(&'static str, Vec<u8>)> {
+pub fn samples() -> Vec<(&'static str, Vec<u8>)> {
     let mut lossy = vec![0, 0, 0, 0x9d, 0x01, 0x2a];
     lossy.extend_from_slice(&7u16.to_le_bytes());
     lossy.extend_from_slice(&11u16.to_le_bytes());

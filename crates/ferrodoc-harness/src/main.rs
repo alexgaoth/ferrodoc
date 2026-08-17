@@ -6,6 +6,7 @@
 //!   ferrodoc-harness diff-ast  [--verbose] [--fail-under PCT] <file-or-dir>...
 //!   ferrodoc-harness diff-spec [--verbose] [--fail-under PCT] <spec.json>
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
+//!   ferrodoc-harness diff-odt   [--verbose] [--fail-under PCT] <file-or-dir>...
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-md [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-gfm [--verbose] [--fail-under PCT] <dir-or-spec.json>...
@@ -37,7 +38,9 @@ fn main() -> Result<()> {
         Some("diff-spec") => diff_spec(&args[1..], verbose, fail_under),
         Some("diff-html") => diff_html(&args[1..], verbose, fail_under),
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
+        Some("diff-odt") => diff_odt(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
+        Some("diff-odt-write") => diff_odt_write(&args[1..], verbose, fail_under),
         Some("diff-md") => diff_md(&args[1..], verbose, fail_under),
         Some("diff-gfm") => diff_gfm(&args[1..], verbose, fail_under),
         Some("diff-gfm-md") => diff_gfm_md(&args[1..], verbose, fail_under),
@@ -47,7 +50,7 @@ fn main() -> Result<()> {
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-write|diff-odt-write|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -536,7 +539,7 @@ fn collect_bytes(path: &Path, out: &mut Vec<Vec<u8>>) -> Result<()> {
         }
     } else if path
         .extension()
-        .is_some_and(|e| matches!(e.to_str(), Some("md" | "gfm" | "html" | "docx")))
+        .is_some_and(|e| matches!(e.to_str(), Some("md" | "gfm" | "html" | "docx" | "odt")))
     {
         out.push(std::fs::read(path).with_context(|| format!("reading {}", path.display()))?);
     }
@@ -576,6 +579,17 @@ fn fuzz_run(seeds: &[Vec<u8>], iters: u32, seed: u64) -> (u32, u32) {
         }
         // The media path decompresses parts the plain read never touches.
         if ferrodoc_docx::read_docx_with_media(&input).is_ok() {
+            ok += 1;
+        } else {
+            refused += 1;
+        }
+        // ODT is a zip of XML parts too, and its own reader.
+        if ferrodoc_odt::read_odt(&input).is_ok() {
+            ok += 1;
+        } else {
+            refused += 1;
+        }
+        if ferrodoc_odt::read_odt_with_media(&input).is_ok() {
             ok += 1;
         } else {
             refused += 1;
@@ -792,11 +806,38 @@ fn normalize_media(value: &mut Value, seen: &mut Vec<String>) {
 /// meaningless; comparing what the format actually preserves is the real
 /// contract.
 fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_round_trip(paths, "docx", &|ast, base| {
+        ferrodoc_docx::write_docx_with_media(ast, &|url| std::fs::read(base.join(url)).ok())
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }, verbose, fail_under)
+}
+
+fn diff_odt_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_round_trip(paths, "odt", &|ast, base| {
+        ferrodoc_odt::write_odt_with_media(ast, &|url| std::fs::read(base.join(url)).ok())
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }, verbose, fail_under)
+}
+
+/// Score a binary writer by round trip: ours through pandoc's reader
+/// against pandoc's own output through the same reader.
+///
+/// Comparing the two *readbacks* rather than either against the source AST
+/// is what isolates the writer. Both office formats lose things on the way
+/// through — a code block has no ODT spelling pandoc's reader knows — and a
+/// loss both writers share is the format's, not ours.
+fn diff_round_trip(
+    paths: &[String],
+    format: &str,
+    write: &dyn Fn(&ferrodoc_ast::Pandoc, &Path) -> Result<Vec<u8>>,
+    verbose: bool,
+    fail_under: Option<f64>,
+) -> Result<()> {
     let cases = collect_mixed(paths)?;
     if cases.is_empty() {
         bail!("no inputs found");
     }
-    let dir = std::env::temp_dir().join("ferrodoc-diff-write");
+    let dir = std::env::temp_dir().join(format!("ferrodoc-diff-{format}-write"));
     std::fs::create_dir_all(&dir)?;
     let mut matched = 0usize;
     let mut failures = Vec::new();
@@ -804,24 +845,21 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
         let ast = ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?;
         let ast_json = serde_json::to_string(&ast)?;
 
-        // Ours: ferrodoc writes the docx, pandoc reads it back. Images
+        // Ours: ferrodoc writes the file, pandoc reads it back. Images
         // resolve against the case's own directory, which is how pandoc
         // resolves them too — otherwise nothing here would embed one.
         let base = Path::new(&case.name).parent().unwrap_or(Path::new(".")).to_owned();
-        let ours_docx = ferrodoc_docx::write_docx_with_media(&ast, &|url| {
-            std::fs::read(base.join(url)).ok()
-        })
-        .map_err(|e| anyhow::anyhow!("{e}"))
-        .with_context(|| format!("ferrodoc failed to write {}", case.name))?;
-        let ours_path = dir.join("ours.docx");
-        std::fs::write(&ours_path, &ours_docx)?;
-        let ours = pandoc_file(&ours_path)
-            .with_context(|| format!("pandoc could not read our docx for {}", case.name))?;
+        let ours_bytes = write(&ast, &base)
+            .with_context(|| format!("ferrodoc failed to write {}", case.name))?;
+        let ours_path = dir.join(format!("ours.{format}"));
+        std::fs::write(&ours_path, &ours_bytes)?;
+        let ours = pandoc_file(&ours_path, format)
+            .with_context(|| format!("pandoc could not read our {format} for {}", case.name))?;
 
-        // Theirs: pandoc writes the docx and reads it back.
-        let theirs_path = dir.join("theirs.docx");
+        // Theirs: pandoc writes the file and reads it back.
+        let theirs_path = dir.join(format!("theirs.{format}"));
         let status = Command::new("pandoc")
-            .args(["-f", "json", "-t", "docx", "--resource-path"])
+            .args(["-f", "json", "-t", format, "--resource-path"])
             .arg(&base)
             .arg("-o")
             .arg(&theirs_path)
@@ -844,7 +882,7 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
                 String::from_utf8_lossy(&status.stderr)
             );
         }
-        let mut theirs = pandoc_file(&theirs_path)?;
+        let mut theirs = pandoc_file(&theirs_path, format)?;
 
         let mut ours = ours;
         normalize_media(&mut ours, &mut Vec::new());
@@ -859,10 +897,10 @@ fn diff_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Resul
     report(&cases, matched, &failures, verbose, fail_under)
 }
 
-/// Read a file with `pandoc -f docx -t json`.
-fn pandoc_file(path: &Path) -> Result<Value> {
+/// Read a file with `pandoc -f <format> -t json`.
+fn pandoc_file(path: &Path, format: &str) -> Result<Value> {
     let output = Command::new("pandoc")
-        .args(["-f", "docx", "-t", "json"])
+        .args(["-f", format, "-t", "json"])
         .arg(path)
         .output()
         .context("running pandoc")?;
@@ -878,12 +916,34 @@ fn pandoc_file(path: &Path) -> Result<Value> {
 
 /// Compare our DOCX reader against `pandoc -f docx -t json` per file.
 fn diff_docx(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_binary(paths, "docx", &|bytes| {
+        Ok(serde_json::to_value(ferrodoc_docx::read_docx(bytes)?)?)
+    }, verbose, fail_under)
+}
+
+fn diff_odt(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_binary(paths, "odt", &|bytes| {
+        Ok(serde_json::to_value(ferrodoc_odt::read_odt(bytes)?)?)
+    }, verbose, fail_under)
+}
+
+/// Compare a binary reader against pandoc's, document by document.
+///
+/// One function for both office formats: the extension is also pandoc's
+/// name for the format, so nothing else differs between the two gates.
+fn diff_binary(
+    paths: &[String],
+    format: &str,
+    read: &dyn Fn(&[u8]) -> Result<Value>,
+    verbose: bool,
+    fail_under: Option<f64>,
+) -> Result<()> {
     let mut files = Vec::new();
     for p in paths {
-        collect_files_with_ext(Path::new(p), "docx", &mut files)?;
+        collect_files_with_ext(Path::new(p), format, &mut files)?;
     }
     if files.is_empty() {
-        bail!("no .docx inputs found");
+        bail!("no .{format} inputs found");
     }
     let mut matched = 0usize;
     let mut failures = Vec::new();
@@ -893,12 +953,9 @@ fn diff_docx(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result
         .collect();
     for (file, case) in files.iter().zip(&cases) {
         let bytes = std::fs::read(file).with_context(|| format!("reading {}", file.display()))?;
-        let ours = serde_json::to_value(
-            ferrodoc_docx::read_docx(&bytes)
-                .with_context(|| format!("ferrodoc failed on {}", file.display()))?,
-        )?;
+        let ours = read(&bytes).with_context(|| format!("ferrodoc failed on {}", file.display()))?;
         let output = Command::new("pandoc")
-            .args(["-f", "docx", "-t", "json"])
+            .args(["-f", format, "-t", "json"])
             .arg(file)
             .output()
             .context("running pandoc")?;

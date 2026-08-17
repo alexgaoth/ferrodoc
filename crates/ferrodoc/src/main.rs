@@ -24,7 +24,7 @@ OPTIONS:
     -V, --version           Print the version
 
 FORMATS:
-    input:   markdown (commonmark, md), gfm, html, docx, json
+    input:   markdown (commonmark, md), gfm, html, docx, odt, json
     output:  those, plus plain (text)
 
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
@@ -40,6 +40,8 @@ EXAMPLES:
     ferrodoc report.docx -t markdown        # DOCX in, CommonMark out
     ferrodoc page.html -t markdown          # HTML in, markdown out
     ferrodoc report.docx -t plain
+    ferrodoc minutes.odt -t gfm             # LibreOffice in, markdown out
+    ferrodoc README.md -o readme.odt        # markdown in, LibreOffice out
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ";
 

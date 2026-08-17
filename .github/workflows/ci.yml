@@ -71,6 +71,12 @@ jobs:
         run: ./target/release/ferrodoc-harness diff-docx corpus/docx-libreoffice --fail-under 87
       - name: DOCX writer
         run: ./target/release/ferrodoc-harness diff-write corpus --fail-under 90
+      - name: ODT reader
+        run: ./target/release/ferrodoc-harness diff-odt corpus/odt --fail-under 94
+      - name: ODT reader, documents LibreOffice wrote
+        run: ./target/release/ferrodoc-harness diff-odt corpus/odt-libreoffice --fail-under 100
+      - name: ODT writer
+        run: ./target/release/ferrodoc-harness diff-odt-write corpus --fail-under 100
       - name: markdown writer
         run: ./target/release/ferrodoc-harness diff-md corpus/commonmark-spec-0.31.2.json --fail-under 100
       - name: GFM reader (corpus)

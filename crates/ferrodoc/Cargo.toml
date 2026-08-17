@@ -26,6 +26,7 @@ ferrodoc-markdown = { workspace = true }
 ferrodoc-html = { workspace = true }
 ferrodoc-text = { workspace = true }
 ferrodoc-docx = { workspace = true }
+ferrodoc-odt = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]
