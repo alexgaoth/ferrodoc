@@ -227,7 +227,18 @@ measurement that decides what comes after it. Probes behind each item are in
     4. `./scripts/verify.sh` exits 0 with no threshold lowered, and
        `./samples/generate.sh --check` stays clean on three consecutive runs.
 
-- [ ] **Nobody has counted what the failing gates are failing on** — the
+- [ ] **(IN PROGRESS, UNJUDGED)** **Nobody has counted what the failing gates
+  are failing on** — `bf289bc` → `4bf7595` → `e8bf015`. Two critics returned
+  REVISE; attempt 3 of 3 was **stopped by agent teardown**, not by failing, and
+  its output is committed unjudged in `e8bf015`. **Criteria 1, 2, 4 and 5 were
+  verified met by two independent critics across rounds 1 and 2** — the census
+  sums to 51 against a fresh harness run, the grouping arithmetic holds, the
+  criterion-4 refutation is confirmed correct, and the diff never left `docs/`.
+  What remains is criterion 3 applied to the document's *own* summary claims.
+  **Resume by running every command block in the file verbatim** — the standard
+  the document sets for itself — and judging with a fresh critic. Do not touch
+  the row tables, the group counts or the criterion-4 refutation: two critics
+  have verified them, and changing them costs that verification. — the
   measurement that should precede the next three features. `CLAUDE.md`'s first
   rule is that *a roadmap item's premise is a claim like any other: measure it
   before building on it*, and two premises in this file were false that way.
