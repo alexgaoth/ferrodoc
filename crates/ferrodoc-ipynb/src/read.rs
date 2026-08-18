@@ -392,14 +392,43 @@ fn fixup_markdown(
                 resolve(target);
                 inlines.extend(alt.iter_mut());
             }
+            Inline::Link(attr, items, target) => {
+                autolink_class(attr, items, target);
+                inlines.extend(items.iter_mut());
+            }
             Inline::Emph(items)
             | Inline::Strong(items)
             | Inline::Strikeout(items)
             | Inline::Underline(items)
-            | Inline::Span(_, items)
-            | Inline::Link(_, items, _) => inlines.extend(items.iter_mut()),
+            | Inline::Span(_, items) => inlines.extend(items.iter_mut()),
             _ => {}
         }
+    }
+}
+
+/// Pandoc's ipynb reader runs markdown with `autolink_bare_uris`, which
+/// classes an autolink: a bare or `<…>` URI becomes `Link ("",["uri"],[])`
+/// and a bare address `Link ("",["email"],[])` with a `mailto:` target. An
+/// explicit `[text](url)` gets no class. Probed against 3.8.2.1; note its
+/// *gfm* reader adds neither class, which is why this lives here and not in
+/// `read_gfm`.
+///
+/// Comrak does not record whether a link was written as an autolink, so the
+/// test is the one that distinguishes them in the source: an autolink's text
+/// *is* its target. `[https://x](https://x)`, written out in full, is
+/// therefore classed here where pandoc leaves it bare — recorded in
+/// `COMPATIBILITY.md` rather than papered over.
+fn autolink_class(attr: &mut Attr, items: &[Inline], target: &Target) {
+    if !attr.classes.is_empty() {
+        return;
+    }
+    let [Inline::Str(text)] = items else { return };
+    if let Some(address) = target.url.strip_prefix("mailto:") {
+        if address == text {
+            attr.classes.push("email".to_owned());
+        }
+    } else if target.url == *text {
+        attr.classes.push("uri".to_owned());
     }
 }
 

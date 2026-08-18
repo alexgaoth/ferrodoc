@@ -32,7 +32,7 @@
 //!   which keeps the paragraph whole and loses the soft break.
 
 use ferrodoc_ast::{
-    Alignment, Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType, Row, Table,
+    Alignment, Attr, Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType, Row, Table, Target,
 };
 use std::fmt::Write as _;
 
@@ -565,14 +565,17 @@ impl Writer {
                 let _ = write!(out, "{ticks}{pad}{text}{pad}{ticks}");
             }
             Inline::Math(kind, text) => {
-                let delimiter = match kind {
-                    MathType::InlineMath => "$",
-                    MathType::DisplayMath => "$$",
-                };
-                escape_text(out, &format!("{delimiter}{text}{delimiter}"), self.gfm);
+                // Verbatim: escaping corrupts the TeX, since `\\` is a
+                // MathJax line break and `\_` a literal underscore. Probed
+                // against pandoc's `ipynb` writer; see the crate CLAUDE.md
+                // for why the dollar form is kept over its `gfm` spelling.
+                write_math(out, *kind, text);
             }
-            Inline::Link(_, inner, target) => {
+            Inline::Link(attr, inner, target) => {
                 let text = self.inlines(inner);
+                if write_autolink(out, attr, inner, target) {
+                    return;
+                }
                 let _ = write!(out, "[{text}]({}", link_destination(&target.url));
                 if !target.title.is_empty() {
                     let _ = write!(out, " \"{}\"", target.title.replace('"', "\\\""));
@@ -729,6 +732,36 @@ fn header(out: &mut String, prefix: &str, level: i64, text: &str) {
 fn digits_since_line_start(out: &str) -> bool {
     let before = out.trim_end_matches(|c: char| c.is_ascii_digit());
     before.len() < out.len() && (before.is_empty() || before.ends_with('\n'))
+}
+
+/// Write `$x$` or `$$x$$`, content untouched.
+fn write_math(out: &mut String, kind: MathType, text: &str) {
+    let delimiter = match kind {
+        MathType::InlineMath => "$",
+        MathType::DisplayMath => "$$",
+    };
+    let _ = write!(out, "{delimiter}{text}{delimiter}");
+}
+
+/// Write a classed autolink in its `<…>` form, returning whether it did.
+///
+/// Probed: pandoc writes an autolink back as `<url>`, and that is what keeps
+/// the `uri`/`email` class its ipynb reader assigns. Written as
+/// `[text](url)` instead, the class is lost on the next read and the writer
+/// gate fails on a document it otherwise matches.
+///
+/// The comparison is against the *unescaped* `Str`: the rendered text has
+/// already had `https\://…` escaped into it, which never equals the target.
+fn write_autolink(out: &mut String, attr: &Attr, inner: &[Inline], target: &Target) -> bool {
+    let [Inline::Str(literal)] = inner else { return false };
+    let bare = attr.classes.iter().any(|c| c == "uri") && *literal == target.url;
+    let mail = attr.classes.iter().any(|c| c == "email")
+        && target.url.strip_prefix("mailto:") == Some(literal.as_str());
+    if bare || mail {
+        let _ = write!(out, "<{literal}>");
+        return true;
+    }
+    false
 }
 
 /// Whether `ch`, appended here, would complete one of GFM's autolink
@@ -1015,6 +1048,50 @@ mod tests {
             write_markdown(&crate::read_gfm("- [ ] a\n").unwrap()),
             "- \u{2610} a\n"
         );
+    }
+
+    #[test]
+    fn math_is_written_verbatim_because_escaping_corrupts_the_tex() {
+        // Escaped, `\sum_i` becomes `\\sum\_i`, and MathJax reads `\\`
+        // as a line break and `\_` as a literal underscore — the equation
+        // renders wrong in a notebook. Probed against pandoc's ipynb writer.
+        let doc = Pandoc::new(vec![Block::Para(vec![
+            Inline::Math(MathType::InlineMath, r"L = \sum_i (y_i)^2".to_owned()),
+        ])]);
+        assert_eq!(write_gfm(&doc), "$L = \\sum_i (y_i)^2$\n");
+
+        let display = Pandoc::new(vec![Block::Para(vec![
+            Inline::Math(MathType::DisplayMath, "E = mc^2".to_owned()),
+        ])]);
+        assert_eq!(write_gfm(&display), "$$E = mc^2$$\n");
+    }
+
+    #[test]
+    fn a_classed_autolink_goes_back_in_its_angle_form() {
+        // `[text](url)` would lose the `uri` class on the next read, which
+        // is what the ipynb writer gate scores. Probed: pandoc writes
+        // `<url>` for a `uri`-classed link and `<address>` for `email`.
+        let uri = Pandoc::new(vec![Block::Para(vec![Inline::Link(
+            Box::new(Attr { classes: vec!["uri".to_owned()], ..Attr::default() }),
+            vec![Inline::Str("https://example.org/r".to_owned())],
+            Box::new(Target { url: "https://example.org/r".to_owned(), title: String::new() }),
+        )])]);
+        assert_eq!(write_gfm(&uri), "<https://example.org/r>\n");
+
+        let mail = Pandoc::new(vec![Block::Para(vec![Inline::Link(
+            Box::new(Attr { classes: vec!["email".to_owned()], ..Attr::default() }),
+            vec![Inline::Str("ops@example.com".to_owned())],
+            Box::new(Target { url: "mailto:ops@example.com".to_owned(), title: String::new() }),
+        )])]);
+        assert_eq!(write_gfm(&mail), "<ops@example.com>\n");
+
+        // An unclassed link keeps the bracket form, class or no class.
+        let plain = Pandoc::new(vec![Block::Para(vec![Inline::Link(
+            Box::default(),
+            vec![Inline::Str("https://example.org/r".to_owned())],
+            Box::new(Target { url: "https://example.org/r".to_owned(), title: String::new() }),
+        )])]);
+        assert_eq!(write_gfm(&plain), "[https\\://example.org/r](https://example.org/r)\n");
     }
 
     #[test]

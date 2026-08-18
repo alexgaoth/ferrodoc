@@ -34,7 +34,7 @@ pub use write::{write_gfm, write_markdown};
 use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue, TableAlignment};
 use comrak::{Arena, Options, parse_document};
 use ferrodoc_ast::{
-    Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Format, Inline, ListAttributes,
+    Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Format, Inline, MathType, ListAttributes,
     ListNumberDelim, ListNumberStyle, Pandoc, Row, Table, TableBody, TableFoot, TableHead, Target,
 };
 use std::borrow::Cow;
@@ -82,9 +82,10 @@ pub fn read_commonmark(input: &str) -> Result<Pandoc, Error> {
 /// `gfm_auto_identifiers` derives.
 ///
 /// Pandoc's own `gfm` bundles further *pandoc* extensions that the GFM
-/// specification does not define — emoji shortcodes, footnotes, alerts,
-/// `$math$` and YAML metadata blocks. Those are not read here; see
-/// `COMPATIBILITY.md`.
+/// specification does not define. `$math$` **is** read, because pandoc's
+/// `gfm` has `tex_math_dollars` on and a Jupyter markdown cell is mostly
+/// equations; emoji shortcodes, footnotes, alerts and YAML metadata blocks
+/// are not. See `COMPATIBILITY.md`.
 ///
 /// # Errors
 ///
@@ -103,6 +104,11 @@ fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
         options.extension.strikethrough = true;
         options.extension.tasklist = true;
         options.extension.autolink = true;
+        // Probed: pandoc's `gfm` reader has `tex_math_dollars` on, so
+        // `$x$` is `Math InlineMath` and `$$x$$` is `Math DisplayMath`
+        // there — while `-f commonmark` leaves both as literal `Str`.
+        // `math_code` stays off: pandoc does not read `` `$x$` `` as math.
+        options.extension.math_dollars = true;
     }
     let root = parse_document(&arena, &prepared, &options);
     // Check the depth once, without recursing, and leave the conversion
@@ -648,6 +654,10 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
         NodeValue::Emph => out.push(Inline::Emph(inlines(node.children()))),
         NodeValue::Strong => out.push(Inline::Strong(inlines(node.children()))),
         NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children()))),
+        NodeValue::Math(m) => out.push(Inline::Math(
+            if m.display_math { MathType::DisplayMath } else { MathType::InlineMath },
+            m.literal.clone(),
+        )),
         NodeValue::Link(l) => out.push(Inline::Link(
             Box::default(),
             inlines(node.children()),

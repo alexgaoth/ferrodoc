@@ -372,7 +372,11 @@ cell that loses a real Jupyter id — which is 8 hex characters, `3a7f1c2d`
 identifier drops the gate from 8/8 to **0/8**. On this corpus the drop
 never fires, because every cell carries a real id; it fires on a notebook
 written before nbformat 4.5, where both sides invent and the gate still
-reports 1/1.
+reports 1/1. The guarantee is therefore scoped to Jupyter's actual 8-hex
+form, not to "a real id": a notebook whose cells genuinely carry
+8-4-4-4-12 identifiers would have them cleared on both sides and could lose
+them unnoticed. No such notebook is in the corpus, and Jupyter does not
+write that shape — but the limit is the id's *shape*, not its realness.
 
 **The judge that is not us** is `nbformat.validate` — Jupyter's own schema
 validator, `nbformat 5.11.1`, installed with `pip install nbformat` and run
@@ -409,17 +413,30 @@ pandoc -f ipynb -t json /tmp/div.ipynb
 | `See www.example.org for more.` | `Str "www.example.org"` — no autolink | `Link` to `http://www.example.org` |
 | `text[^1]` with `[^1]: the note` | `Link ["^1"] ("the%20note","")` | two `Para`s, the syntax left literal |
 | `one\` at end of line | `Str "one\\"` then `SoftBreak` | `LineBreak` |
-| `inline $x^2$ math` | `Math InlineMath "x^2"` | `Str "$x^2$"` — `read_gfm` has no math |
 | `<div class="note">\nhi\n</div>` | `RawBlock "html"` **without** the final newline | with it |
 | `# Done 😀` | identifier `done-grinning` | identifier `done-` |
+| `[https://x](https://x)` written out | `Link ("",[],[])` | `Link ("",["uri"],[])` |
 
-The first three and the last are the *flavour*: pandoc's ipynb markdown and
+The first three and the fifth are the *flavour*: pandoc's ipynb markdown and
 GFM genuinely disagree, and matching them would mean a fifth markdown
-reader. The fourth and fifth are ferrodoc's own gaps — `read_gfm` does not
-read `$…$` math although `pandoc -f gfm` does, and the trailing newline of
-a raw HTML block differs between pandoc's markdown reader and its
-CommonMark one. All six are avoided by the corpus rather than papered over,
-which is why both gates are honest at 100.
+reader. The fourth is ferrodoc's own gap — the trailing newline of a raw
+HTML block differs between pandoc's markdown reader and its CommonMark one.
+
+The sixth is this reader's own cost of a fix. Comrak does not record whether
+a link was written as an autolink, so `autolink_class` uses the test that
+distinguishes them in the source — an autolink's text *is* its target — and
+an explicit `[url](url)` therefore gets the class pandoc leaves off. Named
+here rather than papered over.
+
+**Two that used to be on this list are now fixed, and the corpus carries
+them**: `$…$` math and bare-URI autolinks. Both were absent from the corpus
+when these gates first read 100%, and a review measured that adding nothing
+but inline math dropped the reader to 5/8 and the writer to 6/8. The corpus
+was widened rather than the claim narrowed; `read_gfm` now reads `$x$` and
+`$$x$$` as pandoc's `gfm` does, the markdown writer emits math verbatim
+instead of escaping it into `\\sum\_i`, and `<url>` autolinks survive a
+round trip with their `uri`/`email` class. Both gates are 100% on the wider
+corpus, which is the number that means something.
 
 **Three things pandoc's notebook writer loses, which this writer copies
 deliberately** — the gate compares the two readbacks, so copying them is
