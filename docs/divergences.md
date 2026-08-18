@@ -175,7 +175,10 @@ half, one does not.
   three are the declared rule that this writer does not emit a reference
   the book cannot satisfy (G5).
 
-So the HTML reader costs one gate and one document, not three gates.
+So **the 26** cost one gate and one document, not three gates. The HTML
+reader at large costs more — `spec-11` and `spec-13`/`14`/`15` are HTML
+reader divergences too — but they are not among the 26, which is what
+the roadmap claim was about.
 
 ---
 
@@ -263,9 +266,13 @@ printf '<p><em>foo </em>bar</p>\n' | pandoc -f html -t json   # Emph, Space, Str
 ```
 
 `nav.xhtml` and `title_page.xhtml` diverge in **every** chunk, including
-the eight that pass, so neither is a cause of anything: pandoc's EPUB
-reader treats them as furniture and never routes them through the
-comparison. They are excluded above.
+the eight that pass, so neither is a cause of any row above: pandoc's
+EPUB reader treats them as furniture and never routes them through the
+comparison. They are excluded from the table for that reason — but
+excluded from *cause attribution* is not the same as containing nothing
+worth counting, and reading the first as the second is how the two extra
+divergences in the closing section went unnoticed for a round. What they
+diverge on is audited there.
 
 ### EPUB reader — `diff-epub corpus/epub`, 10 of 12
 
@@ -327,9 +334,13 @@ Stated as findings, not as a plan — ranking belongs in `TODO.md`.
   declared, 2 covered only by extension of it. The actionable
   HTML reader count is **13**, in nine groups, the largest of which
   (`<a/>` duplicate emission) is three documents.
-- **Three HTML reader divergences exist that no gate measures**, all
-  three invisible to `diff-html-read` because the CommonMark spec's
-  expected HTML never contains the construct:
+- **Five HTML reader divergences exist that no gate measures**, all five
+  invisible to `diff-html-read` because neither the CommonMark spec's
+  expected HTML nor the eight `corpus/*.html` files contains the
+  construct. The last two are in the EPUB furniture files excluded from
+  the chunk table above, which diverge in the **passing** chunks
+  (`spec-02`, `spec-03`) as well as the failing ones — so no gate can
+  reach them however the scores move:
   - trailing space inside `<em>`/`<strong>` (G3), pandoc hoists it out;
   - a space before `<br />`, pandoc trims it and ferrodoc keeps it;
   - **`<head>` metadata**: pandoc's HTML reader populates `meta` from
@@ -346,15 +357,54 @@ Stated as findings, not as a plan — ranking belongs in `TODO.md`.
     ./target/release/ferrodoc -f html -t json /tmp/h.html   # "meta":{}
     ```
 
-  Two of the three were found only because the EPUB corpus contains HTML
-  the spec's expected output never writes — the third time a new format
-  has found a bug in the old code. The `<head>` one was found by this
-  document getting it wrong, which is the next entry.
+  - **An `id` on `<li>` is dropped** — pandoc wraps the item's content in
+    a `Span` carrying it, ferrodoc emits the content bare. This is silent
+    *identifier* loss, not a formatting difference: it is what every
+    `nav.xhtml` in `corpus/epub-spec` diverges on. Probe:
 
-- **This document was itself the eighth instance of the defect it
-  catalogues**, and the entry is left here rather than quietly fixed.
-  Seven documented claims in this repo have turned out wider than the
-  code behind them; `COMPATIBILITY.md`'s "the two documents it misses
+    ```sh
+    printf '<ol><li id="toc-li-1"><a href="a.html">T</a></li></ol>\n' > /tmp/li.html
+    pandoc -f html -t json /tmp/li.html   # Plain[ Span ["toc-li-1",[],[]] [ Link … ] ]
+    ./target/release/ferrodoc -f html -t json /tmp/li.html   # Plain[ Link … ] — no Span
+    ```
+
+  - **`epub:type` is not read as a class, and `epub:type="titlepage"`
+    is kept** — two facets of one attribute, and what every
+    `title_page.xhtml` diverges on. Pandoc turns the attribute's value
+    into a **class** and keeps the attribute too; ferrodoc keeps only
+    the attribute. Separately, on the value `titlepage` pandoc drops the
+    element *and everything inside it*, where ferrodoc emits a `Div`.
+    Neither the element nor emptiness is the trigger — a `<section>`
+    without `epub:type` matches pandoc exactly, which is why
+    `corpus/sectioning.html` passes. Probe both facets:
+
+    ```sh
+    printf '<section epub:type="titlepage"><p>x</p></section>\n' > /tmp/tp.html
+    pandoc -f html -t json /tmp/tp.html   # "blocks":[]
+    ./target/release/ferrodoc -f html -t json /tmp/tp.html   # one Div, content intact
+
+    printf '<section epub:type="chapter"><p>x</p></section>\n' > /tmp/ch.html
+    pandoc -f html -t json /tmp/ch.html | jq -c '.blocks[0].c[0]'    # ["",["section","chapter"],[["epub:type","chapter"]]]
+    ./target/release/ferrodoc -f html -t json /tmp/ch.html | jq -c '.blocks[0].c[0]'   # ["",["section"],[["epub:type","chapter"]]]
+
+    printf '<section class="x"><p>y</p></section>\n' > /tmp/plain.html   # control: no epub:type
+    diff <(pandoc -f html -t json /tmp/plain.html | jq -S .) \
+         <(./target/release/ferrodoc -f html -t json /tmp/plain.html | jq -S .) && echo "identical"
+    ```
+
+  Four of the five were found only because the EPUB corpus contains HTML
+  the spec's expected output never writes — a new format finding bugs in
+  the old code, for the third time. The `<head>` one was found by this
+  document getting it wrong, and the last two by its getting the count of
+  those wrong; both are the next entry.
+
+- **This document has twice been an instance of the defect it
+  catalogues**, and both entries are left here rather than quietly
+  fixed. (No ordinal: `TODO.md` counts these too, and the two tallies
+  cannot be reconciled without deciding cases the tallies never named.
+  The rule below is the part that matters and does not need a number.)
+  Documented claims in this repo keep turning out wider than the code
+  behind them; `COMPATIBILITY.md`'s "the two documents it misses
   are both HTML reader divergences … in the 26" is one of them, found
   above. The first revision of *this* file then claimed, in bold, that
   three documents read "byte-identically" to `pandoc -f html`, and
@@ -365,3 +415,13 @@ Stated as findings, not as a plan — ranking belongs in `TODO.md`.
   evidence. **A repro that has not been run as printed is a claim, not
   evidence** — which is the rule the rest of this census is built on,
   applied to the census.
+
+  The second revision then said "three divergences no gate measures"
+  when there are five. The two it missed were in the furniture files it
+  had itself dismissed one section earlier, with the words "neither is a
+  cause of anything" — a sentence that is true about *cause attribution*
+  and was silently read as "neither contains anything worth counting".
+  One of the two is silent identifier loss. **Excluding something from a
+  count needs its own evidence, not the evidence that excluded it from a
+  different count** — the same defect as the first, one level up: not an
+  unrun command this time, but an unasked question.
