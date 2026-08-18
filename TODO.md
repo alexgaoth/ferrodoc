@@ -188,7 +188,35 @@ is also written — so the queue is what **rule 3** leaves, followed by the
 measurement that decides what comes after it. Probes behind each item are in
 `.iterate/odyssey-20260817-1409/ODYSSEY.md`.
 
-- [ ] **A Jupyter notebook reader and writer** — the significant addition this
+- [ ] **(IN PROGRESS — REVISE outstanding, do not merge as-is)** **A Jupyter
+  notebook reader and writer** — landed as `9b0a33a` on branch
+  `odyssey/20260817-1902`, **not approved**. A critic returned REVISE on two
+  MAJOR findings; attempt 2 was killed by a session limit before it changed
+  anything, and the deadline passed while blocked.
+
+  **The hazard to fix before this is merged.** `scripts/verify.sh` gates both
+  new ipynb gates at `--fail-under 100` on a corpus the critic measured as
+  unrepresentative: adding **nothing but inline `$…$` math** to three of the
+  eight notebooks drops `diff-ipynb` to **5/8** and `diff-ipynb-write` to
+  **6/8** — the latter below this item's own committed ≥7/8 floor. Merged
+  as-is it advertises a 100% guarantee it does not have. The crate itself is
+  sound and independently verified; it is the corpus and the two thresholds
+  that are not yet honest.
+
+  Resume from the two MAJORs: read `$…$` and `$$…$$` in ipynb markdown cells
+  as pandoc's ipynb reader does, stop `write_gfm` escaping `\` and `_` inside
+  `Math`, widen the corpus to carry math and a bare URL, and correct the two
+  `COMPATIBILITY.md` rows. **Do not shrink the corpus to make the number
+  work** — that is the one move that turns this into bar-lowering.
+
+  What a critic already verified and should not be redone: writer-gate
+  isolation (both writers receive pandoc's own reading), id-drop narrowness
+  (an id-discarding writer scores 0/8), the fuzz extension (126 seeds against
+  a baseline of 118, genuinely calling the new reader), a privacy-clean corpus
+  copied from nothing on this machine, `nbformat` 5.11.1 at 9/9, and no
+  regression in any pre-existing gate.
+
+- [ ] **(original item text, Eval frozen and unchanged)** **A Jupyter notebook reader and writer** — the significant addition this
   run was asked for, and the ranking supports it independently. `ipynb` is one
   of the **eighteen mainstream formats** `## Why not simply rewrite pandoc`
   identifies, it is **not** among the declared non-goals, and pandoc both reads
