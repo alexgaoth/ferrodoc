@@ -188,99 +188,6 @@ is also written — so the queue is what **rule 3** leaves, followed by the
 measurement that decides what comes after it. Probes behind each item are in
 `.iterate/odyssey-20260817-1409/ODYSSEY.md`.
 
-- [ ] **(IN PROGRESS — REVISE outstanding, do not merge as-is)** **A Jupyter
-  notebook reader and writer** — landed as `9b0a33a` on branch
-  `odyssey/20260817-1902`, **not approved**. A critic returned REVISE on two
-  MAJOR findings; attempt 2 was killed by a session limit before it changed
-  anything, and the deadline passed while blocked.
-
-  **The hazard to fix before this is merged.** `scripts/verify.sh` gates both
-  new ipynb gates at `--fail-under 100` on a corpus the critic measured as
-  unrepresentative: adding **nothing but inline `$…$` math** to three of the
-  eight notebooks drops `diff-ipynb` to **5/8** and `diff-ipynb-write` to
-  **6/8** — the latter below this item's own committed ≥7/8 floor. Merged
-  as-is it advertises a 100% guarantee it does not have. The crate itself is
-  sound and independently verified; it is the corpus and the two thresholds
-  that are not yet honest.
-
-  Resume from the two MAJORs: read `$…$` and `$$…$$` in ipynb markdown cells
-  as pandoc's ipynb reader does, stop `write_gfm` escaping `\` and `_` inside
-  `Math`, widen the corpus to carry math and a bare URL, and correct the two
-  `COMPATIBILITY.md` rows. **Do not shrink the corpus to make the number
-  work** — that is the one move that turns this into bar-lowering.
-
-  What a critic already verified and should not be redone: writer-gate
-  isolation (both writers receive pandoc's own reading), id-drop narrowness
-  (an id-discarding writer scores 0/8), the fuzz extension (126 seeds against
-  a baseline of 118, genuinely calling the new reader), a privacy-clean corpus
-  copied from nothing on this machine, `nbformat` 5.11.1 at 9/9, and no
-  regression in any pre-existing gate.
-
-- [ ] **(original item text, Eval frozen and unchanged)** **A Jupyter notebook reader and writer** — the significant addition this
-  run was asked for, and the ranking supports it independently. `ipynb` is one
-  of the **eighteen mainstream formats** `## Why not simply rewrite pandoc`
-  identifies, it is **not** among the declared non-goals, and pandoc both reads
-  and writes it — so it can be gated in both directions on the day it is
-  started, which is the condition `## How a format gets added` sets. The
-  tie-break rule decides the rest: a new reader gains every writer already
-  written, so this arrives as `ipynb → markdown, → GFM, → HTML, → DOCX, → ODT,
-  → EPUB, → LaTeX, → RST, → AsciiDoc, → plain`, plus the return trip.
-
-  It also serves the bet more directly than any format left on the list.
-  Notebooks are where Python pipelines keep prose, and the Python wheel is
-  already the most-used binding this project ships. `notebook → docx` in
-  process, with no 153 MB subprocess, is a pipeline people actually run.
-
-  **Probed before writing this, against pandoc 3.8.2.1** — the premise is
-  measured, not assumed:
-  - a notebook reads to one `Div` per cell, classed `cell markdown` /
-    `cell code` / `cell raw`, with `execution_count` and `tags` as key-value
-    attributes; outputs become nested `Div`s classed `output stream stdout`,
-    `output execute_result`; a raw cell becomes `RawBlock "ipynb"`; notebook
-    metadata lands under a single `jupyter` meta key.
-  - **pandoc's ipynb does not round-trip through itself**, and the only
-    difference is that its writer invents a **random per-cell UUID `id`**
-    (nbformat 4.5 requires one) which its reader then reads back. Everything
-    else — meta, every block, cell count — is identical. That is the same
-    shape as the EPUB writer's random `dc:identifier`, and the harness already
-    has `drop_uuid` for exactly it.
-  - **Eval:**
-    1. A `crates/ferrodoc-ipynb` crate, `Format::Ipynb` wired into `parse`,
-       `render`, `Format::NAMES` and the `--help` text in `main.rs`, and
-       `ferrodoc nb.ipynb -t docx` working end to end from the CLI. A format
-       unreachable by users is not added.
-    2. A corpus of **at least 8** notebooks under `corpus/ipynb-handmade/`,
-       written in the shape **Jupyter and Colab actually emit** (nbformat 4.5,
-       cell `id`s, `outputs` covering `stream`, `execute_result`,
-       `display_data` with a base64 `image/png`, and `error`), **not** in the
-       shape pandoc's writer emits. Real notebooks exist on this machine to
-       study for shape — **read them for shape only and commit none of them**;
-       they are the user's files and third-party package samples.
-    3. **Reader gate `diff-ipynb` at 8/8 (100%)** on that corpus, in
-       `scripts/verify.sh` and CI. 100% is the commitment because the corpus
-       is small and hand-written, which `CLAUDE.md` says to gate at 100
-       separately from a spec run — and because ipynb is JSON, so there is no
-       parse ambiguity to hide behind.
-    4. **Writer gate `diff-ipynb-write` at ≥ 7 of 8**, ours through pandoc
-       against pandoc's through pandoc, with the random cell `id` dropped **in
-       its exact unmatchable form only** — a notebook that loses a *real* id
-       must still fail. Every divergence enumerated by name in
-       `COMPATIBILITY.md`. If 8/8 turns out reachable, say so; if fewer than 7,
-       the item is **not done** — that number is the commitment, not an
-       aspiration.
-    5. **An external judge**: the written notebook must be accepted by
-       something that is not us. Try `pip install nbformat` and validate with
-       `nbformat.validate` if it installs; if it does not, say so plainly and
-       use the strongest available substitute — `pandoc -f ipynb` accepting
-       every written notebook, plus a check of nbformat 4.5's required keys —
-       and record in `COMPATIBILITY.md` which judge was actually used.
-    6. `./scripts/verify.sh` exits 0 with **no existing threshold lowered**,
-       the wasm32 build still passes (the crate must do no IO and pull in no C
-       library), and `--fuzz` is run because a reader changed.
-    7. The paperwork: rows in `COMPATIBILITY.md` and `docs/gates.md`, the gate
-       in CI, and a `crates/ferrodoc-ipynb/CLAUDE.md` holding the rules that
-       are easy to get wrong.
-
 - [ ] **The new samples check claims more than it catches** — three MINORs
   from the `28f064b` review, and the first is the fourth instance this project
   has produced of one defect: **a documented claim wider than the code behind
@@ -439,6 +346,39 @@ measurement that decides what comes after it. Probes behind each item are in
     3. `./scripts/verify.sh` exits 0. This item changes no code.
 
 ## Done
+
+- [x] **A Jupyter notebook reader and writer** (2026-08-18) — eval met on all
+  seven criteria, at `9b0a33a` + `4f0fd35`. `crates/ferrodoc-ipynb`,
+  `Format::Ipynb` reachable from the CLI, **`diff-ipynb` 8/8 and
+  `diff-ipynb-write` 8/8** on a corpus widened to carry what the first one
+  omitted, `nbformat` 5.11.1 accepting 9/9, 500k fuzz over 126 seeds, no
+  pre-existing gate moved and `samples/` clean.
+
+  **The first pass scored 100% partly on what its corpus left out**, and a
+  critic proved it by measurement rather than argument: adding nothing but
+  inline `$…$` math to three of the eight notebooks dropped the reader to
+  **5/8** and the writer to **6/8** — below this item's own committed floor.
+  Two notebooks had no markdown cell at all; `08` said "## Fitting the model"
+  with no equation under it. The offered escape was to state in the paperwork
+  that the gate measures the notebook *container* rather than cell content.
+  That was refused: narrowing what a gate claims to cover, after seeing what
+  it scores, is the thermometer this file warns about. The corpus was widened
+  instead and the fixes made.
+
+  **The reader gap was never ipynb's.** `pandoc -f gfm` has
+  `tex_math_dollars` on, so `read_gfm` had been missing `$x$` all along —
+  and `diff-gfm` could not see it because the CommonMark spec's only `$…$`
+  sits inside a code fence's info string. The same blind-spot shape as the
+  three silent losses `samples/` found, in a third place.
+
+  Two more, both structural rather than cosmetic: the markdown writer
+  **escaped math into `\\sum\_i`**, which MathJax renders as a line break
+  and a literal underscore, so every equation came out wrong; and an
+  autolink lost the `uri`/`email` class pandoc's ipynb reader assigns unless
+  it is written back in `<url>` form. Four mutations, four caught — math off
+  3/8 reader, math escaped 4/8 writer, class dropped 7/8 reader, angle form
+  dropped 7/8 writer.
+
 
 - [x] **`samples/` is an unchecked guarantee** (2026-08-17) — eval met:
   `28f064b`. `samples/generate.sh --check` regenerates into a `mktemp -d -p .`
