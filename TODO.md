@@ -188,6 +188,71 @@ is also written — so the queue is what **rule 3** leaves, followed by the
 measurement that decides what comes after it. Probes behind each item are in
 `.iterate/odyssey-20260817-1409/ODYSSEY.md`.
 
+- [ ] **A Jupyter notebook reader and writer** — the significant addition this
+  run was asked for, and the ranking supports it independently. `ipynb` is one
+  of the **eighteen mainstream formats** `## Why not simply rewrite pandoc`
+  identifies, it is **not** among the declared non-goals, and pandoc both reads
+  and writes it — so it can be gated in both directions on the day it is
+  started, which is the condition `## How a format gets added` sets. The
+  tie-break rule decides the rest: a new reader gains every writer already
+  written, so this arrives as `ipynb → markdown, → GFM, → HTML, → DOCX, → ODT,
+  → EPUB, → LaTeX, → RST, → AsciiDoc, → plain`, plus the return trip.
+
+  It also serves the bet more directly than any format left on the list.
+  Notebooks are where Python pipelines keep prose, and the Python wheel is
+  already the most-used binding this project ships. `notebook → docx` in
+  process, with no 153 MB subprocess, is a pipeline people actually run.
+
+  **Probed before writing this, against pandoc 3.8.2.1** — the premise is
+  measured, not assumed:
+  - a notebook reads to one `Div` per cell, classed `cell markdown` /
+    `cell code` / `cell raw`, with `execution_count` and `tags` as key-value
+    attributes; outputs become nested `Div`s classed `output stream stdout`,
+    `output execute_result`; a raw cell becomes `RawBlock "ipynb"`; notebook
+    metadata lands under a single `jupyter` meta key.
+  - **pandoc's ipynb does not round-trip through itself**, and the only
+    difference is that its writer invents a **random per-cell UUID `id`**
+    (nbformat 4.5 requires one) which its reader then reads back. Everything
+    else — meta, every block, cell count — is identical. That is the same
+    shape as the EPUB writer's random `dc:identifier`, and the harness already
+    has `drop_uuid` for exactly it.
+  - **Eval:**
+    1. A `crates/ferrodoc-ipynb` crate, `Format::Ipynb` wired into `parse`,
+       `render`, `Format::NAMES` and the `--help` text in `main.rs`, and
+       `ferrodoc nb.ipynb -t docx` working end to end from the CLI. A format
+       unreachable by users is not added.
+    2. A corpus of **at least 8** notebooks under `corpus/ipynb-handmade/`,
+       written in the shape **Jupyter and Colab actually emit** (nbformat 4.5,
+       cell `id`s, `outputs` covering `stream`, `execute_result`,
+       `display_data` with a base64 `image/png`, and `error`), **not** in the
+       shape pandoc's writer emits. Real notebooks exist on this machine to
+       study for shape — **read them for shape only and commit none of them**;
+       they are the user's files and third-party package samples.
+    3. **Reader gate `diff-ipynb` at 8/8 (100%)** on that corpus, in
+       `scripts/verify.sh` and CI. 100% is the commitment because the corpus
+       is small and hand-written, which `CLAUDE.md` says to gate at 100
+       separately from a spec run — and because ipynb is JSON, so there is no
+       parse ambiguity to hide behind.
+    4. **Writer gate `diff-ipynb-write` at ≥ 7 of 8**, ours through pandoc
+       against pandoc's through pandoc, with the random cell `id` dropped **in
+       its exact unmatchable form only** — a notebook that loses a *real* id
+       must still fail. Every divergence enumerated by name in
+       `COMPATIBILITY.md`. If 8/8 turns out reachable, say so; if fewer than 7,
+       the item is **not done** — that number is the commitment, not an
+       aspiration.
+    5. **An external judge**: the written notebook must be accepted by
+       something that is not us. Try `pip install nbformat` and validate with
+       `nbformat.validate` if it installs; if it does not, say so plainly and
+       use the strongest available substitute — `pandoc -f ipynb` accepting
+       every written notebook, plus a check of nbformat 4.5's required keys —
+       and record in `COMPATIBILITY.md` which judge was actually used.
+    6. `./scripts/verify.sh` exits 0 with **no existing threshold lowered**,
+       the wasm32 build still passes (the crate must do no IO and pull in no C
+       library), and `--fuzz` is run because a reader changed.
+    7. The paperwork: rows in `COMPATIBILITY.md` and `docs/gates.md`, the gate
+       in CI, and a `crates/ferrodoc-ipynb/CLAUDE.md` holding the rules that
+       are easy to get wrong.
+
 - [ ] **The new samples check claims more than it catches** — three MINORs
   from the `28f064b` review, and the first is the fourth instance this project
   has produced of one defect: **a documented claim wider than the code behind
@@ -227,43 +292,72 @@ measurement that decides what comes after it. Probes behind each item are in
     4. `./scripts/verify.sh` exits 0 with no threshold lowered, and
        `./samples/generate.sh --check` stays clean on three consecutive runs.
 
-- [ ] **(IN PROGRESS, UNJUDGED)** **Nobody has counted what the failing gates
-  are failing on** — `bf289bc` → `4bf7595` → `e8bf015`. Two critics returned
-  REVISE; attempt 3 of 3 was **stopped by agent teardown**, not by failing, and
-  its output is committed unjudged in `e8bf015`. **Criteria 1, 2, 4 and 5 were
-  verified met by two independent critics across rounds 1 and 2** — the census
-  sums to 51 against a fresh harness run, the grouping arithmetic holds, the
-  criterion-4 refutation is confirmed correct, and the diff never left `docs/`.
-  What remains is criterion 3 applied to the document's *own* summary claims.
-  **Resume by running every command block in the file verbatim** — the standard
-  the document sets for itself — and judging with a fresh critic. Do not touch
-  the row tables, the group counts or the criterion-4 refutation: two critics
-  have verified them, and changing them costs that verification. — the
-  measurement that should precede the next three features. `CLAUDE.md`'s first
-  rule is that *a roadmap item's premise is a claim like any other: measure it
-  before building on it*, and two premises in this file were false that way.
-  Two live claims here are unmeasured: that the HTML reader's 26 divergences
-  are what holds `corpus/epub-spec` at **8/22 (36.4%)**, by far the worst gate
-  in the suite, and that closing them "costs three ways". Both may be true;
-  neither has a breakdown behind it.
+- [ ] **(BLOCKED: the Eval is met; a section the Eval never asked for is not)**
+  **Nobody has counted what the failing gates are failing on** — `bf289bc` →
+  `4bf7595` → `e8bf015`. **Three attempts, three REVISE verdicts from three
+  different critics.** The Eval is left **intact and unweakened**; the item is
+  blocked rather than revised, because revising it here would be bar-lowering.
+
+  **What is actually true, and it is unusual.** All five criteria are
+  *verified met* — criterion 1's 51 rows reproduce from the printed command,
+  the grouping arithmetic holds, criterion 4's refutation is confirmed
+  correct, criterion 5 is clean, and round 3's critic ran **every command
+  block in the document verbatim** and found each demonstrates its claim.
+  What failed all three rounds is a section **the Eval never required**: a
+  closing list of "HTML reader divergences that no gate measures". It said
+  three, then five, and is now measured at **six**. The Eval asked for a
+  census of *failing* documents; the author added an audit of *unmeasured*
+  ones, and that addition has been wrong every round.
+
+  So the blocking reason is precise: *done includes the paperwork* makes the
+  extra section binding once written, and it is not right. The census proper
+  is sound and stays committed — nothing is reverted, because the work
+  predates this branch and meets its contract.
+
+  **Do not re-attempt this item.** Its remaining defect is now the item
+  below, with an Eval that actually names the job.
+
+- [ ] **Enumerate every HTML reader divergence no gate can reach — and fix the
+  one that loses content** — the census kept undercounting this because it was
+  guessing at a boundary instead of sweeping it. Round 3's critic did sweep
+  it: all **119 XHTML files** across the 34 corpus EPUBs, `pandoc -f html` vs
+  `ferrodoc -f html`, comparing `.blocks`. That is the method; the census's
+  was not.
+
+  It found a **sixth** divergence, and it is a structural loss rather than a
+  formatting one. Verified independently by the overseer:
+
+  ```
+  <p>a<a href="#fn1" class="footnote-ref" id="fnref1" epub:type="noteref" role="doc-noteref">1</a></p>
+  pandoc   → Para[ Str "a", Note [] ]
+  ferrodoc → Para[ Str "a", Link ["fnref1",["footnote-ref"],…] ]
+  ```
+
+  **A footnote reference silently degrades to a link.** Neither attribute
+  triggers it alone — probed both ways — only the combination. It is live in
+  `corpus/epub/anchors-and-notes.epub` and `corpus/epub/notes-and-images.epub`,
+  and **both books pass `diff-epub`**, because ferrodoc's EPUB path builds
+  `Note` by another route. No gate reaches it: none of the 8 `corpus/*.html`
+  files contains `noteref`.
   - **Eval:**
-    1. A table — committed as `docs/divergences.md` — with **one row per
-       failing document** across every gate scoring under 100%: 26 HTML
-       reader, 14 EPUB spec chunks, 3 EPUB writer, 2 EPUB reader, 2 ODT
-       reader, 1 GFM spec, 1 DOCX reader, 1 DOCX LO, 1 DOCX writer. Each row:
-       the document, the first diverging AST path, and a one-line cause.
-    2. Causes **grouped**, with a count per group, so the table answers "which
-       single fix buys the most documents" — that number is the item's whole
-       point.
-    3. Each claimed cause carries its reproducing command, and at least the
-       top three groups are confirmed by probing pandoc 3.8.2.1 directly
-       rather than inferred from the harness's output.
-    4. States plainly, with evidence, whether the `epub-spec` 8/22 really is
-       the HTML reader — **including if it is not**. A refuted premise is a
-       successful outcome here, not a failure.
-    5. No behaviour change: `./scripts/verify.sh` exits 0, every gate score
-       identical, diff confined to `docs/` and any harness `--verbose` output
-       needed to produce it.
+    1. A corpus fixture under `corpus/` carrying **every one of the six**,
+       so each becomes gate-reachable: trailing space in `<em>`/`<strong>`,
+       space before `<br />`, `<head>` metadata, `<li id>`, `epub:type`, and
+       `noteref`. `diff-html-read`'s denominator grows and its **numerator
+       must grow by the same amount** — a fixture that fails on arrival is a
+       fixture, not a fix.
+    2. **The `noteref` loss is fixed**: the probe above produces `Note` from
+       ferrodoc, asserted as a literal-AST unit test, and mutation-tested by
+       breaking it and confirming the new fixture drops.
+    3. The remaining five are each either fixed or **recorded in
+       `COMPATIBILITY.md` as deliberate with a reason**, and `<li id>` is
+       stated with **both** its forms — a `Span` for inline item content and a
+       `Div` for block content, which the census printed only half of.
+    4. `diff-html-read`'s threshold in `scripts/verify.sh` is **raised**, never
+       lowered, and `./scripts/verify.sh` exits 0.
+    5. The sweep is repeatable: the 119-file comparison is committed as a
+       script so the next session does not re-derive it, and re-running it
+       reports **zero** divergences outside those recorded.
 
 - [ ] **The `plain` writer is plainer than pandoc's** — `samples/10` differs by
   47 lines: block quotes are not indented two spaces, tables are tab-separated
