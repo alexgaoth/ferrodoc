@@ -45,6 +45,8 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
 - Never guess pandoc behavior — probe it first
   (`printf '...' | pandoc -f commonmark -t json`), then encode the probed rule
   with a comment. Every quirk in ferrodoc-markdown was derived this way.
+  A repro you commit must be **run as printed**: a command that does not
+  demonstrate its claim when pasted is a claim, not evidence.
 - **Probe with `-t json`, and never normalize whitespace in the output you
   are comparing.** A `re.sub(r'\s+', ' ')` over pandoc's `-t native` output
   collapses the very thing being measured: it turned "three spaces survive"
@@ -83,7 +85,9 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   before trusting a number that involved media.
 - A behavior with no corpus document that fails without it is not covered.
   Mutation-test a new rule by breaking it and confirming the corpus drops;
-  restore with a `cp` of a copy taken first, never `git checkout`.
+  restore with a plain `cp` of a copy taken first, never `git checkout` —
+  and never `cp -a`, which preserves mtime so cargo skips the rebuild and
+  the "restored" tree is then measured with the mutated binary.
 - A round-trip gate cannot see a rule whose two spellings read back the same
   (`- ☐ a` and `- [ ] a` are one AST). Those need a test on the literal
   output, or they ship broken with CI green.
@@ -132,10 +136,16 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   behind them, including fixes made after a run hit its round cap.
   `COMPATIBILITY.md` has every known loss with its reproducing command —
   update it when a number moves.
-- **Some formats have no oracle.** Pandoc writes `AsciiDoc` and cannot
-  read it, so that writer has no differential gate at all and is judged by
-  `asciidoctor` in CI. Where a format's own toolchain exists, it is the
-  better judge anyway: `pdflatex`, `sphinx-build -W`, `epubcheck`.
+- **Some formats have no oracle, and two gates have contradictory ones.**
+  Pandoc writes `AsciiDoc` and cannot read it, so that writer has no
+  differential gate and is judged by `asciidoctor`; where a format's own
+  toolchain exists it is the better judge anyway (`pdflatex`,
+  `sphinx-build -W`, `epubcheck`). Worse: `pandoc -f html` runs with
+  `raw_html` **off** and `pandoc -f epub` runs the same reader with it
+  **on**, so `diff-html-read` and `epub-spec` cannot both be satisfied by
+  one reader — closing the HTML reader's 26 divergences moves `epub-spec`
+  by **zero** documents. `docs/divergences.md` has all 51 failing
+  documents with a cause each; read it before planning reader work.
 - `unsafe` is forbidden workspace-wide, allowed **for the attribute only**
   in `bindings/wasm` (a handle table is what avoids the blocks), and
   allowed with real blocks in `bindings/c` alone — where each is one
