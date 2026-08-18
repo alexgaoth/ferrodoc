@@ -18,6 +18,7 @@ published sources describe a later pandoc than this binary.
 | DOCX | yes | yes |
 | ODT | yes | yes |
 | EPUB | yes | yes |
+| Jupyter notebook (ipynb) | yes | yes (nbformat 4.5) |
 | LaTeX | — (never: a `.tex` expands macros) | yes |
 | reStructuredText | — | yes |
 | AsciiDoc | — (pandoc cannot read it either) | yes |
@@ -46,6 +47,8 @@ cargo run -p ferrodoc-harness -- diff-odt       corpus/odt --fail-under 94
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt-libreoffice --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-epub-write corpus --fail-under 72
+cargo run -p ferrodoc-harness -- diff-ipynb      corpus/ipynb-handmade --fail-under 100
+cargo run -p ferrodoc-harness -- diff-ipynb-write corpus/ipynb-handmade --fail-under 100
 cargo run -p ferrodoc-harness -- diff-md        corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/commonmark-spec-0.31.2.json --fail-under 99.8
@@ -67,6 +70,8 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-epub` | EPUB reader produces pandoc's AST | **10/12** |
 | `diff-epub` (hand-authored) | ...on books in shapes pandoc's writer never emits | **3/3** |
 | `diff-epub-write` | EPUB writer survives a round trip through pandoc | **8/11** |
+| `diff-ipynb` | notebook reader produces pandoc's AST | **8/8** |
+| `diff-ipynb-write` | notebook writer survives a round trip through pandoc | **8/8** |
 | `diff-latex` | LaTeX writer round-trips the document | **1/11** (pandoc: 0/11) |
 | `diff-rst` | RST writer round-trips the document | **2/11** (pandoc: 3/11) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
@@ -343,6 +348,88 @@ Pandoc does the same. A well-formed comment is untouched.
 Syntax highlighting is not done, so a code block carries no `cbN`
 identifier and no per-token markup; the gate passes
 `--syntax-highlighting=none`, exactly as the HTML gate does.
+
+### Jupyter notebooks — both gates at 8/8, and 6 divergences the corpus avoids
+
+Both notebook gates are at **100%**: `diff-ipynb` reads all 8 hand-authored
+notebooks to exactly pandoc's AST, and `diff-ipynb-write` writes all 8 to a
+notebook that comes back through pandoc's reader identical to pandoc's own.
+
+```sh
+cargo build --release -p ferrodoc-harness
+./target/release/ferrodoc-harness diff-ipynb       corpus/ipynb-handmade --fail-under 100
+./target/release/ferrodoc-harness diff-ipynb-write corpus/ipynb-handmade --fail-under 100
+```
+
+**The writer gate drops one thing, and only in the form nothing can
+match.** nbformat 4.5 requires an `id` on every cell, so a cell whose AST
+carries none forces both writers to invent one: pandoc draws a random
+UUID, this derives a UUID-*shaped* string from the cell's own content so a
+notebook written twice is byte-identical. The gate clears a cell `Div`
+identifier on both sides **only when it is the 8-4-4-4-12 hex shape**, so a
+cell that loses a real Jupyter id — which is 8 hex characters, `3a7f1c2d`
+— still fails. Confirmed by mutation: making the writer discard every
+identifier drops the gate from 8/8 to **0/8**. On this corpus the drop
+never fires, because every cell carries a real id; it fires on a notebook
+written before nbformat 4.5, where both sides invent and the gate still
+reports 1/1.
+
+**The judge that is not us** is `nbformat.validate` — Jupyter's own schema
+validator, `nbformat 5.11.1`, installed with `pip install nbformat` and run
+in CI over a notebook written from each corpus document plus one written
+from markdown: **9/9 accepted**, all at nbformat 4.5 with an `id` on every
+cell.
+
+```sh
+pip install nbformat && cargo build --release -p ferrodoc
+python3 scripts/nbformat-check.py corpus/ipynb-handmade/*.ipynb
+```
+
+**Six divergences in a markdown cell, none of them reached by the corpus.**
+A markdown cell is markdown, and pandoc parses it with an extension set
+that is neither CommonMark nor GFM: it has pipe tables, task lists,
+strikeout, `$…$` math and raw HTML, and it has neither bare-URI autolinks
+nor footnotes nor escaped line breaks nor `fancy_lists`. `read_gfm` is the
+closest reader this project has, and these are what remains. Each command
+below prints what it claims:
+
+```sh
+cargo build --release -p ferrodoc
+python3 - <<'EOF'
+import json; json.dump({"cells":[{"cell_type":"markdown","id":"c1","metadata":{},
+ "source":["See www.example.org for more.\n"]}],"metadata":{},"nbformat":4,
+ "nbformat_minor":5}, open('/tmp/div.ipynb','w'))
+EOF
+pandoc -f ipynb -t json /tmp/div.ipynb
+./target/release/ferrodoc /tmp/div.ipynb -f ipynb -t json
+```
+
+| in a markdown cell | pandoc | ferrodoc |
+|---|---|---|
+| `See www.example.org for more.` | `Str "www.example.org"` — no autolink | `Link` to `http://www.example.org` |
+| `text[^1]` with `[^1]: the note` | `Link ["^1"] ("the%20note","")` | two `Para`s, the syntax left literal |
+| `one\` at end of line | `Str "one\\"` then `SoftBreak` | `LineBreak` |
+| `inline $x^2$ math` | `Math InlineMath "x^2"` | `Str "$x^2$"` — `read_gfm` has no math |
+| `<div class="note">\nhi\n</div>` | `RawBlock "html"` **without** the final newline | with it |
+| `# Done 😀` | identifier `done-grinning` | identifier `done-` |
+
+The first three and the last are the *flavour*: pandoc's ipynb markdown and
+GFM genuinely disagree, and matching them would mean a fifth markdown
+reader. The fourth and fifth are ferrodoc's own gaps — `read_gfm` does not
+read `$…$` math although `pandoc -f gfm` does, and the trailing newline of
+a raw HTML block differs between pandoc's markdown reader and its
+CommonMark one. All six are avoided by the corpus rather than papered over,
+which is why both gates are honest at 100.
+
+**Three things pandoc's notebook writer loses, which this writer copies
+deliberately** — the gate compares the two readbacks, so copying them is
+what keeps it measuring the writer:
+
+- an image output's `width`/`height` are written into the output's
+  `metadata` **unkeyed**, where pandoc's own reader looks for them under
+  the mime type — so they do not survive `ipynb → ipynb`;
+- `nbformat_minor` is forced to 5, whatever the document said;
+- a raw cell's `format` metadata is rewritten to `raw_mimetype`.
 
 ### Markdown writer — 4 limits of CommonMark itself
 

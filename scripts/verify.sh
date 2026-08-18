@@ -139,6 +139,20 @@ if [ "$want_gates" = 1 ]; then
     # layer — see corpus/epub-spec/generate.sh. A *drop* is still a
     # regression, so the level is held.
     gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 36
+    # Notebooks in the shape Jupyter and Colab write them — nbformat
+    # 4.5 with cell ids, streams, execute_results, a base64 `image/png`
+    # display_data and an ANSI-coloured traceback — none of which
+    # pandoc's own ipynb *writer* emits. Gated at 100 because it is
+    # small and hand-authored, and because ipynb is JSON: there is no
+    # parse ambiguity to hide behind.
+    gate "ipynb reader (hand-authored)" $HARNESS diff-ipynb corpus/ipynb-handmade --fail-under 100
+    # Ours through pandoc against pandoc's through pandoc, from the AST
+    # pandoc itself read out of the notebook — so the reader cannot
+    # flatter the writer. 8/8: nothing in this corpus is unmatchable,
+    # because every cell carries a real id. The gate still drops a
+    # UUID-shaped id from both sides, for a document whose cells have
+    # none, and only that shape — a cell that loses `3a7f1c2d` fails.
+    gate "ipynb writer"                $HARNESS diff-ipynb-write corpus/ipynb-handmade --fail-under 100
     # 8/11, and the three that differ all differ the same way: **this
     # writer does not emit a reference the book cannot satisfy.** An
     # image whose bytes are missing becomes its alt text and a relative

@@ -94,6 +94,16 @@ jobs:
             grep -q "0 fatals / 0 errors" /tmp/check || { echo "epubcheck rejected $name"; exit 1; }
           done
 
+      # The notebook writer's judge, and it is Jupyter's own: the gate
+      # above only says our notebook agrees with pandoc's, which two
+      # writers could be wrong about together. `nbformat.validate` is
+      # what refuses a notebook the Jupyter server would not open.
+      - name: nbformat accepts every notebook this writes
+        run: |
+          python3 -m pip install --quiet nbformat
+          cargo build --release -p ferrodoc
+          python3 scripts/nbformat-check.py corpus/ipynb-handmade/*.ipynb
+
   # Memory is a product feature here, not hygiene: the browser and edge
   # targets have hard limits, and nothing else in CI would notice a path
   # getting hungrier.

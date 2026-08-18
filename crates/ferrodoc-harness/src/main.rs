@@ -7,6 +7,8 @@
 //!   ferrodoc-harness diff-spec [--verbose] [--fail-under PCT] <spec.json>
 //!   ferrodoc-harness diff-html [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-odt   [--verbose] [--fail-under PCT] <file-or-dir>...
+//!   ferrodoc-harness diff-ipynb [--verbose] [--fail-under PCT] <file-or-dir>...
+//!   ferrodoc-harness diff-ipynb-write [--verbose] [--fail-under PCT] <file-or-dir>...
 //!   ferrodoc-harness diff-write [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-md [--verbose] [--fail-under PCT] <file-dir-or-spec.json>...
 //!   ferrodoc-harness diff-gfm [--verbose] [--fail-under PCT] <dir-or-spec.json>...
@@ -44,6 +46,8 @@ fn main() -> Result<()> {
         Some("diff-docx") => diff_docx(&args[1..], verbose, fail_under),
         Some("diff-odt") => diff_odt(&args[1..], verbose, fail_under),
         Some("diff-epub") => diff_epub(&args[1..], verbose, fail_under),
+        Some("diff-ipynb") => diff_ipynb(&args[1..], verbose, fail_under),
+        Some("diff-ipynb-write") => diff_ipynb_write(&args[1..], verbose, fail_under),
         Some("diff-write") => diff_write(&args[1..], verbose, fail_under),
         Some("diff-odt-write") => diff_odt_write(&args[1..], verbose, fail_under),
         Some("diff-epub-write") => diff_epub_write(&args[1..], verbose, fail_under),
@@ -60,7 +64,7 @@ fn main() -> Result<()> {
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-write|diff-odt-write|diff-latex|diff-rst|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-ipynb|diff-write|diff-odt-write|diff-epub-write|diff-ipynb-write|diff-latex|diff-rst|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -549,7 +553,7 @@ fn collect_bytes(path: &Path, out: &mut Vec<Vec<u8>>) -> Result<()> {
         }
     } else if path
         .extension()
-        .is_some_and(|e| matches!(e.to_str(), Some("md" | "gfm" | "html" | "docx" | "odt")))
+        .is_some_and(|e| matches!(e.to_str(), Some("md" | "gfm" | "html" | "docx" | "odt" | "ipynb")))
     {
         out.push(std::fs::read(path).with_context(|| format!("reading {}", path.display()))?);
     }
@@ -617,6 +621,13 @@ fn fuzz_run(seeds: &[Vec<u8>], iters: u32, seed: u64) -> (u32, u32) {
                 refused += 1;
             }
             if ferrodoc_html::read_html(text).is_ok() {
+                ok += 1;
+            } else {
+                refused += 1;
+            }
+            // A notebook is text too, and the reader that walks its
+            // metadata is the one bound that a mutation can reach.
+            if ferrodoc_ipynb::read_ipynb_with_media(text).is_ok() {
                 ok += 1;
             } else {
                 refused += 1;
@@ -1225,10 +1236,7 @@ fn drop_uuid(doc: &mut Value) {
     let is_uuid = doc
         .pointer("/meta/identifier/c/0/c")
         .and_then(Value::as_str)
-        .is_some_and(|text| {
-            let Some(rest) = text.strip_prefix("urn:uuid:") else { return false };
-            rest.len() == 36 && rest.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-        });
+        .is_some_and(|text| text.strip_prefix("urn:uuid:").is_some_and(is_uuid));
     if is_uuid {
         drop_meta(doc, "identifier");
     }
@@ -1268,6 +1276,145 @@ fn diff_odt(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<
     diff_binary(paths, "odt", &|bytes| {
         Ok(serde_json::to_value(ferrodoc_odt::read_odt(bytes)?)?)
     }, verbose, fail_under)
+}
+
+/// A notebook is JSON rather than a zip, but `diff_binary` only ever asked
+/// for bytes and for the extension to be pandoc's format name — both of
+/// which hold here.
+fn diff_ipynb(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    diff_binary(paths, "ipynb", &|bytes| {
+        let text = std::str::from_utf8(bytes).context("notebook is not UTF-8")?;
+        Ok(serde_json::to_value(ferrodoc_ipynb::read_ipynb(text)?)?)
+    }, verbose, fail_under)
+}
+
+/// Score the notebook *writer* the way the office writers are scored:
+/// ours through pandoc's reader against pandoc's own output through the
+/// same reader.
+///
+/// The AST both writers are handed is **pandoc's own reading of the
+/// corpus notebook**, not ours, so nothing the reader gets wrong can
+/// flatter the writer here. Only the image bytes come from this crate,
+/// because `-t json` drops pandoc's media bag and neither writer can
+/// re-embed a picture it cannot find — pandoc's exits 99 rather than
+/// writing the notebook.
+fn diff_ipynb_write(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let mut files = Vec::new();
+    for p in paths {
+        collect_files_with_ext(Path::new(p), "ipynb", &mut files)?;
+    }
+    if files.is_empty() {
+        bail!("no .ipynb inputs found");
+    }
+    let dir = std::env::temp_dir().join("ferrodoc-diff-ipynb-write");
+    let media_dir = dir.join("media");
+    let cases: Vec<Case> = files
+        .iter()
+        .map(|f| Case { name: f.display().to_string(), markdown: String::new() })
+        .collect();
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for (file, case) in files.iter().zip(&cases) {
+        let source = std::fs::read_to_string(file)
+            .with_context(|| format!("reading {}", file.display()))?;
+        let ast_value = pandoc_file(file, "ipynb")?;
+        let ast: ferrodoc_ast::Pandoc = serde_json::from_value(ast_value)?;
+        let ast_json = serde_json::to_string(&ast)?;
+
+        let (_, media) = ferrodoc_ipynb::read_ipynb_with_media(&source)
+            .with_context(|| format!("ferrodoc failed on {}", file.display()))?;
+        // A fresh directory per document: a stale picture from the last
+        // one would let a writer that forgot its media still resolve.
+        let _ = std::fs::remove_dir_all(&media_dir);
+        std::fs::create_dir_all(&media_dir)?;
+        for (name, bytes) in &media {
+            std::fs::write(media_dir.join(name), bytes)?;
+        }
+
+        let ours_bytes = ferrodoc_ipynb::write_ipynb_with_media(&ast, &|url| media.get(url).cloned())
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let ours_path = dir.join("ours.ipynb");
+        std::fs::write(&ours_path, &ours_bytes)?;
+        let mut ours = pandoc_file(&ours_path, "ipynb")
+            .with_context(|| format!("pandoc could not read our ipynb for {}", case.name))?;
+
+        let theirs_path = dir.join("theirs.ipynb");
+        // `--wrap=preserve` for the reason the text writers pass it:
+        // pandoc reflows a markdown cell at column 72 otherwise, so its
+        // readback has a `SoftBreak` wherever the line happened to end.
+        // A notebook is JSON, but its markdown cells still have lines.
+        let status = Command::new("pandoc")
+            .args(["-f", "json", "-t", "ipynb", "--wrap=preserve", "--resource-path"])
+            .arg(&media_dir)
+            .arg("-o")
+            .arg(&theirs_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                child
+                    .stdin
+                    .take()
+                    .expect("stdin was piped")
+                    .write_all(ast_json.as_bytes())?;
+                child.wait_with_output()
+            })?;
+        if !status.status.success() {
+            bail!(
+                "pandoc failed to write {}: {}",
+                case.name,
+                String::from_utf8_lossy(&status.stderr)
+            );
+        }
+        let mut theirs = pandoc_file(&theirs_path, "ipynb")?;
+
+        // nbformat 4.5 requires an `id` on every cell, and a cell whose
+        // AST carries none forces both writers to invent one: pandoc
+        // draws a random UUID, this derives a UUID-*shaped* string from
+        // the cell so a notebook is reproducible. Neither can match the
+        // other, so both sides drop it — and only in that exact form, so
+        // a cell that loses a real id (`3a7f1c2d`, which is what Jupyter
+        // actually writes) still fails here.
+        drop_cell_uuids(&mut ours);
+        drop_cell_uuids(&mut theirs);
+        normalize_media(&mut ours, &mut Vec::new());
+        normalize_media(&mut theirs, &mut Vec::new());
+
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
+}
+
+/// Clear the identifier of every cell `Div` whose id is a well-formed
+/// UUID, and nothing else.
+fn drop_cell_uuids(doc: &mut Value) {
+    let Some(blocks) = doc.get_mut("blocks").and_then(Value::as_array_mut) else { return };
+    for block in blocks {
+        if block.get("t").and_then(Value::as_str) != Some("Div") {
+            continue;
+        }
+        let is_cell = block
+            .pointer("/c/0/1/0")
+            .and_then(Value::as_str)
+            .is_some_and(|class| class == "cell");
+        let Some(id) = block.pointer_mut("/c/0/0") else { continue };
+        if is_cell && id.as_str().is_some_and(is_uuid) {
+            *id = Value::String(String::new());
+        }
+    }
+}
+
+/// Whether `text` is the 8-4-4-4-12 hex shape a UUID has.
+fn is_uuid(text: &str) -> bool {
+    let groups: Vec<&str> = text.split('-').collect();
+    groups.len() == 5
+        && groups.iter().map(|g| g.len()).eq([8, 4, 4, 4, 12])
+        && groups.iter().all(|g| g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// Compare a binary reader against pandoc's, document by document.

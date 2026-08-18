@@ -1,0 +1,23 @@
+[package]
+name = "ferrodoc-ipynb"
+description = "Jupyter notebook reader and writer producing the ferrodoc (pandoc-compatible) AST"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+readme = "../../README.md"
+
+[dependencies]
+ferrodoc-ast = { workspace = true }
+# A markdown cell is markdown, so the reader that does the work already
+# exists; this crate is the notebook around it.
+ferrodoc-markdown = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -53,6 +53,8 @@ pub enum Format {
     Odt,
     /// EPUB, the e-book format. Readable; see `TODO.md` for the writer.
     Epub,
+    /// Jupyter notebooks (`.ipynb`). Readable and writable.
+    Ipynb,
     /// LaTeX. Writable — `ferrodoc x.docx -t latex | pdflatex` is PDF
     /// output for anyone with TeX. Deliberately never readable: a `.tex`
     /// file expands user-defined macros, which is a language, not a
@@ -74,8 +76,8 @@ pub enum Format {
 impl Format {
     /// Every format name accepted on the command line, in help order.
     pub const NAMES: &'static [&'static str] = &[
-        "markdown", "commonmark", "gfm", "html", "docx", "odt", "epub", "latex", "rst",
-        "asciidoc", "json", "plain",
+        "markdown", "commonmark", "gfm", "html", "docx", "odt", "epub", "ipynb", "latex",
+        "rst", "asciidoc", "json", "plain",
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
@@ -87,6 +89,7 @@ impl Format {
             "docx" => Some(Format::Docx),
             "odt" => Some(Format::Odt),
             "epub" | "epub2" | "epub3" => Some(Format::Epub),
+            "ipynb" | "jupyter" | "notebook" => Some(Format::Ipynb),
             "latex" | "tex" => Some(Format::Latex),
             "rst" | "rest" | "restructuredtext" => Some(Format::Rst),
             "asciidoc" | "adoc" | "asciidoctor" => Some(Format::Asciidoc),
@@ -113,7 +116,7 @@ impl Format {
     /// `.docx` can hold a part that inflates a thousandfold — so
     /// [`convert`] asks for it only when the answer here is yes.
     pub fn embeds_media(self) -> bool {
-        matches!(self, Format::Docx | Format::Odt | Format::Epub)
+        matches!(self, Format::Docx | Format::Odt | Format::Epub | Format::Ipynb)
     }
 
     /// Whether documents can be written to this format.
@@ -134,6 +137,7 @@ impl Format {
             Format::Docx => "docx",
             Format::Odt => "odt",
             Format::Epub => "epub",
+            Format::Ipynb => "ipynb",
             Format::Latex => "latex",
             Format::Rst => "rst",
             Format::Asciidoc => "asciidoc",
@@ -204,6 +208,16 @@ pub fn parse_with_media(input: &[u8], from: Format) -> Result<(Pandoc, Media), E
             format: from,
             detail: e.to_string(),
         }),
+        Format::Ipynb => {
+            let text = String::from_utf8(input.to_vec()).map_err(|e| Error::Invalid {
+                format: from,
+                detail: format!("not UTF-8: {e}"),
+            })?;
+            ferrodoc_ipynb::read_ipynb_with_media(&text).map_err(|e| Error::Invalid {
+                format: from,
+                detail: e.to_string(),
+            })
+        }
         _ => Ok((parse(input, from)?, Media::new())),
     }
 }
@@ -234,6 +248,10 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
             detail: e.to_string(),
         }),
         Format::Epub => ferrodoc_epub::read_epub(input).map_err(|e| Error::Invalid {
+            format: from,
+            detail: e.to_string(),
+        }),
+        Format::Ipynb => ferrodoc_ipynb::read_ipynb(&text(input)?).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
@@ -378,6 +396,13 @@ pub fn render_with_media(
         Format::Epub => {
             let resolve = |url: &str| data_url(url).or_else(|| media(url));
             ferrodoc_epub::write_epub_with_media(doc, &resolve).map_err(|e| Error::Invalid {
+                format: to,
+                detail: e.to_string(),
+            })
+        }
+        Format::Ipynb => {
+            let resolve = |url: &str| data_url(url).or_else(|| media(url));
+            ferrodoc_ipynb::write_ipynb_with_media(doc, &resolve).map_err(|e| Error::Invalid {
                 format: to,
                 detail: e.to_string(),
             })

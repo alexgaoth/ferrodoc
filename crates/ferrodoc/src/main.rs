@@ -24,7 +24,7 @@ OPTIONS:
     -V, --version           Print the version
 
 FORMATS:
-    input:   markdown (commonmark, md), gfm, html, docx, odt, epub, json
+    input:   markdown (commonmark, md), gfm, html, docx, odt, epub, ipynb, json
     output:  those, plus latex (tex), rst, asciidoc (adoc) and plain (text)
 
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
@@ -44,6 +44,7 @@ EXAMPLES:
     ferrodoc book.epub -t gfm               # an e-book in, markdown out
     ferrodoc manual.md -o manual.epub       # markdown in, an e-book out
     ferrodoc report.docx -t latex | pdflatex # DOCX in, PDF out, via TeX
+    ferrodoc analysis.ipynb -t docx        # a notebook in, Word out
     ferrodoc README.md -o readme.odt        # markdown in, LibreOffice out
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ";

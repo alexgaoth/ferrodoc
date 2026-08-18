@@ -42,6 +42,8 @@ The gates, and what each one proves:
 | `diff-write` / `diff-odt-write` | the office writers survive a round trip — ours through pandoc against pandoc's through pandoc, which is what isolates the writer from the format |
 | `diff-epub` | the EPUB reader produces pandoc's AST, over three corpora that measure three different things |
 | `diff-epub-write` | the EPUB writer survives a round trip — and is **deliberately** below 100: it refuses to emit a reference the book cannot satisfy, where pandoc emits one and `epubcheck` rejects the result |
+| `diff-ipynb` | the notebook reader produces pandoc's AST, over a hand-authored corpus in the shape Jupyter and Colab write — not the shape pandoc's own writer emits |
+| `diff-ipynb-write` | the notebook writer survives a round trip, from the AST **pandoc** read out of the corpus so the reader cannot flatter the writer; `nbformat.validate` is the judge that is not pandoc |
 | `diff-latex` / `diff-rst` | the text writers round-trip the document, with pandoc's score on the same corpus printed beside it |
 | `bench-rss` | no conversion path exceeds its published multiple of the input |
 
