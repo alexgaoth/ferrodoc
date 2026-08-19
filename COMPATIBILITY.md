@@ -815,6 +815,34 @@ memory 1.6× left the curve unchanged). It is the *number* of live
 allocations. `docx → AST` therefore grows about 20× for 10× the input, and
 that is the one path where size costs more than proportionally.
 
+### The `plain` writer — identical to pandoc on the sample, with two stated gaps
+
+`ferrodoc x.md -t plain` now matches `pandoc -t plain --wrap=none` byte for
+byte on `samples/inputs/handbook.md`, which is the document written to
+carry the awkward cases: `samples/10-markdown-to-plain` went from **47
+differing lines to none**. The rules, each probed and each asserted on
+literal output because pandoc cannot read plain text back and no
+differential gate exists:
+
+| construct | rule |
+|---|---|
+| block quote | indented 2 spaces, compounding per level |
+| code block | indented 4 spaces |
+| ordered list | marker column as wide as the widest marker plus a space, never under 4 — `1.  ` and `10. ` |
+| list spacing | a `Para` in any item makes the whole list loose; otherwise no blank lines |
+| table | 2-space margin, each column the widest cell plus 2, a dashed rule under the head, `AlignRight` padded left |
+| footnote | `[N]` at the reference, bodies as `[N] …` at the end |
+| strikeout | keeps `~~`, because without them the text says the opposite |
+| image | alt text in `[brackets]`, or it reads as prose the document never had |
+| horizontal rule | 72 dashes |
+
+Two things are **not** matched, stated rather than hidden:
+
+- pandoc renders `Math` as Unicode — `$x^2$` becomes `x²` — where this
+  writes the TeX;
+- pandoc fills to `--columns`; this never wraps, which is the same
+  `--wrap=preserve` default described above.
+
 ### Footnotes in HTML — resolved, with two stated divergences
 
 A `role="doc-noteref"` link becomes a `Note` whose body comes from the

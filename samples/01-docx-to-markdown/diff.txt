@@ -1,5 +1,5 @@
---- samples/01-docx-to-markdown/pandoc.md	2026-08-19 15:14:00.987940946 -0700
-+++ samples/01-docx-to-markdown/ferrodoc.md	2026-08-19 15:14:00.909941017 -0700
+--- samples/01-docx-to-markdown/pandoc.md	2026-08-19 16:45:11.496711990 -0700
++++ samples/01-docx-to-markdown/ferrodoc.md	2026-08-19 16:45:11.432711954 -0700
 @@ -14,18 +14,18 @@
  
  ## Actions
