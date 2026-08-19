@@ -806,6 +806,33 @@ memory 1.6× left the curve unchanged). It is the *number* of live
 allocations. `docx → AST` therefore grows about 20× for 10× the input, and
 that is the one path where size costs more than proportionally.
 
+### `--wrap` — the default differs from pandoc's, deliberately
+
+**Pandoc fills text output to 72 columns by default; ferrodoc leaves every
+line where the document put it.** That is `--wrap=preserve` against
+pandoc's `--wrap=auto`, and it is the one CLI default that differs.
+
+The reason is what a migration looks like. Converting a corpus with both
+tools and diffing is how anyone checks a swap, and filling by default makes
+*every paragraph of every document* differ on line breaks alone — burying
+whatever real difference the diff was run to find. Leaving the text alone
+makes the diff readable, and the fill is one flag away.
+
+`--wrap=auto` (with `--columns N`, default 72) matches pandoc. Measured in
+isolation, because scoring it over whole documents would score this
+project's other divergences at the same time: of the 79 DOCX and ODT corpus
+documents, **10** already produce byte-identical GFM to
+`pandoc --wrap=none`. On those 10 — the subset where wrapping is the only
+variable — `ferrodoc --wrap=auto --columns 72` is **10/10 identical** to
+`pandoc -t gfm` at its default.
+
+A line breaks only where a `Space` or `SoftBreak` stood in the tree, never
+inside a code span, a link destination or a link title, which are written
+rather than read from the document. A heading is never filled (pandoc
+leaves a 151-column heading at 151), a pipe table row is never filled, and
+a word wider than the column overruns rather than being cut. A list marker
+and a quote's `> ` count toward the width, as they do for pandoc.
+
 ### `--extract-media` — file for file with pandoc
 
 `ferrodoc <doc> --extract-media DIR` writes each embedded image to

@@ -21,6 +21,12 @@ OPTIONS:
     -o, --output <FILE>     Write to FILE instead of standard output
     -s, --standalone        Wrap HTML in a page, or LaTeX in a whole document
         --css <FILE>        Inline a stylesheet into that page
+        --wrap <MODE>       preserve (default) | none | auto. `auto` fills
+                            text output to --columns, which is what pandoc
+                            does by default; ferrodoc leaves lines where
+                            they fall unless asked. Only the markdown
+                            writers fill.
+        --columns <N>       Fill width for --wrap=auto [72]
         --extract-media <DIR>
                             Write the input's embedded images under DIR and
                             point the output at them. Without it a
@@ -66,8 +72,22 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+/// Everything the command line asked for.
+struct Options {
+    from: Option<Format>,
+    to: Option<Format>,
+    output: Option<PathBuf>,
+    input: Option<PathBuf>,
+    standalone: bool,
+    css: Option<PathBuf>,
+    extract_media: Option<PathBuf>,
+    /// The width to fill to, or `None` to leave lines where they fall.
+    wrap_columns: Option<usize>,
+}
+
+/// Parse the command line. `Ok(None)` means `--help` or `--version`
+/// already printed what was asked for and there is nothing left to do.
+fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     let mut from: Option<Format> = None;
     let mut to: Option<Format> = None;
     let mut output: Option<PathBuf> = None;
@@ -76,11 +96,24 @@ fn run() -> Result<(), String> {
     let mut standalone = false;
     let mut css: Option<PathBuf> = None;
     let mut extract_media: Option<PathBuf> = None;
+    // `preserve` is the default and `none` is the same thing for this
+    // writer, which never inserted a break of its own: both leave every
+    // line where the document put it. Only `auto` fills.
+    let mut wrap_columns: Option<usize> = None;
+    let mut columns = 72usize;
 
     let mut i = 0;
     while i < args.len() {
-        let arg = args[i].as_str();
+        // `--opt=value` as well as `--opt value`, because that is how
+        // pandoc is written in everybody's existing Makefile.
+        let (arg, attached) = match args[i].split_once('=') {
+            Some((name, value)) if name.starts_with("--") => (name, Some(value.to_owned())),
+            _ => (args[i].as_str(), None),
+        };
         let mut value = |name: &str| -> Result<String, String> {
+            if let Some(attached) = attached.clone() {
+                return Ok(attached);
+            }
             i += 1;
             args.get(i)
                 .cloned()
@@ -89,11 +122,11 @@ fn run() -> Result<(), String> {
         match arg {
             "-h" | "--help" => {
                 print!("{USAGE}");
-                return Ok(());
+                return Ok(None);
             }
             "-V" | "--version" => {
                 println!("ferrodoc {}", env!("CARGO_PKG_VERSION"));
-                return Ok(());
+                return Ok(None);
             }
             "-f" | "--from" => {
                 let name = value("--from")?;
@@ -108,6 +141,26 @@ fn run() -> Result<(), String> {
             "--css" => css = Some(PathBuf::from(value("--css")?)),
             "--extract-media" => {
                 extract_media = Some(PathBuf::from(value("--extract-media")?));
+            }
+            "--wrap" => {
+                let mode = value("--wrap")?;
+                match mode.as_str() {
+                    "auto" => wrap_columns = Some(0), // resolved after --columns
+                    "none" | "preserve" => wrap_columns = None,
+                    other => {
+                        return Err(format!(
+                            "unknown --wrap {other:?}; expected auto, none or preserve"
+                        ));
+                    }
+                }
+            }
+            "--columns" => {
+                let raw = value("--columns")?;
+                columns = raw
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or_else(|| format!("--columns needs a positive number, not {raw:?}"))?;
             }
             // An explicit "-" means stdin, and cannot be combined with a
             // named file — silently ignoring one of them would convert the
@@ -130,6 +183,39 @@ fn run() -> Result<(), String> {
         }
         i += 1;
     }
+
+    // Formats not given explicitly come from the file extensions; that
+    // resolution needs the input path, so it happens in `run`.
+    //
+    // `--columns` may appear either side of `--wrap`, so the width is
+    // read once both are known rather than as `--wrap` is parsed.
+    Ok(Some(Options {
+        from,
+        to,
+        output,
+        input,
+        standalone,
+        css,
+        extract_media,
+        wrap_columns: wrap_columns.map(|_| columns),
+    }))
+}
+
+fn run() -> Result<(), String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let Some(Options {
+        from,
+        to,
+        output,
+        input,
+        standalone,
+        css,
+        extract_media,
+        wrap_columns,
+    }) = parse_args(&args)?
+    else {
+        return Ok(());
+    };
 
     // Formats not given explicitly come from the file extensions.
     let Some(from) = from.or_else(|| input.as_deref().and_then(Format::from_path)) else {
@@ -172,8 +258,13 @@ fn run() -> Result<(), String> {
         if css.is_some() {
             return Err("--css needs --standalone: a fragment has no <head>".to_owned());
         }
-        ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
-            .map_err(|e| e.to_string())?
+        match wrap_columns {
+            Some(columns) => {
+                ferrodoc::render_wrapped(&doc, to, columns).map_err(|e| e.to_string())?
+            }
+            None => ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
+                .map_err(|e| e.to_string())?,
+        }
     };
 
     write_output(output.as_deref(), &converted)

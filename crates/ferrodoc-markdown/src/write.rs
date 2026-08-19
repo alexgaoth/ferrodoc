@@ -44,6 +44,28 @@ pub fn write_markdown(doc: &Pandoc) -> String {
     render(doc, false)
 }
 
+/// Render a document as `CommonMark`, filled to `columns`.
+///
+/// See [`write_gfm_wrapped`] for what "breakable" means here.
+pub fn write_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
+    render_with(doc, false, Some(columns))
+}
+
+/// Render a document as `GitHub Flavored Markdown`, filled to `columns`.
+///
+/// This is pandoc's `--wrap=auto --columns N`, which is *its* default;
+/// ferrodoc's default is `--wrap=preserve`, so [`write_gfm`] never fills.
+///
+/// A line is broken only where an [`Inline::Space`] or [`Inline::SoftBreak`]
+/// stood in the tree. That distinction is the whole of the correctness
+/// here: the spaces inside a code span, a link destination and a link
+/// title are written by this module rather than read from a `Space`, and
+/// breaking at one of those would change what the text means rather than
+/// how it looks.
+pub fn write_gfm_wrapped(doc: &Pandoc, columns: usize) -> String {
+    render_with(doc, true, Some(columns))
+}
+
 /// Render a document as `GitHub Flavored Markdown`.
 ///
 /// The difference from [`write_markdown`] is the four GFM constructs a
@@ -58,8 +80,12 @@ pub fn write_gfm(doc: &Pandoc) -> String {
 }
 
 fn render(doc: &Pandoc, gfm: bool) -> String {
+    render_with(doc, gfm, None)
+}
+
+fn render_with(doc: &Pandoc, gfm: bool, columns: Option<usize>) -> String {
     let mut out = String::new();
-    let mut writer = Writer { gfm, ..Writer::default() };
+    let mut writer = Writer { gfm, columns, ..Writer::default() };
     writer.blocks(&mut out, &doc.blocks, "");
     writer.flush_notes(&mut out);
     // Exactly one trailing newline, like every other writer here.
@@ -83,7 +109,16 @@ struct Writer {
     alternate: bool,
     /// Whether the GFM extensions are available.
     gfm: bool,
+    /// The column to fill to, or `None` to leave every line as it falls.
+    columns: Option<usize>,
 }
+
+/// Marks a space a line may be broken at. Chosen because no reader here
+/// can produce one inside text: `CommonMark` replaces NUL with U+FFFD by
+/// specification, and XML — which DOCX, ODT and EPUB are — forbids it
+/// outright. Every one is either broken at or turned back into a space
+/// before the string leaves [`push_wrapped`].
+const BREAK: char = '\0';
 
 impl Writer {
     /// Write blocks separated by blank lines, each line carrying `prefix`
@@ -141,7 +176,7 @@ impl Writer {
         match block {
             Block::Plain(inlines) | Block::Para(inlines) => {
                 let text = self.inlines(inlines);
-                push_wrapped(out, prefix, &text);
+                push_wrapped(out, prefix, &text, self.columns);
             }
             Block::Header(level, _, inlines) => {
                 let text = self.inlines(inlines);
@@ -203,7 +238,7 @@ impl Writer {
                     }
                     first = false;
                     let text = self.inlines(term);
-                    push_wrapped(out, prefix, &text);
+                    push_wrapped(out, prefix, &text, self.columns);
                     for definition in definitions {
                         push_line(out, prefix, "");
                         self.blocks(out, definition, prefix);
@@ -222,7 +257,7 @@ impl Writer {
                     }
                     text.push_str(&self.inlines(line));
                 }
-                push_wrapped(out, prefix, &text);
+                push_wrapped(out, prefix, &text, self.columns);
             }
             Block::RawBlock(format, text) => {
                 if format.0 == "html" {
@@ -409,23 +444,34 @@ impl Writer {
             // A tight list's items must not contain blank lines: one
             // would make the whole list loose when it is read back, and
             // every `Plain` inside would come back as a `Para`.
+            //
+            // When filling, the item's content is rendered under `indent`
+            // so the fill pays for the marker: pandoc puts `- word word
+            // word` on a 20-column line, not `- word word word word`.
+            // The marker then replaces the indent on the first line. When
+            // not filling the prefix changes nothing, so it is left empty
+            // and the indent is added per line below, exactly as before.
+            let inner = if self.columns.is_some() { indent.as_str() } else { "" };
             let mut body = String::new();
             if tight {
                 for block in item {
-                    self.block(&mut body, block, "");
+                    self.block(&mut body, block, inner);
                 }
             } else {
-                self.blocks(&mut body, item, "");
+                self.blocks(&mut body, item, inner);
             }
             let mut lines = body.trim_end_matches('\n').split('\n');
             if let Some(first) = lines.next() {
+                let first = first.strip_prefix(inner).unwrap_or(first);
                 push_line(out, prefix, &format!("{marker}{first}"));
             }
             for line in lines {
                 if line.is_empty() {
                     push_line(out, prefix, "");
-                } else {
+                } else if inner.is_empty() {
                     push_line(out, prefix, &format!("{indent}{line}"));
+                } else {
+                    push_line(out, prefix, line);
                 }
             }
         }
@@ -461,15 +507,15 @@ impl Writer {
 
     fn strikeout(&mut self, out: &mut String, inner: &[Inline]) {
         let text = self.inlines(inner);
-        let body = text.trim_matches([' ', '\n']);
+        let body = text.trim_matches([' ', '\n', BREAK]);
         // A tilde at either edge is strikeout immediately inside
         // strikeout; nesting with text in between spells out fine.
         if body.is_empty() || body.starts_with('~') || body.ends_with('~') {
             out.push_str(&text);
             return;
         }
-        let lead = &text[..text.len() - text.trim_start_matches([' ', '\n']).len()];
-        let tail = &text[text.trim_end_matches([' ', '\n']).len()..];
+        let lead = &text[..text.len() - text.trim_start_matches([' ', '\n', BREAK]).len()];
+        let tail = &text[text.trim_end_matches([' ', '\n', BREAK]).len()..];
         if lead.is_empty() && out.ends_with("~~") {
             // Reopening the previous run keeps every word struck. The two
             // nodes arrive back as one, which is what pandoc's own HTML
@@ -492,11 +538,13 @@ impl Writer {
     fn inline(&mut self, out: &mut String, inline: &Inline) {
         match inline {
             Inline::Str(text) => escape_text(out, text, self.gfm),
-            Inline::Space => out.push(' '),
+            Inline::Space => out.push(if self.columns.is_some() { BREAK } else { ' ' }),
             // A soft break is a real line break in the source, and this
             // writer never re-wraps, so keeping it is both faithful and
             // free. Callers that cannot hold a newline flatten it back.
-            Inline::SoftBreak => out.push('\n'),
+            // Filling re-flows, so a soft break becomes just another place
+            // the line may be broken; preserving keeps it where it was.
+            Inline::SoftBreak => out.push(if self.columns.is_some() { BREAK } else { '\n' }),
             // Two trailing spaces before the newline is a hard break —
             // but on an otherwise empty line they are just whitespace, so
             // the line reads as a blank one and splits the paragraph in
@@ -680,7 +728,10 @@ fn cell_text(text: &str) -> String {
             // inline, a URL — arrive here bare.
             '|' if backslashes % 2 == 1 => out.push('|'),
             '|' => out.push_str("\\|"),
-            '\n' => out.push(' '),
+            // A row is one line, so a break opportunity in a cell is a
+            // space and nothing else — pandoc does not fill inside a
+            // pipe table either.
+            '\n' | BREAK => out.push(' '),
             ch => out.push(ch),
         }
         backslashes = if ch == '\\' { backslashes + 1 } else { 0 };
@@ -721,19 +772,63 @@ fn push_line(out: &mut String, prefix: &str, line: &str) {
 }
 
 /// Append text that may already contain hard-break newlines.
-fn push_wrapped(out: &mut String, prefix: &str, text: &str) {
-    for line in text.split('\n') {
-        push_line(out, prefix, line);
+fn push_wrapped(out: &mut String, prefix: &str, text: &str, columns: Option<usize>) {
+    let Some(columns) = columns else {
+        debug_assert!(!text.contains(BREAK));
+        for line in text.split('\n') {
+            push_line(out, prefix, line);
+        }
+        return;
+    };
+    // The prefix is part of the line pandoc counts, so a quote or a list
+    // item fills to less than the full width.
+    let width = columns.saturating_sub(prefix.chars().count()).max(1);
+    for paragraph in text.split('\n') {
+        for line in fill(paragraph, width) {
+            push_line(out, prefix, &line);
+        }
     }
 }
 
+/// Greedy fill: take words while they fit, break at the last space that
+/// did. A word longer than the width goes on its own line and overruns —
+/// breaking inside it would invent a break the text does not have.
+fn fill(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut line_width = 0;
+    for word in text.split(BREAK) {
+        let word_width = word.chars().count();
+        if line.is_empty() {
+            line.push_str(word);
+            line_width = word_width;
+        } else if line_width + 1 + word_width <= width {
+            line.push(' ');
+            line.push_str(word);
+            line_width += 1 + word_width;
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(word);
+            line_width = word_width;
+        }
+    }
+    lines.push(line);
+    lines
+}
+
 /// Write a heading whose inlines have already been rendered to `text`.
+///
+/// **A heading is never filled**, whatever `--columns` says, because an
+/// ATX heading is one line by construction — pandoc leaves a 151-column
+/// heading at 151 columns, measured.
 fn header(out: &mut String, prefix: &str, level: i64, text: &str) {
+    let unbroken = text.replace(BREAK, " ");
+    let text = unbroken.as_str();
     // An ATX heading is one line. A setext heading is not, so levels 1 and
     // 2 can keep a line break; deeper ones must flatten it, which
     // `CommonMark` gives no way around.
     if text.contains('\n') && (level == 1 || level == 2) {
-        push_wrapped(out, prefix, text);
+        push_wrapped(out, prefix, text, None);
         push_line(out, prefix, if level == 1 { "===" } else { "---" });
         return;
     }
@@ -1073,6 +1168,102 @@ mod tests {
             write_markdown(&crate::read_gfm("- [ ] a\n").unwrap()),
             "- \u{2610} a\n"
         );
+    }
+
+    #[test]
+    fn filling_breaks_only_where_a_space_stood_in_the_tree() {
+        let words = |n: usize| {
+            let mut out = Vec::new();
+            for i in 0..n {
+                if i > 0 {
+                    out.push(Inline::Space);
+                }
+                out.push(Inline::Str("word".to_owned()));
+            }
+            out
+        };
+        let para = |inlines: Vec<Inline>| Pandoc::new(vec![Block::Para(inlines)]);
+
+        // Greedy fill, and no line over the width.
+        let filled = write_gfm_wrapped(&para(words(6)), 20);
+        assert_eq!(filled, "word word word word\nword word\n");
+
+        // A soft break is just another break opportunity when filling...
+        let soft = para(vec![
+            Inline::Str("a".to_owned()),
+            Inline::SoftBreak,
+            Inline::Str("b".to_owned()),
+        ]);
+        assert_eq!(write_gfm_wrapped(&soft, 72), "a b\n");
+        // ...and stays where it was when not.
+        assert_eq!(write_gfm(&soft), "a\nb\n");
+
+        // A word wider than the column goes on its own line and overruns:
+        // breaking inside it would invent a break the text does not have.
+        let long = para(vec![
+            Inline::Str("a".to_owned()),
+            Inline::Space,
+            Inline::Str("supercalifragilistic".to_owned()),
+        ]);
+        assert_eq!(write_gfm_wrapped(&long, 5), "a\nsupercalifragilistic\n");
+    }
+
+    #[test]
+    fn filling_never_breaks_what_a_break_would_change() {
+        let para = |inlines: Vec<Inline>| Pandoc::new(vec![Block::Para(inlines)]);
+        // A space inside a code span is the literal's, not a `Space`.
+        let code = para(vec![Inline::Code(Box::default(), "a b c d e f".to_owned())]);
+        assert_eq!(write_gfm_wrapped(&code, 5), "`a b c d e f`\n");
+
+        // A link destination holds spaces the writer put there, and the
+        // title is separated by one. Neither is a break opportunity.
+        let link = para(vec![Inline::Link(
+            Box::default(),
+            vec![Inline::Str("t".to_owned())],
+            Box::new(Target { url: "http://e.com/a".to_owned(), title: "a title".to_owned() }),
+        )]);
+        assert_eq!(write_gfm_wrapped(&link, 5), "[t](http://e.com/a \"a title\")\n");
+
+        // A pipe table row is one line whatever the width says.
+        let table = write_gfm_wrapped(
+            &Pandoc::new(vec![Block::Para(vec![Inline::Str("x".to_owned())])]),
+            5,
+        );
+        assert_eq!(table, "x\n");
+
+        // A heading is one line: pandoc leaves a 151-column heading at 151.
+        let heading = Pandoc::new(vec![Block::Header(
+            1,
+            Attr::default(),
+            vec![
+                Inline::Str("one".to_owned()),
+                Inline::Space,
+                Inline::Str("two".to_owned()),
+                Inline::Space,
+                Inline::Str("three".to_owned()),
+            ],
+        )]);
+        assert_eq!(write_gfm_wrapped(&heading, 5), "# one two three\n");
+    }
+
+    #[test]
+    fn a_prefix_is_part_of_the_width_it_fills_to() {
+        // Measured against pandoc: `> word …` and `- word …` both come out
+        // at 71 columns for `--columns 72`, marker included.
+        let words: Vec<Inline> = (0..6)
+            .flat_map(|i| {
+                if i > 0 {
+                    vec![Inline::Space, Inline::Str("word".to_owned())]
+                } else {
+                    vec![Inline::Str("word".to_owned())]
+                }
+            })
+            .collect();
+        let quoted = Pandoc::new(vec![Block::BlockQuote(vec![Block::Para(words.clone())])]);
+        assert_eq!(write_gfm_wrapped(&quoted, 20), "> word word word\n> word word word\n");
+
+        let listed = Pandoc::new(vec![Block::BulletList(vec![vec![Block::Plain(words)]])]);
+        assert_eq!(write_gfm_wrapped(&listed, 20), "- word word word\n  word word word\n");
     }
 
     #[test]

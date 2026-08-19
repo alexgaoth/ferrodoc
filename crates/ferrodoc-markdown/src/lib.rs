@@ -29,7 +29,7 @@
 
 mod write;
 
-pub use write::{write_gfm, write_markdown};
+pub use write::{write_gfm, write_gfm_wrapped, write_markdown, write_markdown_wrapped};
 
 use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue, TableAlignment};
 use comrak::{Arena, Options, parse_document};

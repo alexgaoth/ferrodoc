@@ -355,6 +355,24 @@ pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
     render_with_media(doc, to, &|_| None)
 }
 
+/// Render, filling text to `columns` where the writer can fill.
+///
+/// This is pandoc's `--wrap=auto --columns N`. Only the markdown writers
+/// fill today; every other format renders exactly as [`render`] would, so
+/// the flag is accepted rather than refused for them and simply has no
+/// effect. Nothing here embeds media, because no format that fills does.
+///
+/// # Errors
+///
+/// The same as [`render`].
+pub fn render_wrapped(doc: &Pandoc, to: Format, columns: usize) -> Result<Vec<u8>, Error> {
+    match to {
+        Format::Markdown => Ok(ferrodoc_markdown::write_markdown_wrapped(doc, columns).into_bytes()),
+        Format::Gfm => Ok(ferrodoc_markdown::write_gfm_wrapped(doc, columns).into_bytes()),
+        _ => render(doc, to),
+    }
+}
+
 /// Write a document, embedding every image whose bytes `media` can supply
 /// for its URL.
 ///

@@ -228,6 +228,12 @@ it.
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
 no table syntax, so a table degrades to one paragraph per cell there.
 
+**One default differs from pandoc's on purpose:** pandoc fills text output
+to 72 columns, and ferrodoc leaves lines where the document put them.
+`--wrap=auto --columns N` matches pandoc when you want that — the point of
+the default is that diffing a corpus converted by both tools shows real
+differences rather than re-flowed paragraphs.
+
 `--extract-media DIR` writes the input's embedded images under `DIR` and
 repoints the output at them, matching `pandoc --extract-media` file for
 file. Without it a `docx → markdown` conversion names pictures nothing ever
