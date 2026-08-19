@@ -628,15 +628,24 @@ only where matching would mean reproducing a parse failure*:
   - In a `<p>` pandoc drops the element **and breaks the block around it**,
     so `<p>loose <input type="checkbox" /> in a paragraph</p>` is two blocks
     to pandoc and one `Para` here. Matching that would mean reproducing a
-    parse failure. Reproduce with
-    `printf '<p>loose <input type="checkbox" /> in a paragraph</p>' | pandoc -f html -t json`
+    parse failure. Both halves, `Plain`+`Plain` against `Para`:
+
+        html='<p>loose <input type="checkbox" /> in a paragraph</p>'
+        printf '%s' "$html" | pandoc   -f html -t json
+        printf '%s' "$html" | ferrodoc -f html -t json
   - In a `<td>` pandoc drops the element and leaves the block whole, and
-    ferrodoc matches it byte for byte — one `Plain` either way. Reproduce with
-    `printf '<table><tr><td><input type="checkbox" checked="" />plain cell text</td></tr></table>' | pandoc -f html -t json`
+    ferrodoc matches it byte for byte — one `Plain` either way, inside one
+    `Table` on both sides:
+
+        html='<table><tr><td><input type="checkbox" checked="" />plain cell text</td></tr></table>'
+        printf '%s' "$html" | pandoc   -f html -t json
+        printf '%s' "$html" | ferrodoc -f html -t json
   - In an `<h2>` pandoc loses the `Header` **entirely**, emitting two
-    `Plain`s rather than a broken heading, where ferrodoc keeps `Header 2`.
-    Reproduce with
-    `printf '<h2>head <input type="checkbox" /> box</h2>' | pandoc -f html -t json`
+    `Plain`s rather than a broken heading, where ferrodoc keeps `Header 2`:
+
+        html='<h2>head <input type="checkbox" /> box</h2>'
+        printf '%s' "$html" | pandoc   -f html -t json
+        printf '%s' "$html" | ferrodoc -f html -t json
 
   One more consequence of `tagsoup`: pandoc reads the box only
   when the tag closes itself. Written `<input type="checkbox" checked="">`,

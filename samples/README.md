@@ -34,6 +34,16 @@ reading ours against pandoc reading its own (`*.readback.md`). The `.docx`,
 `.odt` and `.epub` are kept too — open them in Word, LibreOffice or an
 e-reader.
 
+### The one divergence these diffs are the home of
+
+Three lines of `05-html-to-markdown/diff.txt` are a `CodeBlock` whose
+`Attr` is entirely empty: a bare ```` ``` ```` fence here, an *indented*
+block for pandoc. No round trip can see it — the two spellings read back to
+the same `CodeBlock` — so this folder is where a reader meets it. It is
+recorded in `COMPATIBILITY.md` under **Markdown writer**, with the
+measurement showing pandoc indents unconditionally and any non-empty `Attr`
+agrees.
+
 ### One thing that is normalised, and why
 
 ferrodoc has no line-wrapping option: it never reflows text. Pandoc reflows
