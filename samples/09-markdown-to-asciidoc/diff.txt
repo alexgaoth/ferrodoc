@@ -1,5 +1,5 @@
---- samples/09-markdown-to-asciidoc/pandoc.adoc	2026-08-19 11:09:21.843430308 -0700
-+++ samples/09-markdown-to-asciidoc/ferrodoc.adoc	2026-08-19 11:09:21.680430354 -0700
+--- samples/09-markdown-to-asciidoc/pandoc.adoc	2026-08-19 15:14:02.820939278 -0700
++++ samples/09-markdown-to-asciidoc/ferrodoc.adoc	2026-08-19 15:14:02.648939434 -0700
 @@ -1,47 +1,54 @@
 +[[field-handbook]]
  == Field Handbook

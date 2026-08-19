@@ -1,5 +1,5 @@
---- samples/06-markdown-to-html/pandoc.html	2026-08-19 11:09:20.966430558 -0700
-+++ samples/06-markdown-to-html/ferrodoc.html	2026-08-19 11:09:20.867430586 -0700
+--- samples/06-markdown-to-html/pandoc.html	2026-08-19 15:14:01.896940119 -0700
++++ samples/06-markdown-to-html/ferrodoc.html	2026-08-19 15:14:01.784940220 -0700
 @@ -61,18 +61,18 @@
  </ul>
  <h2 id="running-a-conversion">Running a conversion</h2>

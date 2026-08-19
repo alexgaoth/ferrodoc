@@ -1,5 +1,5 @@
---- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-19 11:09:23.088429953 -0700
-+++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-19 11:09:22.999429977 -0700
+--- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-19 15:14:04.204938018 -0700
++++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-19 15:14:04.109938104 -0700
 @@ -86,13 +86,13 @@
  
  Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.

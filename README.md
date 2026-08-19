@@ -126,7 +126,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-asciidoc` writer | every corpus document is accepted by **`asciidoctor --failure-level=WARN`** |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **656/656** documents survive a GFM round trip identically (pandoc: 590/656) |
-| `ferrodoc-html` reader | **633/659** HTML documents produce identical ASTs |
+| `ferrodoc-html` reader | **634/660** HTML documents produce identical ASTs |
 
 ```sh
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100

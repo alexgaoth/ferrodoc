@@ -67,7 +67,10 @@ fn read(input: &str, generate_identifiers: bool) -> Result<Pandoc, Error> {
     let dom = html5ever::parse_document(RcDom::default(), options)
         .from_utf8()
         .one(source.as_bytes());
-    let mut reader = Reader { generate_identifiers, ..Reader::default() };
+    // Endnotes are collected first: a reference almost always precedes
+    // the section that defines it, so one pass cannot resolve them.
+    let notes = endnotes(&dom.document, generate_identifiers);
+    let mut reader = Reader { generate_identifiers, notes, ..Reader::default() };
     let body = body(&dom.document).unwrap_or_else(|| dom.document.clone());
     // A page that marks its main content is read as that content alone,
     // which is how pandoc reads one — and the whole reason this is useful
@@ -98,6 +101,9 @@ struct Reader {
     /// Whether the nodes being read sit below a `<li>`, where an
     /// `<input type="checkbox">` is a task-list box — see [`Reader::items`].
     inside_a_list_item: bool,
+    /// Note bodies by the identifier a `doc-noteref` points at — see
+    /// [`endnotes`].
+    notes: HashMap<String, Vec<Block>>,
 }
 
 impl Default for Reader {
@@ -109,6 +115,7 @@ impl Default for Reader {
             next_suffix: HashMap::new(),
             generate_identifiers: true,
             inside_a_list_item: false,
+            notes: HashMap::new(),
         }
     }
 }
@@ -211,6 +218,10 @@ impl Reader {
             // A `<div>` and a `<header>`/`<footer>` become a div; a
             // `<section>` becomes one too but takes a `section` class,
             // ahead of any of its own. Measured, one element at a time.
+            // The endnotes were read before this pass and belong inside
+            // the `Note`s that reference them, so the container itself is
+            // not a block. Pandoc removes it too.
+            _ if is_endnotes_container(node) => {}
             "div" | "header" => {
                 let attr = attributes(node);
                 let mut inner = self.division(&kids)?;
@@ -458,6 +469,24 @@ impl Reader {
                 out.push(Inline::Code(Box::new(attr), collapse_spaces(&text)));
             }
             "br" => out.push(Inline::LineBreak),
+            // `role="doc-noteref"` alone is the trigger — `epub:type` is
+            // not, measured both ways.
+            //
+            // Only a reference this document can answer becomes a `Note`.
+            // Pandoc emits `Note []` for one it cannot (and warns), but an
+            // EPUB keeps its notes in a *different* XHTML file, and
+            // `ferrodoc-epub` resolves them across files by matching the
+            // `Link` this would have thrown away. Losing the target to
+            // match a warning would trade two books for nothing.
+            "a" if attribute(node, "role").as_deref() == Some("doc-noteref")
+                && attribute(node, "href")
+                    .and_then(|h| h.strip_prefix('#').map(str::to_owned))
+                    .is_some_and(|id| self.notes.contains_key(&id)) =>
+            {
+                let id = attribute(node, "href").unwrap_or_default();
+                let body = self.notes[id.trim_start_matches('#')].clone();
+                out.push(Inline::Note(body));
+            }
             "a" => {
                 let mut attr = attributes(node);
                 // A legacy jump anchor names itself with `name`, which is
@@ -766,6 +795,89 @@ impl Reader {
 }
 
 // --- tree helpers ---
+
+/// Every note body in the document, keyed by the identifier a
+/// `role="doc-noteref"` link points at.
+///
+/// Probed against pandoc 3.8.2.1, and the rule is narrower than it looks:
+///
+/// - the **container** must carry `role="doc-endnotes"`. A `<section>` or a
+///   `<div>` both work, with or without `class="footnotes"`; but
+///   `class="footnotes"` *alone* does not, and neither does
+///   `epub:type="footnotes"` — with those, pandoc emits `Note []` and keeps
+///   the list as an ordinary block;
+/// - the **reference** is `role="doc-noteref"` on the `<a>`, alone.
+///   `epub:type="noteref"` alone leaves a plain `Link`.
+///
+/// The backlink pandoc's own writer puts at the end of each body
+/// (`class="footnote-back"`, `role="doc-backlink"`) is dropped, as pandoc
+/// drops it.
+fn endnotes(document: &Handle, generate_identifiers: bool) -> HashMap<String, Vec<Block>> {
+    let mut found = HashMap::new();
+    let mut stack = vec![document.clone()];
+    while let Some(node) = stack.pop() {
+        if is_endnotes_container(&node) {
+            collect_note_bodies(&node, generate_identifiers, &mut found);
+            continue;
+        }
+        stack.extend(children(&node));
+    }
+    found
+}
+
+/// Whether this element holds the document's notes.
+fn is_endnotes_container(node: &Handle) -> bool {
+    attribute(node, "role").as_deref() == Some("doc-endnotes")
+}
+
+/// Whether this is the backlink a note body ends with.
+fn is_backlink(node: &Handle) -> bool {
+    attribute(node, "role").as_deref() == Some("doc-backlink")
+        || attribute(node, "class")
+            .is_some_and(|c| c.split_whitespace().any(|w| w == "footnote-back"))
+}
+
+/// Read every identified descendant of an endnotes container as a body.
+fn collect_note_bodies(
+    node: &Handle,
+    generate_identifiers: bool,
+    found: &mut HashMap<String, Vec<Block>>,
+) {
+    let mut stack = children(node);
+    while let Some(child) = stack.pop() {
+        if let Some(id) = attribute(&child, "id").filter(|id| !id.is_empty()) {
+            let mut reader = Reader { generate_identifiers, ..Reader::default() };
+            let kids: Vec<Handle> =
+                children(&child).into_iter().filter(|k| !is_backlink(k)).collect();
+            if let Ok(blocks) = reader.blocks(&kids) {
+                found.insert(id, strip_backlinks(blocks));
+            }
+            continue;
+        }
+        stack.extend(children(&child));
+    }
+}
+
+/// Remove the backlink from the end of a body whose paragraph swallowed it.
+///
+/// Filtering the element out before reading catches the common shape, where
+/// the backlink is a direct child of the `<li>`; pandoc's own writer puts it
+/// *inside* the last paragraph, where only the read blocks can see it.
+fn strip_backlinks(mut blocks: Vec<Block>) -> Vec<Block> {
+    if let Some(Block::Plain(inlines) | Block::Para(inlines)) = blocks.last_mut() {
+        while matches!(
+            inlines.last(),
+            Some(Inline::Link(attr, _, _)) if attr.classes.iter().any(|c| c == "footnote-back")
+                || attr.attributes.iter().any(|(k, v)| k == "role" && v == "doc-backlink")
+        ) {
+            inlines.pop();
+        }
+        while matches!(inlines.last(), Some(Inline::Space | Inline::SoftBreak)) {
+            inlines.pop();
+        }
+    }
+    blocks
+}
 
 fn children(node: &Handle) -> Vec<Handle> {
     // A `<template>`'s content is parsed into a fragment of its own rather
@@ -1517,6 +1629,40 @@ mod tests {
         assert_eq!(
             blocks("<ul><li>x</li></ul>"),
             vec![Block::BulletList(vec![vec![Block::Plain(vec![Inline::Str("x".to_owned())])]])]
+        );
+    }
+
+    #[test]
+    fn a_footnote_reference_is_a_note_and_the_endnotes_section_disappears() {
+        // The whole shape pandoc's own HTML writer emits, and pandoc reads
+        // it back to exactly this. Before the fix the reference stayed a
+        // `Link` and the section came through as a `Div` — a footnote
+        // silently degraded to a link, in two corpus EPUBs, with every
+        // gate green because no `corpus/*.html` contained `noteref`.
+        let html = concat!(
+            r##"<p>T<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref">1</a></p>"##,
+            r##"<section class="footnotes" role="doc-endnotes"><ol>"##,
+            r##"<li id="fn1"><p>Body.<a href="#fnref1" class="footnote-back" "##,
+            r##"role="doc-backlink">back</a></p></li></ol></section>"##,
+        );
+        assert_eq!(
+            blocks(html),
+            vec![Block::Para(vec![
+                Inline::Str("T".to_owned()),
+                Inline::Note(vec![Block::Para(vec![Inline::Str("Body.".to_owned())])]),
+            ])],
+            "the backlink is dropped and the section contributes no block"
+        );
+
+        // `epub:type="noteref"` alone is *not* the trigger, and a reference
+        // this document cannot answer keeps its `Link` — an EPUB holds its
+        // notes in another file, and `ferrodoc-epub` matches on that link.
+        let unresolved = r##"<p>T<a href="#absent" role="doc-noteref">1</a></p>"##;
+        assert!(
+            matches!(blocks(unresolved).as_slice(), [Block::Para(inlines)]
+                if matches!(inlines.last(), Some(Inline::Link(..)))),
+            "{:?}",
+            blocks(unresolved)
         );
     }
 

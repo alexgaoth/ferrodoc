@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-html-read` | HTML reader produces pandoc's AST | **633/659** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **634/660** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -814,6 +814,34 @@ per-document cost is constant) and it is not byte volume either (cutting
 memory 1.6× left the curve unchanged). It is the *number* of live
 allocations. `docx → AST` therefore grows about 20× for 10× the input, and
 that is the one path where size costs more than proportionally.
+
+### Footnotes in HTML — resolved, with two stated divergences
+
+A `role="doc-noteref"` link becomes a `Note` whose body comes from the
+container carrying `role="doc-endnotes"`, and that container then
+contributes no block — which is what pandoc does. Probed against 3.8.2.1,
+and the rule is narrower than it looks: `class="footnotes"` alone does not
+do it, `epub:type="footnotes"` does not, and on the reference side
+`epub:type="noteref"` alone leaves a plain `Link`. The backlink
+(`class="footnote-back"` / `role="doc-backlink"`) is dropped from the body,
+as pandoc drops it. `corpus/footnotes.html` covers it, and
+`diff-html-read` reads **634/660** where it read 633/659 — the gate fails
+at its unchanged 96% floor if the resolution is switched off (95.9%).
+
+Two divergences, both deliberate:
+
+- **`epub:type="noteref"` gives pandoc the class `["noteref"]`** and gives
+  us none. That is the general `epub:type`-to-class divergence, not a
+  footnote rule.
+- **A reference this document cannot answer keeps its `Link`**, where
+  pandoc emits `Note []` and warns `Reference not found`. An EPUB holds its
+  notes in a *different* XHTML file, and `ferrodoc-epub` resolves them
+  across files by matching exactly that link; discarding the target to
+  reproduce a warning costs two books on `diff-epub` and buys nothing.
+
+      html='<p>T<a href="#absent" role="doc-noteref">1</a></p>'
+      printf '%s' "$html" | pandoc   -f html -t json
+      printf '%s' "$html" | ferrodoc -f html -t json
 
 ### `markdown` means CommonMark, not pandoc's markdown
 

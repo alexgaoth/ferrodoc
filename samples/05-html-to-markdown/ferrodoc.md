@@ -74,7 +74,7 @@ Text with entities &amp; symbols — an em dash, "curly quotes", an
 ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
 日本語.
 
-~~Struck-through text~~ and text with a footnote.[<sup>1</sup>](#fn1)
+~~Struck-through text~~ and text with a footnote.[^1]
 
 Five inlines no writer test used to reach through this file:
 <u>underlined text</u>, <span class="smallcaps">small caps</span>, a
@@ -106,7 +106,5 @@ Nested quoting:
 Contact [ops\@example.com](mailto:ops@example.com) with
 questions. See the `LICENSE` file for terms.
 
-***
-
-1. Footnote bodies can contain **formatting**
-   and a [link](https://example.com).[↩︎](#fnref1)
+[^1]: Footnote bodies can contain **formatting**
+    and a [link](https://example.com).

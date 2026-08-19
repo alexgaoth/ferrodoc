@@ -1,5 +1,5 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-19 11:09:20.821430599 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-19 11:09:20.631430653 -0700
+--- samples/05-html-to-markdown/pandoc.md	2026-08-19 15:14:01.739940262 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-19 15:14:01.535940447 -0700
 @@ -17,22 +17,22 @@
  
  ## Rollout schedule
@@ -47,7 +47,7 @@
  
  ## Awkward cases, on purpose
  
-@@ -68,11 +70,11 @@
+@@ -68,7 +70,7 @@
  `<div>`, `--flag`, and a literal backtick:
  `` ` ``.
  
@@ -56,11 +56,6 @@
  ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
  日本語.
  
--~~Struck-through text~~ and text with a footnote.[^1]
-+~~Struck-through text~~ and text with a footnote.[<sup>1</sup>](#fn1)
- 
- Five inlines no writer test used to reach through this file:
- <u>underlined text</u>, <span class="smallcaps">small caps</span>, a
 @@ -83,17 +85,13 @@
  — the claim was wider than the corpus behind it, which is the defect
  this file is supposed to catch.
@@ -81,7 +76,7 @@
  Nested quoting:
  
  > Outer quote.
-@@ -105,8 +103,10 @@
+@@ -105,7 +103,7 @@
  
  ## Sign-off
  
@@ -89,9 +84,4 @@
 +Contact [ops\@example.com](mailto:ops@example.com) with
  questions. See the `LICENSE` file for terms.
  
--[^1]: Footnote bodies can contain **formatting**
--    and a [link](https://example.com).
-+***
-+
-+1. Footnote bodies can contain **formatting**
-+   and a [link](https://example.com).[↩︎](#fnref1)
+ [^1]: Footnote bodies can contain **formatting**
