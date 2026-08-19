@@ -1,5 +1,5 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-19 10:11:49.189844104 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-19 10:11:49.012844108 -0700
+--- samples/05-html-to-markdown/pandoc.md	2026-08-19 11:09:20.821430599 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-19 11:09:20.631430653 -0700
 @@ -17,22 +17,22 @@
  
  ## Rollout schedule
@@ -47,7 +47,7 @@
  
  ## Awkward cases, on purpose
  
-@@ -68,23 +70,19 @@
+@@ -68,11 +70,11 @@
  `<div>`, `--flag`, and a literal backtick:
  `` ` ``.
  
@@ -58,6 +58,12 @@
  
 -~~Struck-through text~~ and text with a footnote.[^1]
 +~~Struck-through text~~ and text with a footnote.[<sup>1</sup>](#fn1)
+ 
+ Five inlines no writer test used to reach through this file:
+ <u>underlined text</u>, <span class="smallcaps">small caps</span>, a
+@@ -83,17 +85,13 @@
+ — the claim was wider than the corpus behind it, which is the defect
+ this file is supposed to catch.
  
 -A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An
 -email: <ops@example.com>.
@@ -75,7 +81,7 @@
  Nested quoting:
  
  > Outer quote.
-@@ -96,8 +94,10 @@
+@@ -105,8 +103,10 @@
  
  ## Sign-off
  

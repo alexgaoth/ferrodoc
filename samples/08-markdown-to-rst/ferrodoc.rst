@@ -102,6 +102,14 @@ ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
 Struck-through text and text with a footnote. [#]_
 
+Five inlines no writer test used to reach through this file: underlined
+text, small caps, a
+span carrying an id and a class, and
+H2O beside E=mc2. They are here because ``docs/gates.md``
+claims ``--samples`` keeps them found, and until this paragraph existed no
+sample document contained one — the claim was wider than the corpus behind
+it, which is the defect this file is supposed to catch.
+
 A link with a title: `the spec <https://example.com/spec>`__.
 A bare autolink: `https://example.com/status <https://example.com/status>`__. An email:
 `ops@example.com <mailto:ops@example.com>`__.

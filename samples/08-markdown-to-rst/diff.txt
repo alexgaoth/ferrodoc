@@ -1,5 +1,5 @@
---- samples/08-markdown-to-rst/pandoc.rst	2026-08-19 10:11:49.914844090 -0700
-+++ samples/08-markdown-to-rst/ferrodoc.rst	2026-08-19 10:11:49.778844093 -0700
+--- samples/08-markdown-to-rst/pandoc.rst	2026-08-19 11:09:21.630430368 -0700
++++ samples/08-markdown-to-rst/ferrodoc.rst	2026-08-19 11:09:21.464430416 -0700
 @@ -1,3 +1,5 @@
 +.. _field-handbook:
 +
@@ -90,7 +90,7 @@
  
     import ferrodoc
     with open("report.docx", "rb") as f:
-@@ -70,33 +89,27 @@
+@@ -70,16 +89,18 @@
  
     ferrodoc -f markdown -t html handbook.md
  
@@ -108,6 +108,11 @@
  
 -[STRIKEOUT:Struck-through text] and text with a footnote. [1]_
 +Struck-through text and text with a footnote. [#]_
+ 
+ Five inlines no writer test used to reach through this file: underlined
+ text, small caps, a
+@@ -90,21 +111,13 @@
+ it, which is the defect this file is supposed to catch.
  
  A link with a title: `the spec <https://example.com/spec>`__.
 -A bare autolink: https://example.com/status. An email:
@@ -130,7 +135,7 @@
  Nested quoting:
  
     Outer quote.
-@@ -104,16 +117,19 @@
+@@ -112,16 +125,19 @@
        Inner quote, with a list:
  
        - one

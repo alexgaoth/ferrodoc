@@ -1,5 +1,5 @@
---- samples/07-markdown-to-latex/pandoc.tex	2026-08-19 10:11:49.736844093 -0700
-+++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-19 10:11:49.477844098 -0700
+--- samples/07-markdown-to-latex/pandoc.tex	2026-08-19 11:09:21.411430431 -0700
++++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-19 11:09:21.125430512 -0700
 @@ -1,129 +1,17 @@
 -% Options for packages loaded elsewhere
 -\PassOptionsToPackage{unicode}{hyperref}
@@ -253,7 +253,7 @@
  
  An indented code block, which is a different construct:
  
-@@ -218,23 +99,27 @@
+@@ -218,31 +99,35 @@
  
  \subsection{Awkward cases, on purpose}\label{awkward-cases-on-purpose}
  
@@ -271,6 +271,17 @@
 -  \href{https://example.com}{link}.}
 +\sout{Struck-through text} and text with a footnote.\footnote{Footnote bodies can contain \textbf{formatting} and a
 +\href{https://example.com}{link}.}
+ 
+ Five inlines no writer test used to reach through this file: underlined
+ text, small caps, a
+ span carrying an id and a class, and
+-H2O beside E=mc2. They are here because \texttt{docs/gates.md}
+-claims \texttt{-\/-samples} keeps them found, and until this paragraph existed no
+-sample document contained one --- the claim was wider than the corpus behind
++H2O beside E=mc2. They are here because \verb|docs/gates.md|
++claims \verb|--samples| keeps them found, and until this paragraph existed no
++sample document contained one — the claim was wider than the corpus behind
+ it, which is the defect this file is supposed to catch.
  
  A link with a title: \href{https://example.com/spec}{the spec}.
 -A bare autolink: \url{https://example.com/status}. An email:
@@ -290,7 +301,7 @@
  Nested quoting:
  
  \begin{quote}
-@@ -246,16 +131,15 @@
+@@ -254,16 +139,15 @@
  \begin{itemize}
  \tightlist
  \item

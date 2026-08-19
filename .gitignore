@@ -7,6 +7,12 @@ bindings/python/dist/
 __pycache__/
 *.pyc
 
+# `samples/generate.sh --check` copies the tree into a `mktemp -d -p .`
+# scratch dir and removes it on EXIT/INT/TERM. SIGKILL, an OOM or a power
+# cut leaves it behind, and a later `git add -A` would commit a duplicate
+# of `samples/`.
+samples-check.*
+
 # Working notes for the agents that build this, not for anyone reading the
 # repository: the roadmap with its unlanded items, the per-crate rules, and
 # the adoption research behind them. A bare name matches at every level, so

@@ -76,6 +76,15 @@ ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
 
 ~~Struck-through text~~ and text with a footnote.[<sup>1</sup>](#fn1)
 
+Five inlines no writer test used to reach through this file:
+<u>underlined text</u>, <span class="smallcaps">small caps</span>, a
+<span id="marked" class="note">span carrying an id and a class</span>,
+and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because
+`docs/gates.md` claims `--samples` keeps them
+found, and until this paragraph existed no sample document contained one
+— the claim was wider than the corpus behind it, which is the defect
+this file is supposed to catch.
+
 A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: [https\://example.com/status](https://example.com/status). An
 email: [ops\@example.com](mailto:ops@example.com).
 

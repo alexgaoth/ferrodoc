@@ -71,9 +71,16 @@ habit. The tree is never written to, so a passing run leaves it clean.
 
 Exactly two things are ignored, because nothing can make them equal: the
 `---`/`+++` header lines of a diff, which carry the run's timestamp, and
-the `.docx`/`.odt`/`.epub` themselves, which embed zip mtimes and
-generated ids — their `*.readback.md`, which is what the rest of the world
-sees when it opens the file, is compared instead.
+every `.docx`/`.odt`/`.epub`, which embed zip mtimes and generated ids —
+their `*.readback.md`, which is what the rest of the world sees when it
+opens the file, is compared instead.
+
+Everything else is compared, and that includes `samples/inputs/`. Those
+six files are not hand-maintained: five are copied from `corpus/` on every
+run and `page.html` is written by pandoc, so a change there is a real
+change. They were outside the compare scope until 2026-08-19, while both
+this file and `generate.sh` said everything matched byte for byte — the
+same defect this page exists to catch, in the page itself.
 
 **It costs ~3 s of the ~110 s `./scripts/verify.sh` run** (measured warm,
 including the `cargo build --release -p ferrodoc` it needs), which is why

@@ -88,6 +88,8 @@ Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a n
 
 ~~Struck-through text~~ and text with a footnote.[^1]
 
+Five inlines no writer test used to reach through this file: <u>underlined text</u>, <span class="smallcaps">small caps</span>, a <span id="ch001.xhtml_marked" class="note">span carrying an id and a class</span>, and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because `docs/gates.md` claims `--samples` keeps them found, and until this paragraph existed no sample document contained one — the claim was wider than the corpus behind it, which is the defect this file is supposed to catch.
+
 A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
 
 An image: ![the logo](media/file0.png "Project logo")

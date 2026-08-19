@@ -1,5 +1,5 @@
---- samples/09-markdown-to-asciidoc/pandoc.adoc	2026-08-19 10:11:50.100844086 -0700
-+++ samples/09-markdown-to-asciidoc/ferrodoc.adoc	2026-08-19 10:11:49.952844089 -0700
+--- samples/09-markdown-to-asciidoc/pandoc.adoc	2026-08-19 11:09:21.843430308 -0700
++++ samples/09-markdown-to-asciidoc/ferrodoc.adoc	2026-08-19 11:09:21.680430354 -0700
 @@ -1,47 +1,54 @@
 +[[field-handbook]]
  == Field Handbook
@@ -67,7 +67,7 @@
  === Running a conversion
  
  Convert a directory in one pass:
-@@ -63,46 +70,46 @@
+@@ -63,20 +70,20 @@
  
  An indented code block, which is a different construct:
  
@@ -91,6 +91,11 @@
 -{empty}[line-through]#Struck-through text# and text with a footnote.footnote:[Footnote bodies can contain *formatting* and a
 -https://example.com[link].]
 +[.line-through]#Struck-through text[.line-through]# and text with a footnote.footnote:[Footnote bodies can contain *formatting* and a https://example.com[link].]
+ 
+ Five inlines no writer test used to reach through this file: underlined
+ text, small caps, a
+@@ -87,30 +94,30 @@
+ it, which is the defect this file is supposed to catch.
  
  A link with a title: https://example.com/spec[the spec].
 -A bare autolink: https://example.com/status. An email:
