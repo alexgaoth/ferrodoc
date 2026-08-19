@@ -60,18 +60,18 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   processor emits. The `-libreoffice` corpora beside them (`bash
   corpus/<name>/generate.sh`) are the only evidence either reader handles
   anything else, and each found a real bug the pandoc corpus could not.
-- **`diff-html` scores against the CommonMark specification, which has no
-  tables in it at all**, so nothing in the HTML writer's table handling is
-  gated by it — and `diff-md`/`diff-gfm-md` are round trips through this
-  project's own reader, so an inline the reader never produces (there is
-  no `^x^` in CommonMark) never reaches the writer either. Three silent
-  losses lived in those two blind spots with every gate green: column
-  alignment, column widths, and `Superscript`/`Subscript`/`Underline`/
-  `SmallCaps`/`Span` attributes. `samples/` is what found them, and
-  `verify.sh` now fails when a committed sample stops matching a fresh run
-  (`--samples`, ~3 s, writes nothing). When it does: run
-  `./samples/generate.sh`, **read** the diffs — a moved line may be an
-  improvement, but it is never nothing — and commit them with the change.
+- **The spec corpus is the blind spot, and it has cost four bugs.**
+  `diff-html` scores against the CommonMark specification, which contains
+  no tables; `diff-md`/`diff-gfm-md` round-trip through this project's own
+  reader, so an inline it never produces never reaches the writer; and the
+  spec's only `$…$` sits inside a code fence, so `diff-gfm` could not see
+  that `read_gfm` read no math although `pandoc -f gfm` does. Column
+  alignment, column widths, five inline types and `$x$` all shipped with
+  every gate green. `samples/` found the first three and `verify.sh` now
+  fails when a committed sample stops matching a fresh run (`--samples`,
+  ~3 s, writes nothing): run `./samples/generate.sh`, **read** the diffs —
+  a moved line may be an improvement, but it is never nothing — and commit
+  them with the change.
 - Generator inputs live in `<corpus>/src/`, and the HTML collector skips
   `src/`. `diff-html-read` walks `corpus/` for `*.html`, so without that
   rule eight DOCX sources silently widened the HTML gate — and *passed*, so
@@ -83,7 +83,12 @@ Per-crate gotchas live in `crates/*/CLAUDE.md` and
   disagreed was the one that had just been written. Check
   `git ls-files --others --ignored --exclude-standard corpus/` is empty
   before trusting a number that involved media.
-- A behavior with no corpus document that fails without it is not covered.
+- A behavior with no corpus document that fails without it is not covered —
+  and a *hand-authored* corpus can reach 100% by omission: the ipynb gates
+  read 8/8 until a review added inline `$…$` math to three notebooks and
+  they fell to 5/8 and 6/8. When that happens, **widen the corpus; never
+  narrow what the gate claims to cover.** Both are one edit; only one is
+  honest.
   Mutation-test a new rule by breaking it and confirming the corpus drops;
   restore with a plain `cp` of a copy taken first, never `git checkout` —
   and never `cp -a`, which preserves mtime so cargo skips the rebuild and

@@ -19,13 +19,19 @@ Jupyter notebooks. JSON around markdown, so it depends on
   - null is `""` in notebook metadata and the four characters `null` in a
     cell attribute. Same JSON, two spellings.
 - **Cell markdown is neither CommonMark nor GFM.** Pandoc's ipynb
-  extension set has pipe tables, task lists, strikeout, `$…$` math and raw
-  HTML, and lacks bare-URI autolinks, footnotes, escaped line breaks and
-  `fancy_lists`. `read_gfm` is the closest; `fixup_markdown` flattens every
-  `OrderedList` to `(1, DefaultStyle, DefaultDelim)`, which is the *only*
-  ordered list that set can parse. The six remaining divergences are in
-  `COMPATIBILITY.md` with a command each — do not add one to the corpus
-  without fixing it first.
+  extension set has pipe tables, task lists, strikeout, `$…$` math, raw
+  HTML and **classed** bare-URI autolinks (`Link ("",["uri"],[])`, and
+  `["email"]` with a `mailto:` target); it lacks footnotes, escaped line
+  breaks, `www.` autolinks and `fancy_lists`. `read_gfm` is the closest and
+  now reads the math; `autolink_class` adds the classes, using the only
+  signal comrak leaves — an autolink's text *is* its target — so an explicit
+  `[url](url)` is classed where pandoc leaves it bare. `fixup_markdown`
+  flattens every `OrderedList` to `(1, DefaultStyle, DefaultDelim)`, the
+  *only* ordered list that set can parse. Remaining divergences are in
+  `COMPATIBILITY.md` with a command each. **Fix one before the corpus
+  carries it — but never keep it out of the corpus to protect a score:**
+  the first version of these gates read 100% partly because no notebook in
+  it contained an equation.
 - **The writer emits GFM, not CommonMark**: `write_markdown` targets
   CommonMark, which has no table syntax, so a table becomes one paragraph
   per cell and the writer gate drops to 7/8. `write_gfm` keeps it.
