@@ -1,6 +1,7 @@
 //! The `ferrodoc` command-line converter.
 
 use ferrodoc::Format;
+use ferrodoc::ast::{Block, Inline};
 use std::io::{Read as _, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -20,6 +21,11 @@ OPTIONS:
     -o, --output <FILE>     Write to FILE instead of standard output
     -s, --standalone        Wrap HTML in a page, or LaTeX in a whole document
         --css <FILE>        Inline a stylesheet into that page
+        --extract-media <DIR>
+                            Write the input's embedded images under DIR and
+                            point the output at them. Without it a
+                            `docx -> markdown` conversion names pictures it
+                            never writes, so they cannot be recovered.
     -h, --help              Print this help
     -V, --version           Print the version
 
@@ -40,6 +46,7 @@ EXAMPLES:
     ferrodoc report.docx -t markdown        # DOCX in, CommonMark out
     ferrodoc page.html -t markdown          # HTML in, markdown out
     ferrodoc report.docx -t plain
+    ferrodoc report.docx -t gfm --extract-media out  # and keep the pictures
     ferrodoc minutes.odt -t gfm             # LibreOffice in, markdown out
     ferrodoc book.epub -t gfm               # an e-book in, markdown out
     ferrodoc manual.md -o manual.epub       # markdown in, an e-book out
@@ -68,6 +75,7 @@ fn run() -> Result<(), String> {
     let mut stdin_requested = false;
     let mut standalone = false;
     let mut css: Option<PathBuf> = None;
+    let mut extract_media: Option<PathBuf> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -98,6 +106,9 @@ fn run() -> Result<(), String> {
             "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
             "-s" | "--standalone" => standalone = true,
             "--css" => css = Some(PathBuf::from(value("--css")?)),
+            "--extract-media" => {
+                extract_media = Some(PathBuf::from(value("--extract-media")?));
+            }
             // An explicit "-" means stdin, and cannot be combined with a
             // named file — silently ignoring one of them would convert the
             // wrong document.
@@ -143,14 +154,18 @@ fn run() -> Result<(), String> {
         .and_then(std::path::Path::parent)
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_owned();
-    // Only when the output can hold them: a document's images can be far
-    // larger than its text, and reading them to throw them away is how a
-    // `docx -> markdown` conversion runs a machine out of memory.
-    let (doc, embedded) = if to.embeds_media() {
+    // Only when the output can hold them, or when asked for them: a
+    // document's images can be far larger than its text, and reading them
+    // to throw them away is how a `docx -> markdown` conversion runs a
+    // machine out of memory.
+    let (mut doc, embedded) = if to.embeds_media() || extract_media.is_some() {
         ferrodoc::parse_with_media(&bytes, from).map_err(|e| e.to_string())?
     } else {
         (ferrodoc::parse(&bytes, from).map_err(|e| e.to_string())?, ferrodoc::Media::new())
     };
+    if let Some(dir) = extract_media.as_deref() {
+        extract(&mut doc, &embedded, dir)?;
+    }
     let converted = if standalone {
         render_page(&doc, to, css.as_deref())?
     } else {
@@ -216,6 +231,153 @@ fn render_page(
     Ok(ferrodoc::render_html_standalone(doc, css.as_deref()))
 }
 
+/// Write every embedded image under `dir` and repoint the document at it.
+///
+/// Pandoc's `--extract-media` is the behaviour being matched, probed
+/// against 3.8.2.1: a picture the AST calls `media/rId10.png` is written
+/// to `<dir>/media/rId10.png`, and the reference becomes that same joined
+/// path — so a relative `--extract-media out` yields `out/media/rId10.png`
+/// and an absolute one an absolute reference. Without this the reference
+/// names a file nothing ever writes, and the picture is unrecoverable
+/// from the command line although the library has held it all along.
+///
+/// # Errors
+///
+/// If a key escapes `dir`, or the bytes cannot be written.
+fn extract(
+    doc: &mut ferrodoc::Pandoc,
+    embedded: &ferrodoc::Media,
+    dir: &std::path::Path,
+) -> Result<(), String> {
+    let mut written = std::collections::HashMap::new();
+    for (url, bytes) in embedded {
+        // The key comes out of somebody's zip, so it is untrusted input.
+        // A component that walks upward would place a file anywhere the
+        // process can write; refusing beats sanitizing, which invites a
+        // second guess about what the sanitized name now collides with.
+        let relative = std::path::Path::new(url);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| !matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(format!("refusing to extract {url:?}: it escapes {}", dir.display()));
+        }
+        let path = dir.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        written.insert(url.clone(), path.to_string_lossy().into_owned());
+    }
+    repoint(&mut doc.blocks, &written);
+    Ok(())
+}
+
+/// Rewrite every image target that names an extracted file.
+///
+/// Recursive, unlike the readers: the tree here has already been through
+/// one, so its depth is bounded by whichever bound accepted it — 200 for
+/// this project's readers, `serde_json`'s own limit for `-f json`. The
+/// alternative, a hand-rolled worklist over two node kinds, is what makes
+/// a walk miss a container, and a missed container is a picture silently
+/// left pointing at a file that is not there.
+fn repoint(blocks: &mut [Block], written: &std::collections::HashMap<String, String>) {
+    for block in blocks {
+        match block {
+            Block::Plain(inlines) | Block::Para(inlines) | Block::Header(_, _, inlines) => {
+                repoint_inlines(inlines, written);
+            }
+            Block::LineBlock(lines) => {
+                for line in lines {
+                    repoint_inlines(line, written);
+                }
+            }
+            Block::BlockQuote(inner) | Block::Div(_, inner) => repoint(inner, written),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    repoint(item, written);
+                }
+            }
+            Block::DefinitionList(entries) => {
+                for (term, definitions) in entries {
+                    repoint_inlines(term, written);
+                    for definition in definitions {
+                        repoint(definition, written);
+                    }
+                }
+            }
+            Block::Figure(_, caption, inner) => {
+                repoint_caption(caption, written);
+                repoint(inner, written);
+            }
+            Block::Table(table) => {
+                repoint_caption(&mut table.caption, written);
+                for row in table
+                    .head
+                    .rows
+                    .iter_mut()
+                    .chain(table.bodies.iter_mut().flat_map(|b| {
+                        b.head.iter_mut().chain(b.body.iter_mut())
+                    }))
+                    .chain(table.foot.rows.iter_mut())
+                {
+                    for cell in &mut row.cells {
+                        repoint(&mut cell.blocks, written);
+                    }
+                }
+            }
+            Block::CodeBlock(..) | Block::RawBlock(..) | Block::HorizontalRule => {}
+        }
+    }
+}
+
+fn repoint_caption(
+    caption: &mut ferrodoc::ast::Caption,
+    written: &std::collections::HashMap<String, String>,
+) {
+    if let Some(short) = caption.short.as_mut() {
+        repoint_inlines(short, written);
+    }
+    repoint(&mut caption.blocks, written);
+}
+
+fn repoint_inlines(inlines: &mut [Inline], written: &std::collections::HashMap<String, String>) {
+    for inline in inlines {
+        match inline {
+            Inline::Image(_, alt, target) => {
+                if let Some(path) = written.get(&target.url) {
+                    target.url.clone_from(path);
+                }
+                repoint_inlines(alt, written);
+            }
+            Inline::Emph(inner)
+            | Inline::Underline(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Span(_, inner)
+            | Inline::Cite(_, inner) => repoint_inlines(inner, written),
+            // A picture inside a footnote is not hypothetical here: one
+            // was once replaced by the body's, and `corpus/docx` still
+            // carries the document that found it.
+            Inline::Note(blocks) => repoint(blocks, written),
+            Inline::Str(_)
+            | Inline::Code(..)
+            | Inline::Math(..)
+            | Inline::RawInline(..)
+            | Inline::Space
+            | Inline::SoftBreak
+            | Inline::LineBreak => {}
+        }
+    }
+}
+
 /// Where an image's bytes come from: the input package first, then a file
 /// of that name beside the document.
 ///
@@ -247,6 +409,58 @@ fn format(name: &str) -> Result<Format, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A key out of somebody's zip is untrusted: a component that walks
+    /// upward would place a file anywhere the process can write.
+    #[test]
+    fn extraction_refuses_a_key_that_escapes_the_directory() {
+        let dir = std::env::temp_dir().join("ferrodoc-extract-escape");
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        for hostile in ["../escaped.png", "a/../../escaped.png", "/etc/escaped.png"] {
+            let mut media = ferrodoc::Media::new();
+            media.insert(hostile.to_owned(), b"bytes".to_vec());
+            let mut doc = ferrodoc::Pandoc::new(Vec::new());
+            let err = extract(&mut doc, &media, &dir).expect_err(hostile);
+            assert!(err.contains("escapes"), "{err}");
+        }
+        assert!(!dir.join("../escaped.png").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every container, because a walk that misses one leaves a picture
+    /// pointing at a file that is not there — and nothing fails loudly.
+    #[test]
+    fn extraction_repoints_a_picture_wherever_it_sits() {
+        let dir = std::env::temp_dir().join("ferrodoc-extract-walk");
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        let mut media = ferrodoc::Media::new();
+        media.insert("media/p.png".to_owned(), b"bytes".to_vec());
+
+        let image = || {
+            Inline::Image(
+                Box::default(),
+                Vec::new(),
+                Box::new(ferrodoc::ast::Target { url: "media/p.png".to_owned(), title: String::new() }),
+            )
+        };
+        let para = || Block::Para(vec![image()]);
+        let mut doc = ferrodoc::Pandoc::new(vec![
+            para(),
+            Block::BlockQuote(vec![para()]),
+            Block::BulletList(vec![vec![para()]]),
+            Block::DefinitionList(vec![(vec![image()], vec![vec![para()]])]),
+            Block::Para(vec![Inline::Note(vec![para()])]),
+            Block::Para(vec![Inline::Emph(vec![image()])]),
+        ]);
+        extract(&mut doc, &media, &dir).expect("extractable");
+
+        let json = serde_json::to_string(&doc).expect("serializable");
+        assert!(!json.contains("\"media/p.png\""), "a picture was left unrepointed: {json}");
+        let expected = dir.join("media/p.png").to_string_lossy().into_owned();
+        assert_eq!(json.matches(&expected).count(), 7, "{json}");
+        assert_eq!(std::fs::read(dir.join("media/p.png")).expect("written"), b"bytes");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// The package wins over a same-named file on disk. Nothing else in
     /// the workspace exercises `main.rs`, and swapping the two silently

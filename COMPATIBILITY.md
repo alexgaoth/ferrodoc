@@ -806,6 +806,25 @@ memory 1.6× left the curve unchanged). It is the *number* of live
 allocations. `docx → AST` therefore grows about 20× for 10× the input, and
 that is the one path where size costs more than proportionally.
 
+### `--extract-media` — file for file with pandoc
+
+`ferrodoc <doc> --extract-media DIR` writes each embedded image to
+`DIR/<the path the AST names>` and rewrites the reference to that joined
+path, which is what `pandoc --extract-media` does. Verified against 3.8.2.1
+on every reader that carries media, `cmp` per file:
+
+| document | files | byte-identical |
+|---|---|---|
+| `corpus/docx/notes-and-images.docx` | 1 | 1 |
+| `corpus/odt/notes-and-images.odt` | 3 | 3 |
+| `corpus/epub/notes-and-images.epub` | 1 | 1 |
+| `corpus/ipynb-handmade/03-plot-display-data.ipynb` | 2 | 2 |
+
+One deliberate difference: **a key that escapes `DIR` is refused, not
+sanitized.** The key comes out of somebody's zip, so a `..` component would
+place a file anywhere the process can write. Renaming it instead invites a
+second question about what the new name now collides with.
+
 ## Where ferrodoc behaves differently on purpose
 
 - **Deterministic output.** The same AST always produces the same `.docx`

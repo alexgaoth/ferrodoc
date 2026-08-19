@@ -213,6 +213,7 @@ ferrodoc report.docx -o copy.docx        # DOCX in, DOCX out — keeps its image
 ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out — keeps tables
 ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table syntax
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
+ferrodoc report.docx -t gfm --extract-media out   # ...and keep the pictures
 ferrodoc minutes.odt -t gfm              # LibreOffice in, GitHub markdown out
 cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
@@ -226,6 +227,13 @@ it.
 
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
 no table syntax, so a table degrades to one paragraph per cell there.
+
+`--extract-media DIR` writes the input's embedded images under `DIR` and
+repoints the output at them, matching `pandoc --extract-media` file for
+file. Without it a `docx → markdown` conversion names pictures nothing ever
+writes — pandoc does the same, and it is the reason both tools need the
+flag. Media is only read when something will hold it, so the conversions
+that do not ask for pictures never pay for them.
 
 As a library, one call converts — and the AST is right there when you want to
 transform rather than convert, with no subprocess and no JSON round trip:
