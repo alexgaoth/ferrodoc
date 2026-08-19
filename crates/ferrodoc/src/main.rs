@@ -39,6 +39,13 @@ FORMATS:
     input:   markdown (commonmark, md), gfm, html, docx, odt, epub, ipynb, json
     output:  those, plus latex (tex), rst, asciidoc (adoc) and plain (text)
 
+    `markdown` here is **CommonMark**, which is not what `pandoc -f markdown`
+    means. Pandoc's own dialect adds YAML metadata blocks, header attributes
+    (`# H {#id .class}`), definition lists and superscript/subscript, and
+    none of those are read: they come through as the literal text they are
+    written with. Footnotes are read by `gfm` and not by `markdown`, which
+    is also how pandoc has it.
+
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
     and bare-URL links. Prefer it over `markdown` for anything with a
     table — CommonMark has no table syntax, so a table degrades there to
@@ -232,6 +239,13 @@ fn run() -> Result<(), String> {
     };
 
     let bytes = read_input(input.as_deref())?;
+    if matches!(from, Format::Markdown | Format::Gfm) && opens_with_metadata_block(&bytes) {
+        eprintln!(
+            "ferrodoc: this document opens with what pandoc would read as a YAML \
+metadata block; ferrodoc reads CommonMark, where it is a thematic break and \
+a heading in the body"
+        );
+    }
 
     // Image paths in a document are relative to the document, the way
     // every editor that wrote one meant them.
@@ -320,6 +334,34 @@ fn render_page(
         })
         .transpose()?;
     Ok(ferrodoc::render_html_standalone(doc, css.as_deref()))
+}
+
+/// Whether the document opens with what pandoc would read as a YAML
+/// metadata block.
+///
+/// This is the one place the dialect difference is not merely narrower
+/// but **wrong**: pandoc lifts the block into metadata, and `CommonMark`
+/// reads it as a thematic break followed by a setext heading, so the
+/// title and author appear in the body. Nothing else here is worth a
+/// warning — an unread `[^1]` or `{#id}` shows up as itself.
+///
+/// The rule is pandoc's, probed against 3.8.2.1: the first line is exactly
+/// `---`, the line after it is **not** blank (`---\n\ntext\n\n---` is two
+/// thematic breaks to pandoc as well), and a later line is exactly `---`
+/// or `...`.
+fn opens_with_metadata_block(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else { return false };
+    let mut lines = text.lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return false;
+    }
+    let Some(second) = lines.next() else { return false };
+    if second.trim().is_empty() {
+        return false;
+    }
+    std::iter::once(second)
+        .chain(lines)
+        .any(|line| matches!(line.trim_end(), "---" | "..."))
 }
 
 /// Write every embedded image under `dir` and repoint the document at it.
@@ -500,6 +542,26 @@ fn format(name: &str) -> Result<Format, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Probed against pandoc 3.8.2.1: every `true` here is a document
+    /// whose `meta` pandoc fills and ferrodoc leaves in the body, and
+    /// every `false` one pandoc also reads as thematic breaks.
+    #[test]
+    fn a_metadata_block_is_recognised_and_its_near_misses_are_not() {
+        let opens = |s: &str| opens_with_metadata_block(s.as_bytes());
+        assert!(opens("---\ntitle: A\n---\n\nBody.\n"));
+        assert!(opens("---\ntitle: A\n...\n\nBody.\n"), "`...` closes one too");
+        assert!(opens("---\r\ntitle: A\r\n---\r\n"), "CRLF");
+
+        // A blank line after the opener makes it a thematic break for
+        // pandoc as well, which is the false positive worth avoiding.
+        assert!(!opens("---\n\nSome text\n\n---\n"));
+        assert!(!opens("---\ntitle: A\n\nBody.\n"), "no closing fence");
+        assert!(!opens("***\n\nBody.\n\n---\n"), "a different break character");
+        assert!(!opens("Body.\n\n---\ntitle: A\n---\n"), "not at the start");
+        assert!(!opens(""));
+        assert!(!opens("---\n"));
+    }
 
     /// A key out of somebody's zip is untrusted: a component that walks
     /// upward would place a file anywhere the process can write.

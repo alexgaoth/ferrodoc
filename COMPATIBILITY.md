@@ -806,6 +806,50 @@ memory 1.6× left the curve unchanged). It is the *number* of live
 allocations. `docx → AST` therefore grows about 20× for 10× the input, and
 that is the one path where size costs more than proportionally.
 
+### `markdown` means CommonMark, not pandoc's markdown
+
+The flag spelling is the same and the dialects are not. `pandoc -f
+markdown` is pandoc's own dialect; `ferrodoc -f markdown` is CommonMark,
+and extension inference picks it for a `.md` file. Five things a pandoc
+document may carry are read as the literal text they are written with:
+
+```console
+$ cat sample.md
+---
+title: A report
+---
+
+# Heading {#custom-id .fancy}
+
+Text with a footnote.[^1]
+
+[^1]: The note body.
+
+Term
+:   Definition of the term.
+
+H~2~O and E=mc^2^.
+
+$ ferrodoc -f markdown -t html sample.md
+<hr />
+<h2>title: A report</h2>
+<h1>Heading {#custom-id .fancy}</h1>
+<p>Text with a footnote.[^1]</p>
+<p>[^1]: The note body.</p>
+<p>Term : Definition of the term.</p>
+<p>H~2~O and E=mc^2^.</p>
+```
+
+Footnotes are the exception that moved: `-f gfm` reads them, matching
+`pandoc -f gfm`, and `-f markdown` reads none, matching `pandoc -f
+commonmark`.
+
+**Only the metadata block makes the output wrong rather than narrower** —
+the title and author appear in the body — so that one case warns on
+stderr. The test is pandoc's own, probed: the first line is exactly `---`,
+the line after it is not blank, and a later line is exactly `---` or
+`...`. `stdout` and the exit code are untouched.
+
 ### `--wrap` — the default differs from pandoc's, deliberately
 
 **Pandoc fills text output to 72 columns by default; ferrodoc leaves every

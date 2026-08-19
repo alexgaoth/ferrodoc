@@ -219,8 +219,19 @@ cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
-Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`, `json` (the
-pandoc AST). Outputs: those plus `plain`. `-s`/`--standalone` wraps HTML
+Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`,
+`ipynb`, `json` (the pandoc AST). Outputs: those plus `latex`, `rst`,
+`asciidoc` and `plain`.
+
+> **`markdown` here is CommonMark, which is not what `pandoc -f markdown`
+> means.** Pandoc's own dialect adds YAML metadata blocks, header
+> attributes (`# H {#id .class}`), definition lists and
+> superscript/subscript; none of those are read here, and they come through
+> as the literal text they are written with. Footnotes are read by `gfm`
+> and not by `markdown` — which is how pandoc has it too. The one case
+> where the output is *wrong* rather than narrower is a YAML metadata
+> block, because the title and author land in the body, so ferrodoc prints
+> a line to stderr when a document opens with one. `-s`/`--standalone` wraps HTML
 output in a complete page — doctype, charset, `lang`, and the title and
 authors the document carries — and `--css FILE` inlines a stylesheet into
 it.
