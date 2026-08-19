@@ -1,0 +1,3 @@
+# The same person, committing under two spellings. Without this GitHub's
+# contributor graph and `git shortlog -sn` both show two.
+Alex Gao <alexisobrenovic@gmail.com> alexgaoth <alexisobrenovic@gmail.com>

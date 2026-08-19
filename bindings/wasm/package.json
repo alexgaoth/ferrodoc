@@ -1,7 +1,7 @@
 {
   "name": "ferrodoc",
   "version": "0.1.0",
-  "description": "Convert documents \u2014 markdown, GFM, HTML, DOCX, ODT \u2014 in the browser or in Node, with no document leaving the client",
+  "description": "Convert documents \u2014 markdown, GFM, HTML, DOCX, ODT, EPUB, Jupyter \u2014 in the browser or in Node, with no document leaving the client",
   "type": "module",
   "main": "./js/ferrodoc.mjs",
   "module": "./js/ferrodoc.mjs",

@@ -7,7 +7,7 @@ them — that the HTML reader's 26 divergences are what holds
 One of those is refuted below.
 
 **Scope.** Every gate in `scripts/verify.sh` scoring under 100%, except
-the two *fidelity* gates (`diff-latex` 1/11, `diff-rst` 2/11), which are
+the two *fidelity* runs (`diff-latex` 0/11, `diff-rst` 2/11), which are
 excluded on purpose: pandoc itself scores 0/11 and 3/11 on the same
 corpus, so their failures measure the format, not this project, and 20
 more rows of "the format cannot hold it" would drown the signal.

@@ -66,6 +66,16 @@ step() {
 # Run a gate, reporting the score it printed. Never "ok": a number that
 # moved is worth seeing even when it passes, and a summary that says less
 # than the tool did is how a threshold gets quietly lowered.
+# A number worth printing that cannot fail the run. Use it only where an
+# oracle scores 0 on the same corpus, so any threshold would be a number
+# picked after seeing the score — a thermometer, in this file's language.
+# Everything else is a `gate`.
+measure() {
+    local name="$1"; shift
+    printf '%-46s ' "$name"
+    printf '%s\n' "$("$@" 2>&1 | tail -n1)"
+}
+
 gate() {
     local name="$1"; shift
     printf '%-46s ' "$name"
@@ -164,12 +174,20 @@ if [ "$want_gates" = 1 ]; then
     # output does not reach. Every remaining case is listed in
     # COMPATIBILITY.md.
     gate "EPUB writer"                 $HARNESS diff-epub-write corpus --fail-under 72
-    # Fidelity, not agreement with pandoc: pandoc's own LaTeX round trip
-    # scores 0/11 on this corpus, so matching it would gate us on copying
-    # losses. The number is low because the *format* is lossy through
-    # pandoc's reader — see COMPATIBILITY.md — and CI compiles the output
-    # with pdflatex, which is the check that matters for this writer.
-    gate "LaTeX writer (fidelity)"     $HARNESS diff-latex corpus --fail-under 9
+    # **Reported, not gated, and that is a demotion made on evidence.**
+    # This ran at `--fail-under 9` because exactly one of eleven documents
+    # round-tripped. Reading footnotes correctly cost that one: its note
+    # holds a list, and a footnote containing a list does not survive
+    # pandoc's LaTeX reader — measured with `\tightlist`, without it, with
+    # one-line items, and with **pandoc's own LaTeX round-tripped by
+    # pandoc**, which loses it identically. The harness prints
+    # `pandoc round-trips 0/11` beside our number: the oracle scores zero,
+    # so any floor here is a number chosen after seeing the score.
+    # The checks that decide this writer are elsewhere and are real: CI
+    # compiles every corpus document with `pdflatex`, and the rules a
+    # round trip cannot see (`\tightlist`, `\verb` delimiters, enumerate
+    # styles) have literal-output tests. See COMPATIBILITY.md.
+    measure "LaTeX writer (fidelity)"  $HARNESS diff-latex corpus --fail-under 0
     # Same framing as LaTeX: pandoc round-trips 3/11 of this corpus, so
     # the ceiling is the format, not the writer. There is deliberately no
     # `diff-asciidoc` — pandoc writes AsciiDoc and cannot read it, so

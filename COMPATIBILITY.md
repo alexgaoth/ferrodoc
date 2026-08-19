@@ -71,7 +71,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-epub-write` | EPUB writer survives a round trip through pandoc | **8/11** |
 | `diff-ipynb` | notebook reader produces pandoc's AST | **8/8** |
 | `diff-ipynb-write` | notebook writer survives a round trip through pandoc | **8/8** |
-| `diff-latex` | LaTeX writer round-trips the document | **1/11** (pandoc: 0/11) |
+| `diff-latex` | LaTeX writer round-trips the document | **0/11** (pandoc: 0/11) — **reported, not gated**; see below |
 | `diff-rst` | RST writer round-trips the document | **2/11** (pandoc: 3/11) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
@@ -688,6 +688,33 @@ Content a browser may never display is content, and is read: a
 than into the element's children) and a `<noscript>`'s (which the reader
 asks for as markup, by parsing with scripting disabled, because pandoc has
 no notion of scripting at all). Both were silently returning nothing.
+
+### LaTeX fidelity — reported, and deliberately not a gate
+
+`diff-latex` prints a number and cannot fail `verify.sh`. It ran at a 9%
+floor while exactly one of eleven corpus documents round-tripped;
+`corpus/docx/src/anchors-and-notes.md` was that one, and it stopped
+passing when its footnotes started being read, because **a footnote
+containing a list does not survive pandoc's LaTeX reader**:
+
+```console
+$ printf 'a[^1]\n\n[^1]: intro\n\n    - one\n    - two\n' > n.md
+$ ferrodoc n.md -f gfm -t json | pandoc -f json -t latex | pandoc -f latex -t json
+… "BulletList", "c": [[{"t": "Para", …    # Plain went in; Para comes back
+```
+
+That is **pandoc's own LaTeX round-tripped by pandoc**, and it loses the
+tightness identically. Adding `\tightlist`, removing it, and putting the
+items on one line all give the same result. The remaining divergences —
+`DefaultStyle` where the document said `Decimal`, a dropped code-block
+language — fail pandoc's own output the same way, which is why the
+harness prints `pandoc round-trips 0/11` beside our score.
+
+An oracle that scores zero cannot set a floor for us, so there is none.
+What decides this writer instead: CI compiles every corpus document with
+`pdflatex -halt-on-error`, and each rule a round trip cannot observe has a
+literal-output test — `\tightlist`, the `\verb` delimiter search, and the
+`enumerate` styles.
 
 ### The write-only formats — judged by their toolchains, not by pandoc
 

@@ -1,6 +1,6 @@
 [package]
 name = "ferrodoc"
-description = "Universal document converter: markdown, HTML, DOCX and the pandoc AST"
+description = "Universal document converter: markdown, GFM, HTML, DOCX, ODT, EPUB, Jupyter and the pandoc JSON AST in; those plus LaTeX, reStructuredText, AsciiDoc and plain text out — every format checked against pandoc document by document"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

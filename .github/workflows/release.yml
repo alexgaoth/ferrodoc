@@ -6,6 +6,10 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Publishing hangs off this one, deliberately: a tag builds and attaches
+  # artefacts, and only publishing the release sends anything outward.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -60,6 +64,12 @@ jobs:
 
   # The browser story shipped as something installable, not just a claim
   # that it compiles.
+  # This used to run `cargo build -p ferrodoc --target wasm32-unknown-unknown`,
+  # which builds the **CLI** for a target with no filesystem: a 31 KB stub
+  # with no `convert` symbol, not the 1.6 MB module the npm package ships.
+  # It then copied with `|| true` and uploaded with
+  # `fail_on_unmatched_files: false`, so it could not fail even when it
+  # produced nothing. Both are why v0.1.0's "wasm32 package" is unusable.
   wasm:
     name: wasm package
     runs-on: ubuntu-latest
@@ -68,13 +78,54 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - run: cargo build --release -p ferrodoc --target wasm32-unknown-unknown
-      - name: Package
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          registry-url: https://registry.npmjs.org
+      - name: Build the module the package actually ships
+        run: ./bindings/wasm/build.sh
+      # Prove the artefact is the module and not the CLI stub again. The
+      # export is what a caller reaches for, so its absence is the failure
+      # this asserts.
+      - name: Check it exports convert
         run: |
-          mkdir -p wasm
-          cp target/wasm32-unknown-unknown/release/*.wasm wasm/ 2>/dev/null || true
-          tar czf "ferrodoc-${GITHUB_REF_NAME}-wasm32.tar.gz" wasm
+          size=$(wc -c < bindings/wasm/js/ferrodoc.wasm)
+          echo "module is $size bytes"
+          test "$size" -gt 1000000
+          grep -q convert bindings/wasm/js/ferrodoc.wasm
+      - name: Pack the npm tarball
+        run: cd bindings/wasm && npm pack && mv ferrodoc-*.tgz "$GITHUB_WORKSPACE/"
       - uses: softprops/action-gh-release@v2
         with:
-          files: ferrodoc-*-wasm32.tar.gz
-          fail_on_unmatched_files: false
+          files: |
+            ferrodoc-*.tgz
+            bindings/wasm/js/ferrodoc.wasm
+          fail_on_unmatched_files: true
+
+  # Publishing runs only when a human publishes the release, never on a
+  # tag push and never on `workflow_dispatch`: both are recoverable, and
+  # `npm publish` is not.
+  npm-publish:
+    name: publish to npm
+    needs: wasm
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          registry-url: https://registry.npmjs.org
+      - run: ./bindings/wasm/build.sh
+      # `--provenance` ties the tarball to this workflow run, which is
+      # what makes "the package is built from this source" checkable by
+      # someone who does not trust us.
+      - run: cd bindings/wasm && npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

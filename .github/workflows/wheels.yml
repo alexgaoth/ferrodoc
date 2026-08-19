@@ -84,3 +84,28 @@ jobs:
         with:
           name: sdist
           path: bindings/python/dist/*.tar.gz
+
+  # Until this existed, every wheel above was built, installed and tested
+  # on four platforms and then thrown away as a CI artifact — while
+  # `README.md` opened with `pip install ferrodoc`, which 404'd.
+  #
+  # Runs only when a human publishes the release. Trusted publishing, so
+  # there is no long-lived token in this repository; the one-time setup is
+  # a pending publisher on PyPI naming this repo, this workflow file and
+  # the `pypi` environment.
+  publish:
+    name: publish to PyPI
+    needs: [wheels, sdist]
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "{wheel-*,sdist}"
+          merge-multiple: true
+      - run: ls -l dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

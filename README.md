@@ -6,14 +6,23 @@ semantically and in your own process, with output checked against pandoc
 document by document.
 
 ```sh
-pip install ferrodoc          # Python
-npm install ferrodoc          # JavaScript — browser, Node, edge
 cargo add ferrodoc            # Rust
 cargo install ferrodoc        # or the CLI
 ```
 
 Any other language with an FFI links the C ABI in
 [`bindings/c`](bindings/c) — one header, one function.
+
+> **The Python and JavaScript packages are built but not yet published.**
+> `pip install ferrodoc` and `npm install ferrodoc` do not resolve today.
+> Both are built, installed and tested on every platform claimed on every
+> push — four wheels in [`wheels.yml`](.github/workflows/wheels.yml), and
+> the npm tarball installed into an empty project and driven in headless
+> Chrome in [`ci.yml`](.github/workflows/ci.yml) — and both publish on the
+> next release. Until then, build them from this repository:
+> `maturin build --release -m bindings/python/Cargo.toml` (then
+> `pip install` the wheel it writes to `bindings/python/target/wheels/`),
+> and `./bindings/wasm/build.sh && cd bindings/wasm && npm pack`.
 
 ## Why you would switch
 
@@ -75,7 +84,9 @@ The 72× figure is the one worth reproducing yourself, because it is the one
 that decides anything:
 
 ```sh
-pip install ferrodoc
+# Needs the wheel; until the package is on PyPI, build and install it with
+#   maturin build --release -m bindings/python/Cargo.toml
+#   pip install bindings/python/target/wheels/ferrodoc-*.whl
 python3 - <<'EOF'
 import ferrodoc, subprocess, time, pathlib
 docs = [p.read_bytes() for p in pathlib.Path("corpus/docx-libreoffice").glob("*.docx")]
@@ -155,8 +166,12 @@ The remaining gaps are limits of CommonMark itself and are listed in
 
 ### Python
 
+Not on PyPI yet — see the note at the top. Built from this repository:
+
 ```sh
-pip install ferrodoc
+pip install maturin
+maturin build --release -m bindings/python/Cargo.toml
+pip install bindings/python/target/wheels/ferrodoc-*.whl
 ```
 
 ```python
@@ -183,8 +198,8 @@ cargo install ferrodoc                   # installs the `ferrodoc` binary
 
 Or take a prebuilt binary from the
 [latest release](https://github.com/alexgaoth/ferrodoc/releases/latest) —
-Linux (musl), macOS (Intel and Apple silicon), Windows, and a wasm32
-package — or add the library to a project:
+Linux (musl), macOS (Intel and Apple silicon) and Windows — or add the
+library to a project:
 
 ```toml
 [dependencies]
@@ -239,9 +254,9 @@ let without_headings = render(&doc, Format::Html)?;
   bytes, which makes content-addressed caching and "did this change?" work.
   Pandoc embeds timestamps, so its output differs run to run.
 - **Portable, and shipped that way.** Every library crate compiles to
-  `wasm32-unknown-unknown`, and `npm install ferrodoc` is that build:
-  **0.6 MB gzipped**, converting in a browser tab with no document leaving
-  the client. CI drives it in headless Chrome and asserts that the page
+  `wasm32-unknown-unknown`, and the npm package is that build (not yet
+  published — see above): **0.6 MB gzipped**, converting in a browser tab
+  with no document leaving the client. CI drives it in headless Chrome and asserts that the page
   makes no network request, because that claim is the reason it exists.
 
 ```sh

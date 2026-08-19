@@ -88,6 +88,7 @@ dependencies = [
  "ferrodoc-docx",
  "ferrodoc-epub",
  "ferrodoc-html",
+ "ferrodoc-ipynb",
  "ferrodoc-latex",
  "ferrodoc-markdown",
  "ferrodoc-odt",
@@ -137,6 +138,15 @@ dependencies = [
  "ferrodoc-ast",
  "html5ever",
  "markup5ever_rcdom",
+]
+
+[[package]]
+name = "ferrodoc-ipynb"
+version = "0.1.0"
+dependencies = [
+ "ferrodoc-ast",
+ "ferrodoc-markdown",
+ "serde_json",
 ]
 
 [[package]]
