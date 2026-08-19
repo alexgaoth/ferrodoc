@@ -6,3 +6,11 @@ bindings/python/target/
 bindings/python/dist/
 __pycache__/
 *.pyc
+
+# Working notes for the agents that build this, not for anyone reading the
+# repository: the roadmap with its unlanded items, the per-crate rules, and
+# the adoption research behind them. A bare name matches at every level, so
+# this covers the nested `CLAUDE.md` files too.
+TODO.md
+CLAUDE.md
+ADOPTION.md

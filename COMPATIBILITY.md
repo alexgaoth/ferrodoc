@@ -31,8 +31,7 @@ language with an FFI (a C ABI in `bindings/c`), and the command line. Every bind
 to the numbers below.
 
 Everything else pandoc supports — LaTeX, EPUB, RST, Org, presentations, the
-rest of its ~40 — is not converted today. `TODO.md` says which are planned
-and which are declared non-goals.
+rest of its ~40 — is not converted today.
 
 ## Measured conformance
 
@@ -748,8 +747,7 @@ wide payload took `Inline` from **152 to 48 bytes** and cut peak memory
 **1.7–2.0× across every path**. What remains is one allocation per word,
 which no amount of boxing reaches — and the three ways to fix *that* each
 cost something this project values more (raw pointers, a dependency in the
-AST crate, or a public type that cannot serialize alone). `TODO.md` records
-the measurement.
+AST crate, or a public type that cannot serialize alone).
 
 Two further limits worth planning around. The DOCX body is read one part at
 a time, so its XML tree never exists in full — streaming it cut peak RSS

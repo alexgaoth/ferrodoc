@@ -51,7 +51,7 @@ pub enum Format {
     /// `OpenDocument` text, what `LibreOffice` and `OpenOffice` write.
     /// Readable and writable.
     Odt,
-    /// EPUB, the e-book format. Readable; see `TODO.md` for the writer.
+    /// EPUB, the e-book format. Readable and writable.
     Epub,
     /// Jupyter notebooks (`.ipynb`). Readable and writable.
     Ipynb,

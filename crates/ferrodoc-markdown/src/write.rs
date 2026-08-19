@@ -567,8 +567,10 @@ impl Writer {
             Inline::Math(kind, text) => {
                 // Verbatim: escaping corrupts the TeX, since `\\` is a
                 // MathJax line break and `\_` a literal underscore. Probed
-                // against pandoc's `ipynb` writer; see the crate CLAUDE.md
-                // for why the dollar form is kept over its `gfm` spelling.
+                // against pandoc's `ipynb` writer, whose spelling this is.
+                // Pandoc's `gfm` writer instead emits GitHub's `` $`x`$ `` and
+                // a ```` ```math ```` fence; one writer serves both here, and
+                // the dollar form is the one both readers accept.
                 write_math(out, *kind, text);
             }
             Inline::Link(attr, inner, target) => {

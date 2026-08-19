@@ -49,7 +49,7 @@ reintroduce a timing loop that discards a `Result`.
 
 ## The published figures
 
-`TODO.md` holds the current table and the command that reproduces each
-row. `docx → AST` is the one superlinear path — 16.9× the time for 10× the
+`README.md` holds the published figures and the command that reproduces
+each. `docx → AST` is the one superlinear path — 16.9× the time for 10× the
 input — and the only one worth re-measuring when a large document feels
 slow.

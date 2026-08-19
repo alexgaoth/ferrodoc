@@ -272,7 +272,8 @@ unclosed `<a>`, a tag with no closing `>`, a `<pre>` inside a `<tr>` — the
 two build different trees, and that is what most of the 26 unmatched
 documents are. Not all: `<![CDATA[…]]>` tokenizes differently, and `<a/>`
 self-closing syntax sends the two down different recovery paths. The
-remaining families are listed in `TODO.md`, one by one. The bet is not that
+remaining families are listed in [`docs/divergences.md`](docs/divergences.md),
+one by one. The bet is not that
 this replaces pandoc — it is that the common path, markdown/HTML/DOCX
 called from a program rather than a shell, is worth doing natively.
 

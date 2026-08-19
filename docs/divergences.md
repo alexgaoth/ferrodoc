@@ -1,7 +1,7 @@
 # Every failing document, and what it fails on
 
 A census, not a change: nothing here alters behaviour. It exists because
-two claims in `TODO.md` were carrying weight without a breakdown behind
+two claims in the project's roadmap were carrying weight without a breakdown behind
 them — that the HTML reader's 26 divergences are what holds
 `corpus/epub-spec` at 8/22, and that closing them "costs three ways".
 One of those is refuted below.
@@ -319,7 +319,7 @@ cannot be made to hang is the worse trade.
 
 ## What this suggests, without doing any of it
 
-Stated as findings, not as a plan — ranking belongs in `TODO.md`.
+Stated as findings, not as a plan — ranking belongs in the roadmap.
 
 - **`epub-spec` cannot be fixed by the HTML reader.** It needs a
   raw-HTML mode in the EPUB path first (G2, 11 documents). Ten of the
@@ -400,7 +400,7 @@ Stated as findings, not as a plan — ranking belongs in `TODO.md`.
 
 - **This document has twice been an instance of the defect it
   catalogues**, and both entries are left here rather than quietly
-  fixed. (No ordinal: `TODO.md` counts these too, and the two tallies
+  fixed. (No ordinal: the roadmap counts these too, and the two tallies
   cannot be reconciled without deciding cases the tallies never named.
   The rule below is the part that matters and does not need a number.)
   Documented claims in this repo keep turning out wider than the code
