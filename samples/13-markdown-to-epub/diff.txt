@@ -1,11 +1,11 @@
---- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-17 12:18:56.920883931 -0700
-+++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-17 12:18:56.844884039 -0700
+--- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-19 10:11:51.235844064 -0700
++++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-19 10:11:51.164844066 -0700
 @@ -86,11 +86,11 @@
  
  Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
  
 -~~Struck-through text~~ and text with a footnote.[^1]
-+~~Struck-through text~~ and text with a footnote.\[^note\]
++~~Struck-through text~~ and text with a footnote.
  
  A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
  
@@ -14,16 +14,7 @@
  
  <div class="callout">
  
-@@ -107,6 +107,8 @@
- > > - one
- > > - two
- 
-+\[^note\]: Footnote bodies can contain **formatting** and a [link](https://example.com).
-+
- </div>
- 
- <div id="ch001.xhtml_sign-off" class="section level2">
-@@ -118,5 +120,3 @@
+@@ -118,5 +118,3 @@
  </div>
  
  </div>

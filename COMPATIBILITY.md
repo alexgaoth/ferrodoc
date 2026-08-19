@@ -74,8 +74,8 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-latex` | LaTeX writer round-trips the document | **1/11** (pandoc: 0/11) |
 | `diff-rst` | RST writer round-trips the document | **2/11** (pandoc: 3/11) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
-| `diff-gfm` | GFM reader produces pandoc's AST | **654/655** |
-| `diff-gfm-md` | GFM writer round-trips the document | **655/655** (pandoc: 589/655) |
+| `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
+| `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
 | `diff-html-read` | HTML reader produces pandoc's AST | **633/659** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -489,10 +489,25 @@ and tag filtering (which is off, because pandoc does not apply it either).
 Heading identifiers are derived too, since pandoc's `gfm` always does.
 
 Pandoc's `gfm` additionally bundles *pandoc* extensions the GFM
-specification does not define, and those are **not** read: emoji
-shortcodes, footnotes, alerts, `$math$`, and YAML metadata blocks. That
-last one is the single `diff-gfm` mismatch — pandoc reads `---\n---\n` as
-an empty metadata block where we read two thematic breaks.
+specification does not define. Two of them **are** read, because a
+document that has them is wrong without them: `$math$` and **footnotes**.
+Emoji shortcodes, alerts and YAML metadata blocks are not — that last is
+the single `diff-gfm` mismatch, since pandoc reads `---\n---\n` as an
+empty metadata block where we read two thematic breaks.
+
+**Footnotes** agree with `pandoc -f gfm` on all fifteen shapes probed,
+including the two quirks: a reference inside a footnote body resolves to
+nothing (`[^1]: outer[^2]` gives `Note [Para [Str "outer", Str ""]]` —
+`[^2]`'s body is never reached), and a reference with no definition stays
+literal text. `read_commonmark` reads none of them, as `pandoc -f
+commonmark` does not. `corpus/gfm/footnotes.gfm` covers twelve.
+
+> **Pandoc exhausts memory on a self-referential footnote.**
+> `printf 'a[^1]\n\n[^1]: see [^1]\n' | pandoc -f gfm -t json` took
+> **1.4 GB in 5 s** and was still climbing when a 2 GB cap stopped it;
+> ferrodoc reads the same file in **4.6 MB and 0.00 s**. Bodies here never
+> resolve references — which is pandoc's own semantics, above — so the
+> conversion is not recursive and terminates on every input.
 
 Six further reader divergences, all the same shape: ferrodoc parses with
 comrak, a port of GitHub's own **`cmark-gfm`**, and pandoc parses with

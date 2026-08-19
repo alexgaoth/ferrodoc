@@ -83,7 +83,7 @@ literal backtick: ```.
 Text with entities & symbols — an em dash, "curly quotes", an
 ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-[.line-through]#Struck-through text[.line-through]# and text with a footnote.[\^note]
+[.line-through]#Struck-through text[.line-through]# and text with a footnote.footnote:[Footnote bodies can contain *formatting* and a https://example.com[link].]
 
 A link with a title: https://example.com/spec[the spec].
 A bare autolink: https://example.com/status[https://example.com/status]. An email:
@@ -107,9 +107,6 @@ Inner quote, with a list:
 * two
 ____
 _____
-
-[\^note]: Footnote bodies can contain *formatting* and a
-https://example.com[link].
 
 [[sign-off]]
 === Sign-off

@@ -82,10 +82,11 @@ pub fn read_commonmark(input: &str) -> Result<Pandoc, Error> {
 /// `gfm_auto_identifiers` derives.
 ///
 /// Pandoc's own `gfm` bundles further *pandoc* extensions that the GFM
-/// specification does not define. `$math$` **is** read, because pandoc's
-/// `gfm` has `tex_math_dollars` on and a Jupyter markdown cell is mostly
-/// equations; emoji shortcodes, footnotes, alerts and YAML metadata blocks
-/// are not. See `COMPATIBILITY.md`.
+/// specification does not define. `$math$` and **footnotes** are read,
+/// because pandoc's `gfm` reads both and a document carrying either is
+/// wrong without it — a Jupyter cell is mostly equations, and an unread
+/// `[^1]` becomes literal text. Emoji shortcodes, alerts and YAML
+/// metadata blocks are not. See `COMPATIBILITY.md`.
 ///
 /// # Errors
 ///
@@ -109,6 +110,10 @@ fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
         // there — while `-f commonmark` leaves both as literal `Str`.
         // `math_code` stays off: pandoc does not read `` `$x$` `` as math.
         options.extension.math_dollars = true;
+        // Probed: `pandoc -f gfm` reads `[^1]` as `Note`, and GitHub renders
+        // it. `-f commonmark` does not, which is why this is inside the gfm
+        // branch — `diff-spec` and `diff-md` would drop if it leaked out.
+        options.extension.footnotes = true;
     }
     let root = parse_document(&arena, &prepared, &options);
     // Check the depth once, without recursing, and leave the conversion
@@ -117,11 +122,41 @@ fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
     if tree_depth(root) > MAX_NESTING {
         return Err(Error::TooDeeplyNested);
     }
-    let mut blocks = blocks(root.children(), &src, false);
+    // Definitions first: a reference is converted by cloning the body, so
+    // the bodies have to exist before the block walk reaches the reference.
+    let defs = if gfm { footnotes(root, &src) } else { Notes::new() };
+    let mut blocks = blocks(root.children(), &src, false, &defs);
     if gfm {
         Identifiers::default().assign(&mut blocks);
     }
     Ok(Pandoc::new(blocks))
+}
+
+/// Footnote bodies keyed by the label comrak parsed them under. Empty for
+/// `commonmark`, whose pandoc reader has no footnotes at all.
+type Notes = HashMap<String, Vec<Block>>;
+
+/// Every `[^label]: body` in the document, converted once.
+///
+/// The bodies are converted against an **empty** map, so a reference inside
+/// a footnote body resolves to nothing. That is pandoc's behaviour, not a
+/// simplification: `[^1]: outer[^2]` gives it `Note [Para [Str "outer",
+/// Str ""]]` — the inner reference becomes an empty `Str` and `[^2]`'s body
+/// is never reached. It also makes the conversion non-recursive, which
+/// matters more than matching a quirk: `[^1]: see [^1]` hangs pandoc
+/// indefinitely (measured — killed at 20 s), and a reader here must
+/// terminate on every input.
+fn footnotes<'a>(root: &'a AstNode<'a>, src: &Src) -> Notes {
+    let empty = Notes::new();
+    let mut found = Notes::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if let NodeValue::FootnoteDefinition(def) = &node.data.borrow().value {
+            found.insert(def.name.clone(), blocks(node.children(), src, false, &empty));
+        }
+        stack.extend(node.children());
+    }
+    found
 }
 
 /// The deepest nesting in a parsed tree, computed iteratively so that
@@ -225,6 +260,7 @@ fn blocks<'a>(
     nodes: impl Iterator<Item = &'a AstNode<'a>>,
     src: &Src,
     in_quote: bool,
+    defs: &Notes,
 ) -> Vec<Block> {
     let mut out = Vec::new();
     for node in nodes {
@@ -236,8 +272,8 @@ fn blocks<'a>(
             _ => None,
         };
         if let Some(nl) = list {
-            out.extend(lists(node, &nl, src, in_quote));
-        } else if let Some(block) = block(node, src, in_quote) {
+            out.extend(lists(node, &nl, src, in_quote, defs));
+        } else if let Some(block) = block(node, src, in_quote, defs) {
             out.push(block);
         }
     }
@@ -256,6 +292,7 @@ fn lists<'a>(
     nl: &comrak::nodes::NodeList,
     src: &Src,
     in_quote: bool,
+    defs: &Notes,
 ) -> Vec<Block> {
     // Only bullet lists have task items in pandoc, so an ordered list is
     // never split.
@@ -275,7 +312,7 @@ fn lists<'a>(
             let items: Vec<Vec<Block>> = nodes
                 .iter()
                 .map(|item| {
-                    let mut item_blocks = blocks(item.children(), src, in_quote);
+                    let mut item_blocks = blocks(item.children(), src, in_quote, defs);
                     if tight {
                         for block in &mut item_blocks {
                             if let Block::Para(inlines) = block {
@@ -325,11 +362,11 @@ fn is_loose<'a>(items: &[&'a AstNode<'a>], src: &Src) -> bool {
         })
 }
 
-fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> {
+fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
         NodeValue::Paragraph => {
-            let content = inlines(node.children());
+            let content = inlines(node.children(), defs);
             // Comrak quirk: a paragraph of link reference definitions whose
             // last line is a dash-run comes out as a literal `---` paragraph;
             // pandoc consumes the definitions and reads the dashes as a
@@ -348,9 +385,9 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> 
         NodeValue::Heading(h) => Some(Block::Header(
             i64::from(h.level),
             Attr::default(),
-            inlines(node.children()),
+            inlines(node.children(), defs),
         )),
-        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src, true))),
+        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src, true, defs))),
         NodeValue::CodeBlock(cb) => {
             // Pandoc keeps the literal untouched only for a fence that is
             // never closed, sits outside any blockquote, and is followed by
@@ -397,7 +434,7 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool) -> Option<Block> 
             Some(Block::RawBlock(Format("html".to_owned()), literal))
         }
         NodeValue::ThematicBreak => Some(Block::HorizontalRule),
-        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments)))),
+        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments, defs)))),
         // Only core-CommonMark nodes occur with default comrak options, and
         // the GFM extensions add exactly the ones handled above; the
         // differential harness would surface anything dropped here.
@@ -454,13 +491,13 @@ fn prepend(item: &mut Vec<Block>, mut prefix: Vec<Inline>, tight: bool) {
 /// Map a GFM pipe table. comrak has already padded short rows and dropped
 /// cells past the column count, which is what pandoc does too, so the grid
 /// arrives rectangular.
-fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment]) -> Table {
+fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment], defs: &Notes) -> Table {
     let row = |n: &'a AstNode<'a>| Row {
         attr: Attr::default(),
         cells: n
             .children()
             .map(|c| {
-                let content = inlines(c.children());
+                let content = inlines(c.children(), defs);
                 Cell {
                     attr: Attr::default(),
                     alignment: Alignment::AlignDefault,
@@ -618,11 +655,11 @@ fn contains_closer(literal: &str, block_type: u8) -> bool {
     }
 }
 
-fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>) -> Vec<Inline> {
+fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes) -> Vec<Inline> {
     let iter = nodes.into_iter();
     let mut out = Vec::with_capacity(iter.size_hint().0 * 2);
     for node in iter {
-        inline(node, &mut out);
+        inline(node, &mut out, defs);
     }
     merge_adjacent_emphasis(out)
 }
@@ -642,7 +679,7 @@ fn merge_adjacent_emphasis(tokens: Vec<Inline>) -> Vec<Inline> {
     out
 }
 
-fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
+fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes) {
     match &node.data.borrow().value {
         NodeValue::Text(t) => text_tokens(t, out),
         NodeValue::SoftBreak => out.push(Inline::SoftBreak),
@@ -651,21 +688,30 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>) {
         NodeValue::HtmlInline(h) => {
             out.push(Inline::RawInline(Box::new(Format("html".to_owned())), h.clone()));
         }
-        NodeValue::Emph => out.push(Inline::Emph(inlines(node.children()))),
-        NodeValue::Strong => out.push(Inline::Strong(inlines(node.children()))),
-        NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children()))),
+        NodeValue::Emph => out.push(Inline::Emph(inlines(node.children(), defs))),
+        NodeValue::Strong => out.push(Inline::Strong(inlines(node.children(), defs))),
+        NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children(), defs))),
         NodeValue::Math(m) => out.push(Inline::Math(
             if m.display_math { MathType::DisplayMath } else { MathType::InlineMath },
             m.literal.clone(),
         )),
         NodeValue::Link(l) => out.push(Inline::Link(
             Box::default(),
-            inlines(node.children()),
+            inlines(node.children(), defs),
             Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
         )),
+        // One `Note` per reference, body cloned: pandoc duplicates the
+        // body when a label is referenced twice rather than sharing it.
+        // A label with no definition is `Str ""` — see `footnotes`.
+        NodeValue::FootnoteReference(f) => {
+            out.push(match defs.get(&f.name) {
+                Some(body) => Inline::Note(body.clone()),
+                None => Inline::Str(String::new()),
+            });
+        }
         NodeValue::Image(l) => out.push(Inline::Image(
             Box::default(),
-            inlines(node.children()),
+            inlines(node.children(), defs),
             Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
         )),
         _ => {}
@@ -723,6 +769,52 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_footnote_is_a_note_in_gfm_and_a_link_definition_in_commonmark() {
+        // `pandoc -f gfm` reads `[^1]` as `Note`; `-f commonmark` has no
+        // footnotes at all and reads the definition as a link reference,
+        // which is why the extension is set only in the gfm branch. Both
+        // halves were probed against 3.8.2.1.
+        let md = "Text.[^1]\n\n[^1]: body.\n";
+        assert_eq!(
+            gfm(md),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "Text."},
+                {"t": "Note", "c": [{"t": "Para", "c": [{"t": "Str", "c": "body."}]}]},
+            ]}])
+        );
+        assert_eq!(
+            doc(md),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "Text."},
+                {"t": "Link", "c": [["", [], []], [{"t": "Str", "c": "^1"}], ["body.", ""]]},
+            ]}])
+        );
+    }
+
+    #[test]
+    fn a_reference_with_no_definition_stays_literal_and_one_body_never_recurses() {
+        // Undefined: pandoc keeps the whole run as one `Str`.
+        assert_eq!(
+            gfm("Text.[^missing]\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Str", "c": "Text.[^missing]"}]}])
+        );
+        // A reference inside a body resolves to nothing, exactly as pandoc
+        // leaves it — and because bodies never resolve references, the
+        // self-referential `[^1]: see [^1]` that exhausts pandoc's memory
+        // terminates here.
+        assert_eq!(
+            gfm("a[^1]\n\n[^1]: outer[^2]\n\n[^2]: inner\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "a"},
+                {"t": "Note", "c": [{"t": "Para", "c": [
+                    {"t": "Str", "c": "outer"}, {"t": "Str", "c": ""},
+                ]}]},
+            ]}])
+        );
+        assert!(read_gfm("a[^1]\n\n[^1]: see [^1]\n").is_ok());
     }
 
     #[test]

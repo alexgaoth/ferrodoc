@@ -1,0 +1,54 @@
+# Footnotes
+
+Two notes in one paragraph[^1] keep separate labels[^2], which is the
+whole point of this file: with only one note a writer that loses the
+count still looks right.
+
+[^1]: The first body.
+[^2]: The second body.
+
+A body can hold more than a sentence[^long], and a label need not be a
+number[^named].
+
+[^long]: An opening paragraph.
+
+    A second paragraph under the same note.
+
+    - a bullet
+    - another
+
+[^named]: Labels are not part of the tree; only the order of first
+    reference is.
+
+The same note referenced twice[^twice] duplicates its body[^twice].
+
+[^twice]: Referenced from two places.
+
+A note inside *emphasis[^emph]*, inside a heading, inside a quote and
+inside a list item — each keeps its place.
+
+[^emph]: Inside emphasis.
+
+## A heading with a note[^head]
+
+[^head]: Attached to a heading.
+
+> A quoted line with a note[^quote]
+
+[^quote]: Attached to a quote.
+
+- A list item with a note[^item]
+
+[^item]: Attached to a list item.
+
+| column |
+|--------|
+| a cell with a note[^cell] |
+
+[^cell]: Attached to a table cell.
+
+A definition may precede its use.
+
+[^early]: Defined above where it is referenced.
+
+Here is that reference[^early].

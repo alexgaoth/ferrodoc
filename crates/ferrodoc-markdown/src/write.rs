@@ -36,6 +36,9 @@ use ferrodoc_ast::{
 };
 use std::fmt::Write as _;
 
+/// What a footnote body's continuation lines carry, as pandoc writes them.
+const INDENT: &str = "    ";
+
 /// Render a document as `CommonMark`.
 pub fn write_markdown(doc: &Pandoc) -> String {
     render(doc, false)
@@ -56,7 +59,9 @@ pub fn write_gfm(doc: &Pandoc) -> String {
 
 fn render(doc: &Pandoc, gfm: bool) -> String {
     let mut out = String::new();
-    Writer { gfm, ..Writer::default() }.blocks(&mut out, &doc.blocks, "");
+    let mut writer = Writer { gfm, ..Writer::default() };
+    writer.blocks(&mut out, &doc.blocks, "");
+    writer.flush_notes(&mut out);
     // Exactly one trailing newline, like every other writer here.
     while out.ends_with("\n\n") {
         out.pop();
@@ -109,12 +114,26 @@ impl Writer {
             self.block(out, block, prefix);
             previous = Some(block);
         }
-        // Footnote bodies belong at the end of the document.
-        if prefix.is_empty() && !self.notes.is_empty() {
-            for (index, body) in std::mem::take(&mut self.notes).iter().enumerate() {
-                out.push('\n');
-                let _ = writeln!(out, "[^{}]: {body}", index + 1);
-            }
+    }
+
+    /// Write the collected footnote bodies, which belong at the very end of
+    /// the document.
+    ///
+    /// This is called once, by [`render`], and deliberately not from
+    /// [`Writer::blocks`]. It used to live there behind `prefix.is_empty()`
+    /// — but a note's *own* body is a nested `blocks` call, and rendering
+    /// one with an empty prefix therefore flushed every note collected so
+    /// far into it and reset the counter. A two-footnote document came out
+    /// with both references labelled `[^1]` and the first body nested
+    /// inside the second.
+    fn flush_notes(&mut self, out: &mut String) {
+        for (index, body) in std::mem::take(&mut self.notes).iter().enumerate() {
+            let body = body.trim_end();
+            // The body was rendered under `INDENT`; pandoc puts the first
+            // line on the label's line and leaves the rest indented.
+            let first = body.strip_prefix(INDENT).unwrap_or(body);
+            out.push('\n');
+            let _ = writeln!(out, "[^{}]: {first}", index + 1);
         }
     }
 
@@ -598,10 +617,14 @@ impl Writer {
                 }
             }
             Inline::Note(blocks) => {
+                // Reserve the number before rendering: a note nested inside
+                // this one would otherwise take this one's label.
+                let index = self.notes.len();
+                self.notes.push(String::new());
                 let mut body = String::new();
-                self.blocks(&mut body, blocks, "");
-                self.notes.push(body.trim_end().replace('\n', " "));
-                let _ = write!(out, "[^{}]", self.notes.len());
+                self.blocks(&mut body, blocks, INDENT);
+                self.notes[index] = body;
+                let _ = write!(out, "[^{}]", index + 1);
             }
         }
     }
@@ -1050,6 +1073,38 @@ mod tests {
             write_markdown(&crate::read_gfm("- [ ] a\n").unwrap()),
             "- \u{2610} a\n"
         );
+    }
+
+    #[test]
+    fn two_footnotes_keep_two_labels_and_two_bodies() {
+        // A note's body is itself a nested `blocks` call. When the flush
+        // lived in `blocks` behind `prefix.is_empty()`, rendering the
+        // second note drained the first into its body and reset the
+        // counter: both references came out `[^1]` and one body vanished
+        // inside the other. Byte-compared against pandoc's gfm writer.
+        let note = |text: &str| {
+            Inline::Note(vec![Block::Para(vec![Inline::Str(text.to_owned())])])
+        };
+        let doc = Pandoc::new(vec![Block::Para(vec![
+            Inline::Str("a".to_owned()),
+            note("one"),
+            Inline::Space,
+            Inline::Str("b".to_owned()),
+            note("two"),
+        ])]);
+        assert_eq!(write_gfm(&doc), "a[^1] b[^2]\n\n[^1]: one\n\n[^2]: two\n");
+    }
+
+    #[test]
+    fn a_footnote_body_keeps_its_blocks_under_the_continuation_indent() {
+        let doc = Pandoc::new(vec![Block::Para(vec![
+            Inline::Str("a".to_owned()),
+            Inline::Note(vec![
+                Block::Para(vec![Inline::Str("one".to_owned())]),
+                Block::Para(vec![Inline::Str("two".to_owned())]),
+            ]),
+        ])]);
+        assert_eq!(write_gfm(&doc), "a[^1]\n\n[^1]: one\n\n    two\n");
     }
 
     #[test]

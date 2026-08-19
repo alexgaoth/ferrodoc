@@ -1,5 +1,5 @@
---- samples/06-markdown-to-html/pandoc.html	2026-08-17 12:18:55.100889475 -0700
-+++ samples/06-markdown-to-html/ferrodoc.html	2026-08-17 12:18:55.015886630 -0700
+--- samples/06-markdown-to-html/pandoc.html	2026-08-19 10:11:49.320844101 -0700
++++ samples/06-markdown-to-html/ferrodoc.html	2026-08-19 10:11:49.228844104 -0700
 @@ -61,18 +61,18 @@
  </ul>
  <h2 id="running-a-conversion">Running a conversion</h2>
@@ -21,15 +21,12 @@
  <p>Inline code with special characters: <code>a | b</code>, <code>&lt;div&gt;</code>, <code>--flag</code>, and a literal backtick: <code>`</code>.</p>
  <p>Text with entities &amp; symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.</p>
 -<p><del>Struck-through text</del> and text with a footnote.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>
-+<p><del>Struck-through text</del> and text with a footnote.[^note]</p>
++<p><del>Struck-through text</del> and text with a footnote.</p>
  <p>A link with a title: <a href="https://example.com/spec" title="Format spec">the spec</a>. A bare autolink: <a href="https://example.com/status">https://example.com/status</a>. An email: <a href="mailto:ops@example.com">ops@example.com</a>.</p>
  <p>An image: <img src="logo.png" title="Project logo" alt="the logo" /></p>
  <div class="callout">
-@@ -91,11 +91,6 @@
- </ul>
+@@ -93,9 +93,3 @@
  </blockquote>
- </blockquote>
-+<p>[^note]: Footnote bodies can contain <strong>formatting</strong> and a <a href="https://example.com">link</a>.</p>
  <h2 id="sign-off">Sign-off</h2>
  <p>Contact <a href="mailto:ops@example.com">ops@example.com</a> with questions. See the <code>LICENSE</code> file for terms.</p>
 -<section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes">

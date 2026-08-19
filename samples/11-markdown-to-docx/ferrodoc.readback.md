@@ -56,11 +56,11 @@ Inline code with special characters: `a | b`, `<div>`, `--flag`, and a literal b
 
 Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-~~Struck-through text~~ and text with a footnote.\[^note\]
+~~Struck-through text~~ and text with a footnote.[^1]
 
 A link with a title: [the spec](https://example.com/spec). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
 
-An image: <img src="media/image4.png" title="Project logo" style="width:0.88889in;height:0.44444in" alt="the logo" />
+An image: <img src="media/image5.png" title="Project logo" style="width:0.88889in;height:0.44444in" alt="the logo" />
 
 Raw HTML block, which not every target format can hold.
 
@@ -73,8 +73,8 @@ Nested quoting:
 - one
 - two
 
-\[^note\]: Footnote bodies can contain **formatting** and a [link](https://example.com).
-
 ## Sign-off
 
 Contact <ops@example.com> with questions. See the `LICENSE` file for terms.
+
+[^1]: Footnote bodies can contain **formatting** and a [link](https://example.com).

@@ -5,6 +5,8 @@
 \usepackage{longtable,booktabs}
 \providecommand{\sout}[1]{{\leavevmode\setbox0=\hbox{#1}%
   \rlap{\rule[0.5ex]{\wd0}{0.4pt}}\box0}}
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 \usepackage{hyperref}
 \begin{document}
 \section{Field Handbook}\label{field-handbook}
@@ -43,12 +45,14 @@ Decommission & Ops & 2026-09-15 & not started \tabularnewline
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
+\tightlist
 \item
 Export everything from the old system.
 \item
 Convert it:
 
 \begin{itemize}
+\tightlist
 \item
 \verb|.docx| and \verb|.odt| to markdown for the index
 \item
@@ -61,6 +65,7 @@ Spot-check 1 \% of the output by hand.
 \subsubsection{Checklist}\label{checklist}
 
 \begin{itemize}
+\tightlist
 \item
 ☒ Inventory complete
 \item
@@ -100,7 +105,8 @@ literal backtick: \verb|`|.
 Text with entities \& symbols — an em dash, "curly quotes", an
 ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-\sout{Struck-through text} and text with a footnote.[\textasciicircum{}note]
+\sout{Struck-through text} and text with a footnote.\footnote{Footnote bodies can contain \textbf{formatting} and a
+\href{https://example.com}{link}.}
 
 A link with a title: \href{https://example.com/spec}{the spec}.
 A bare autolink: \href{https://example.com/status}{https://example.com/status}. An email:
@@ -123,6 +129,7 @@ Outer quote.
 Inner quote, with a list:
 
 \begin{itemize}
+\tightlist
 \item
 one
 \item
@@ -130,9 +137,6 @@ two
 \end{itemize}
 \end{quote}
 \end{quote}
-
-[\textasciicircum{}note]: Footnote bodies can contain \textbf{formatting} and a
-\href{https://example.com}{link}.
 
 \subsection{Sign-off}\label{sign-off}
 

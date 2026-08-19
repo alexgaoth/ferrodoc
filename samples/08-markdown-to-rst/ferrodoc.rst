@@ -100,7 +100,7 @@ literal backtick: `````.
 Text with entities & symbols — an em dash, "curly quotes", an
 ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-Struck-through text and text with a footnote.[^note]
+Struck-through text and text with a footnote. [#]_
 
 A link with a title: `the spec <https://example.com/spec>`__.
 A bare autolink: `https://example.com/status <https://example.com/status>`__. An email:
@@ -120,9 +120,6 @@ Nested quoting:
 
       - two
 
-[^note]: Footnote bodies can contain **formatting** and a
-`link <https://example.com>`__.
-
 .. _sign-off:
 
 Sign-off
@@ -133,3 +130,6 @@ terms.
 
 
 .. |the logo| image:: logo.png
+
+.. [#] Footnote bodies can contain **formatting** and a
+   `link <https://example.com>`__.

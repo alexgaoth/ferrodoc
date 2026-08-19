@@ -1,5 +1,5 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-17 12:18:54.973886689 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-17 12:18:54.811886918 -0700
+--- samples/05-html-to-markdown/pandoc.md	2026-08-19 10:11:49.189844104 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-19 10:11:49.012844108 -0700
 @@ -17,22 +17,22 @@
  
  ## Rollout schedule

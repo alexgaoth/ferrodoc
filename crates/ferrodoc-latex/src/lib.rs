@@ -91,6 +91,12 @@ const PREAMBLE: &str = concat!(
     // Box the argument, overlay a rule its width, then print it.
     "\\providecommand{\\sout}[1]{{\\leavevmode\\setbox0=\\hbox{#1}%\n",
     "  \\rlap{\\rule[0.5ex]{\\wd0}{0.4pt}}\\box0}}\n",
+    // `\tightlist` is pandoc's, and its reader needs it to tell a tight
+    // list from a loose one: without it every `Plain` item comes back as
+    // `Para`. `\providecommand` again, so a fragment pasted into a
+    // pandoc-produced document does not clash with the identical macro.
+    "\\providecommand{\\tightlist}{%\n",
+    "  \\setlength{\\itemsep}{0pt}\\setlength{\\parskip}{0pt}}\n",
     // Loaded last, as hyperref asks.
     "\\usepackage{hyperref}\n",
 );
@@ -169,6 +175,7 @@ fn block_to(block: &Block, out: &mut String) {
                 "\\def\\labelenumi{{{}}}",
                 enumerate_style(attrs.style, attrs.delim)
             );
+            tightlist(items, out);
             for item in items {
                 out.push_str("\\item\n");
                 blocks(item, out);
@@ -177,6 +184,7 @@ fn block_to(block: &Block, out: &mut String) {
         }
         Block::BulletList(items) => {
             out.push_str("\\begin{itemize}\n");
+            tightlist(items, out);
             for item in items {
                 out.push_str("\\item\n");
                 blocks(item, out);
@@ -239,6 +247,21 @@ fn block_to(block: &Block, out: &mut String) {
 /// The `\labelenumi` a numbering style and delimiter call for.
 ///
 /// Always emitted, even for the arabic default: pandoc's reader reports
+/// Write `\tightlist` when every item opens with a `Plain`, which is what
+/// a tight list is. Pandoc emits it and its reader keys on it: a list
+/// written without it reads back with every item promoted to `Para`, so
+/// this is the difference between a round trip and a divergence, not a
+/// matter of spacing. An empty list is not tight — pandoc emits nothing.
+fn tightlist(items: &[Vec<Block>], out: &mut String) {
+    let tight = !items.is_empty()
+        && items
+            .iter()
+            .all(|item| matches!(item.first(), Some(Block::Plain(_))));
+    if tight {
+        out.push_str("\\tightlist\n");
+    }
+}
+
 /// `DefaultStyle` for a bare `enumerate`, so a `Decimal` list that says
 /// nothing comes back as a different list.
 fn enumerate_style(style: ListNumberStyle, delim: ListNumberDelim) -> String {
@@ -570,6 +593,33 @@ mod tests {
         assert!(latex.contains("\\textbackslash{}"), "{latex}");
         assert!(latex.contains("\\textasciitilde{}"), "{latex}");
         assert!(latex.contains("\\textasciicircum{}"), "{latex}");
+    }
+
+    #[test]
+    fn a_tight_list_says_so_and_a_loose_one_does_not() {
+        // No gate can see this: pandoc's LaTeX reader promotes every item
+        // to `Para` inside a footnote whatever the writer does, so a
+        // round trip cannot distinguish the two spellings. Compared
+        // against `pandoc -f json -t latex`, which emits exactly this.
+        let item = |b: Block| vec![vec![b]];
+        let tight = write_latex(&doc(vec![Block::BulletList(item(Block::Plain(vec![
+            Inline::Str("a".into()),
+        ])))]));
+        assert!(tight.contains("\\begin{itemize}\n\\tightlist\n"), "{tight}");
+
+        let loose = write_latex(&doc(vec![Block::BulletList(item(Block::Para(vec![
+            Inline::Str("a".into()),
+        ])))]));
+        assert!(!loose.contains("\\tightlist"), "{loose}");
+
+        // An empty list is not tight; pandoc emits nothing for one.
+        let empty = write_latex(&doc(vec![Block::BulletList(Vec::new())]));
+        assert!(!empty.contains("\\tightlist"), "{empty}");
+
+        // The macro the output depends on must be in the preamble, or a
+        // standalone document stops compiling.
+        let standalone = write_latex_standalone(&doc(Vec::new()));
+        assert!(standalone.contains(r"\providecommand{\tightlist}"), "{standalone}");
     }
 
     #[test]

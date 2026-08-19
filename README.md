@@ -103,7 +103,7 @@ nothing is trusted because it looks right.
 |---|---|
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
-| `ferrodoc-markdown` GFM reader | **654/655** documents produce identical ASTs |
+| `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
@@ -114,7 +114,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-rst` writer | every corpus document is accepted by **`sphinx-build -W`** |
 | `ferrodoc-asciidoc` writer | every corpus document is accepted by **`asciidoctor --failure-level=WARN`** |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
-| `ferrodoc-markdown` GFM writer | **655/655** documents survive a GFM round trip identically (pandoc: 589/655) |
+| `ferrodoc-markdown` GFM writer | **656/656** documents survive a GFM round trip identically (pandoc: 590/656) |
 | `ferrodoc-html` reader | **633/659** HTML documents produce identical ASTs |
 
 ```sh

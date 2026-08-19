@@ -1,5 +1,5 @@
---- samples/09-markdown-to-asciidoc/pandoc.adoc	2026-08-17 12:18:55.863930456 -0700
-+++ samples/09-markdown-to-asciidoc/ferrodoc.adoc	2026-08-17 12:18:55.716885637 -0700
+--- samples/09-markdown-to-asciidoc/pandoc.adoc	2026-08-19 10:11:50.100844086 -0700
++++ samples/09-markdown-to-asciidoc/ferrodoc.adoc	2026-08-19 10:11:49.952844089 -0700
 @@ -1,47 +1,54 @@
 +[[field-handbook]]
  == Field Handbook
@@ -67,7 +67,7 @@
  === Running a conversion
  
  Convert a directory in one pass:
-@@ -63,46 +70,49 @@
+@@ -63,46 +70,46 @@
  
  An indented code block, which is a different construct:
  
@@ -90,7 +90,7 @@
  
 -{empty}[line-through]#Struck-through text# and text with a footnote.footnote:[Footnote bodies can contain *formatting* and a
 -https://example.com[link].]
-+[.line-through]#Struck-through text[.line-through]# and text with a footnote.[\^note]
++[.line-through]#Struck-through text[.line-through]# and text with a footnote.footnote:[Footnote bodies can contain *formatting* and a https://example.com[link].]
  
  A link with a title: https://example.com/spec[the spec].
 -A bare autolink: https://example.com/status. An email:
@@ -122,9 +122,7 @@
  
 ---
 -____
-+[\^note]: Footnote bodies can contain *formatting* and a
-+https://example.com[link].
- 
+-
 +[[sign-off]]
  === Sign-off
  

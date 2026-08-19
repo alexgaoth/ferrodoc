@@ -86,7 +86,7 @@ Inline code with special characters: `a | b`, `<div>`, `--flag`, and a literal b
 
 Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-~~Struck-through text~~ and text with a footnote.\[^note\]
+~~Struck-through text~~ and text with a footnote.
 
 A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
 
@@ -106,8 +106,6 @@ Nested quoting:
 > >
 > > - one
 > > - two
-
-\[^note\]: Footnote bodies can contain **formatting** and a [link](https://example.com).
 
 </div>
 
