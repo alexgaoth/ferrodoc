@@ -792,12 +792,22 @@ fn write_classes(out: &mut String, attr: &Attr) {
 
 fn write_kv(out: &mut String, key: &str, value: &str) {
     out.push(' ');
-    // An attribute name the AST invented is written back behind `data-`,
-    // exactly as pandoc's writer does. Without this a document carrying an
-    // `onclick` — which any HTML reader will produce from `data-onclick`,
-    // and which a JSON AST can simply state — would come out of a
-    // conversion as a live event handler.
-    if !read::is_reserved(key) {
+    // Pandoc's rule, probed on `-f json -t html`: a name HTML does not know
+    // is written behind `data-` (`foo` becomes `data-foo`), and a name it
+    // knows is written as it stands (`onclick`, `style`, `href`). This is
+    // **fidelity, not sanitizing** — a live `onclick` in the source passes
+    // through here exactly as it passes through pandoc. `is_reserved` is
+    // the "HTML knows this name" test, shared with the reader so the two
+    // stay symmetric.
+    //
+    // `starts_with` is not redundant with it. The reader leaves
+    // `data-onclick` *whole* precisely because `onclick` is reserved, so
+    // the key arriving here is already prefixed; without this check the
+    // writer prefixed it again and `ferrodoc -f html -t html` turned
+    // `data-onclick` into `data-data-onclick`. It hit only the reserved
+    // names — `onclick`, `style`, `href`, `id` — and never an ordinary
+    // `data-k`, whose bare `k` the reader had already unwrapped.
+    if !key.starts_with("data-") && !read::is_reserved(key) {
         out.push_str("data-");
     }
     // Keys come from the same untrusted AST as values; drop characters
@@ -883,6 +893,35 @@ fn escape_attribute(out: &mut String, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No differential gate reaches this: `diff-html` is markdown → HTML
+    /// through `read_commonmark`, and `CommonMark` cannot express an
+    /// arbitrary attribute, so every input to that gate scores the same
+    /// before and after. Each line below is `pandoc -f json -t html`
+    /// output, run and pasted.
+    #[test]
+    fn an_attribute_name_is_prefixed_exactly_when_html_does_not_know_it() {
+        let div = |key: &str| {
+            let attr = ferrodoc_ast::Attr {
+                attributes: vec![(key.to_owned(), "v".to_owned())],
+                ..ferrodoc_ast::Attr::default()
+            };
+            write_html(&Pandoc::new(vec![Block::Div(attr, Vec::new())]))
+        };
+        // Invented names go behind `data-`; names HTML knows do not.
+        assert_eq!(div("foo"), "<div data-foo=\"v\">\n\n</div>\n");
+        assert_eq!(div("onclick"), "<div onclick=\"v\">\n\n</div>\n");
+        assert_eq!(div("style"), "<div style=\"v\">\n\n</div>\n");
+
+        // Already prefixed: written once, not twice. Before this was
+        // fixed, `ferrodoc -f html -t html` turned `data-onclick` into
+        // `data-data-onclick` — and only ever the reserved names, because
+        // the reader unwraps `data-k` to a bare `k` and leaves
+        // `data-onclick` whole.
+        for key in ["data-onclick", "data-style", "data-href", "data-id", "data-k"] {
+            assert_eq!(div(key), format!("<div {key}=\"v\">\n\n</div>\n"), "{key}");
+        }
+    }
 
     fn html(md: &str) -> String {
         write_html(&ferrodoc_markdown::read_commonmark(md).expect("convertible"))

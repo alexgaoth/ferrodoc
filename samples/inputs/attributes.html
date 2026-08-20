@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Attributes a converter has to carry</title>
+<meta name="author" content="The Handbook" />
+</head>
+<body>
+<h2 id="known-names">Names HTML already knows</h2>
+<p>These are written as they stand, by pandoc and here alike. Nothing on this
+page is sanitized by either tool — that is the caller's business, and saying so
+is the point of the file.</p>
+<div id="d1" style="color:red" title="a title">A div carrying names HTML knows.</div>
+
+<h2 id="invented-names">Names it does not</h2>
+<div id="d2" data-role="callout" data-level="2">An invented name arrives behind
+<code>data-</code>, and has to go back out the same way rather than gaining a
+second prefix.</div>
+
+<h2 id="already-prefixed">Names already spelled <code>data-</code></h2>
+<p>The reader unwraps <code>data-k</code> to a bare <code>k</code> because HTML
+does not know <code>k</code>, and leaves the rest whole because it does. Both
+have to survive the round trip.</p>
+<div id="d3" data-k="unwrapped" data-onclick="kept" data-style="kept" data-href="kept" data-id="kept">
+Five shapes, one of which is unwrapped by the reader and four of which are not.
+</div>
+<p>Inline too: <span id="s1" data-onclick="kept" data-note="invented">a span</span>.</p>
+</body>
+</html>

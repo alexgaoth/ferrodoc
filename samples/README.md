@@ -34,6 +34,21 @@ reading ours against pandoc reading its own (`*.readback.md`). The `.docx`,
 `.odt` and `.epub` are kept too — open them in Word, LibreOffice or an
 e-reader.
 
+### Why `14-html-to-html` exists
+
+It is the only sample that scores the HTML reader and writer **together**, and
+it is here because no gate can. `diff-html` is markdown → HTML through
+`read_commonmark`, and CommonMark cannot express an arbitrary attribute — so an
+attribute bug is invisible to it whatever fixture you add. `diff-html-read`
+scores the reader alone. `inputs/attributes.html` is therefore hand-authored
+rather than generated from `handbook.md` like `page.html` is: the shapes it
+carries cannot be written in markdown at all.
+
+It caught one on arrival. A key already spelled `data-…` was prefixed a second
+time, so `ferrodoc -f html -t html` turned `data-onclick` into
+`data-data-onclick` — on exactly the names HTML knows, and never on an ordinary
+`data-k`, whose bare `k` the reader had already unwrapped.
+
 ### The one divergence these diffs are the home of
 
 Three lines of `05-html-to-markdown/diff.txt` are a `CodeBlock` whose

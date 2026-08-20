@@ -31,6 +31,10 @@ if [ "$check" = 1 ]; then
     trap 'rm -rf "$(dirname "$out")"' EXIT INT TERM
     mkdir -p "$out/inputs"
     cp samples/inputs/handbook.md "$out/inputs/handbook.md"
+    # Hand-authored, unlike `page.html`: the attributes it carries
+    # cannot be written in markdown at all, which is also why
+    # `diff-html` cannot see them — that gate is markdown -> HTML.
+    cp samples/inputs/attributes.html "$out/inputs/attributes.html"
 fi
 inputs=$out/inputs
 bin=target/release/ferrodoc
@@ -135,6 +139,10 @@ case_ 02-docx-to-html      report.docx   docx     html     html
 case_ 03-odt-to-markdown   contract.odt  odt      gfm      md
 case_ 04-epub-to-markdown  book.epub     epub     gfm      md
 case_ 05-html-to-markdown  page.html     html     gfm      md
+# HTML in, HTML out: the only sample that scores the HTML reader and
+# writer together. `diff-html` runs markdown -> HTML, so an attribute
+# markdown cannot express is invisible to it; this is where it shows.
+case_ 14-html-to-html      attributes.html html   html     html
 
 echo "== into the formats people need"
 case_ 06-markdown-to-html     handbook.md gfm html html
