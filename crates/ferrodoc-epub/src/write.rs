@@ -233,19 +233,27 @@ fn sections(blocks: &[Block], level: i64, ids: &mut Vec<String>) -> Vec<Block> {
             index += 1;
             continue;
         };
-        if *heading_level != level {
-            // A heading deeper or shallower than the level being built is
-            // not this level's business; the recursion below places it.
+        if *heading_level < level {
+            // Shallower than the level being built: it belongs to a
+            // section further out, and the caller places it.
             out.push(blocks[index].clone());
             index += 1;
             continue;
         }
+        // **A heading deeper than the level being built still gets its own
+        // section, at its own level.** Requiring `== level` left a skipped
+        // level unwrapped: `##` followed by `####` gave pandoc a
+        // `level4` section and this writer a bare heading, and the same
+        // for `#` followed by `###`. No corpus document skipped a level,
+        // so `diff-epub-write` could not see it — the spec-corpus blind
+        // spot again, in a third crate.
+        let heading_level = *heading_level;
         // Everything up to the next heading at this level or shallower.
         let start = index + 1;
         let mut end = start;
         while end < blocks.len() {
             if let Block::Header(next, ..) = &blocks[end]
-                && *next <= level
+                && *next <= heading_level
             {
                 break;
             }
@@ -257,13 +265,13 @@ fn sections(blocks: &[Block], level: i64, ids: &mut Vec<String>) -> Vec<Block> {
             unique(&attr.identifier, ids)
         };
         let mut inner = vec![Block::Header(
-            *heading_level,
+            heading_level,
             // The identifier moved to the section; the classes did not.
             Attr { classes: attr.classes.clone(), ..Attr::default() },
             inlines.clone(),
         )];
-        inner.extend(sections(&blocks[start..end], level + 1, ids));
-        let mut classes = vec!["section".to_owned(), format!("level{level}")];
+        inner.extend(sections(&blocks[start..end], heading_level + 1, ids));
+        let mut classes = vec!["section".to_owned(), format!("level{heading_level}")];
         classes.extend(attr.classes.iter().cloned());
         out.push(Block::Div(
             Attr { identifier, classes, attributes: Vec::new() },
