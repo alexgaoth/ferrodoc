@@ -802,13 +802,44 @@ prose (`bash corpus/bench/generate.sh`):
 | markdown → DOCX | 654 MB | 65.4× |
 | **DOCX → markdown** | **738 MB** | **73.8×** |
 
-CI holds the worst path at **80×**, which is a regression bound rather than
-an aspiration: nothing may quietly get hungrier.
+CI holds the worst path at **80×** on this 10 MB fixture, which is a
+regression bound rather than an aspiration: nothing may quietly get
+hungrier. What that bound covers by size is the paragraph below.
 
 **What this means in practice.** A 1 MB document needs roughly 75 MB and
 fits anywhere. A 10 MB document needs about 750 MB and does not fit a small
-edge worker; convert it in a process with room, or split it. The ratio is
-stable across sizes, so it multiplies out honestly.
+edge worker; convert it in a process with room, or split it. A 50 MB
+document needs about 3.9 GB.
+
+**The ratio is not constant, and the sentence here used to say it was.**
+That claim was measured on a single 10 MB fixture, where the only path
+near the bound could not contradict it. Measured across the range, on the
+same generated prose (`bash corpus/bench/generate.sh --range`, then
+`ferrodoc-harness bench-rss` on each):
+
+| path | 10 MB | 25 MB | 50 MB |
+|---|---|---|---|
+| markdown → AST | 35.9× | 35.6× | 35.5× |
+| markdown → HTML | 35.9× | 35.6× | 35.5× |
+| markdown → ODT | 35.9× | 35.6× | 35.5× |
+| ODT → markdown | 36.7× | 35.6× | 35.5× |
+| HTML → AST | 37.9× | 37.4× | 37.3× |
+| markdown → DOCX | 65.4× | 66.2× | 65.2× |
+| **DOCX → markdown** | **73.8×** | **77.7×** | **78.1×** |
+
+Six of the seven paths are flat, and they are the six that were never the
+constraint. The worst path **rises** — and then flattens: +3.9× over the
+first interval and +0.4× over the second, which is a curve approaching
+something near 78×, not a line. Continuing the first interval's slope
+linearly would have crossed the 80× gate at about 33 MB; that prediction
+was written down before the 50 MB measurement and the measurement refuted
+it.
+
+**So the published bound is 80× for documents up to 50 MB**, with about 2%
+headroom at the top of that range, and nothing is claimed above it. The
+gate still runs on the 10 MB fixture, because a 50 MB run costs 3.9 GB and
+that is not something to spend on every `verify.sh`; the range above it is
+re-measured by hand with the command above.
 
 **Why the floor is around 36×.** Holding a pandoc AST costs what it costs:
 every word is a separate `Str` with its own heap allocation, and every

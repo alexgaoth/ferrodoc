@@ -4,6 +4,12 @@
 # ~/.cache/ferrodoc-bench and are not committed — they are 11 MB of
 # generated prose, and generating them is cheaper than storing them.
 #
+# With `--range`, two more are written at 25 MB and 50 MB. They exist for
+# one question — whether the published peak-RSS *ratio* still holds above
+# the size it was measured at — and they are not part of the gate: at the
+# gated 80x, a 50 MB document wants about 4 GB resident, which is not
+# something to run on every `verify.sh`.
+#
 #   bash corpus/bench/generate.sh
 #   cargo run -q --release -p ferrodoc-harness -- bench-sizes \
 #       ~/.cache/ferrodoc-bench/{small,medium,large}.md --iters 200
@@ -17,6 +23,11 @@
 # reader's 200-level bound and is *refused*. `bench-sizes` used to time
 # that refusal and report it as throughput.
 set -euo pipefail
+
+# `--range` also writes the 25 MB and 50 MB fixtures; see the note above.
+if [ "${1:-}" = "--range" ]; then
+    export FERRODOC_BENCH_RANGE=1
+fi
 
 python3 - <<'PY'
 import os, random
@@ -38,7 +49,11 @@ def block(i):
     if kind == 5: return f"{line(35)} `{line(2)}` **{line(3)}** {line(25)}.\n"
     return f"| a | b |\n|---|---|\n| {line(3)} | {line(3)} |\n"
 
-for target, name in [(10 * 1024, 'small.md'), (1024 * 1024, 'medium.md'), (10 * 1024 * 1024, 'large.md')]:
+sizes = [(10 * 1024, 'small.md'), (1024 * 1024, 'medium.md'), (10 * 1024 * 1024, 'large.md')]
+if os.environ.get('FERRODOC_BENCH_RANGE'):
+    sizes += [(25 * 1024 * 1024, 'xlarge.md'), (50 * 1024 * 1024, 'xxlarge.md')]
+
+for target, name in sizes:
     blocks, i, written = [], 0, 0
     while written < target:
         text = block(i)
