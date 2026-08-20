@@ -1016,6 +1016,60 @@ sanitized.** The key comes out of somebody's zip, so a `..` component would
 place a file anywhere the process can write. Renaming it instead invites a
 second question about what the new name now collides with.
 
+### `--toc`, `--number-sections` and `-M` — matched on the parts that are claims
+
+Three flags a pandoc command line reaches for, and the first of them used
+to be an unknown-option error, which fails a Makefile at the swap rather
+than converting slightly differently.
+
+**What is compared, and what deliberately is not.** The rest of a
+standalone page is *not* pandoc's and is not meant to be: pandoc's default
+template carries a ~170-line stylesheet, an `xmlns`, a `generator` meta and
+a title taken from the **file name**, where `-s` here writes a minimal page
+from what the document actually knows. So the gate compares fragments —
+the `<nav id="TOC">…</nav>` block, and the `^<h[1-6]` lines — and claims
+nothing about template equality:
+
+```sh
+./scripts/compare-toc.sh          # 6/6 documents identical
+```
+
+Six is the whole denominator: every markdown document under `corpus/` and
+`samples/inputs/` with two or more headings, two of them added with this
+work. Both mutations were checked — a `TOC_DEPTH` of 4 drops it to 4/6, and
+numbering from level 1 instead of the document's shallowest heading drops
+it to 5/6.
+
+The rules, each probed against pandoc 3.8.2.1 with `--wrap=none`:
+
+| | |
+|---|---|
+| depth | three levels, which is **pandoc's `--toc-depth` default**, not a property of the format — `pandoc --toc-depth=4` disagrees |
+| nesting | relative, not absolute: `#`, `###`, `##` puts the last two as siblings one level in |
+| no identifier | no link — the entry is bare text, which is every heading in a `-f commonmark` document |
+| numbering base | one component per level from the document's **shallowest** heading, so an all-`##` document numbers `1`, `2` and a mixed one numbers the `##` as `0.1` |
+| `unnumbered` | takes no number and consumes none: the heading after it continues the sequence |
+| containers | a heading inside a `Div` is numbered and listed; one inside a `BlockQuote` is neither |
+| no headings | **no** `<nav>` element at all, rather than an empty one |
+| `-M` | `-M k=v` is a `MetaString`, a bare `-M k` is `MetaBool true`, and `-M title=…` overrides a title the document carried |
+
+`--toc` without `--standalone` is accepted and emits nothing, because there
+is no page to put the contents in — pandoc does the same, and erroring
+would fail a build pandoc runs happily. `--toc` or `--number-sections`
+against a non-HTML output warns on stderr rather than silently doing
+nothing; pandoc numbers LaTeX and DOCX too, and this does not.
+
+**A heading's attributes are written in a different order from every other
+element's**, which this work found and fixed:
+
+    printf '# H {#i .foo data-k=v}\n' | pandoc -f markdown -t html --wrap=none
+    <h1 class="foo" data-k="v" id="i">H</h1>
+
+Class first, then the key-values with `data-number` among them, and the
+identifier **last** — where a `Div` with the same attributes gets `id`
+first. No gate reached it: the `CommonMark` spec's headings carry no
+attributes at all, so `diff-html` reads 652/652 either way.
+
 ### Trimmed builds — what a feature subset drops, and how it says so
 
 Every format is a cargo feature of `crates/ferrodoc`, and `default =
@@ -1046,6 +1100,15 @@ That is **59%** of the gzipped module for markdown plus HTML, and 60% of
 the CLI binary (6,408,248 → 3,871,424). comrak and html5ever are what
 remains and neither can be dropped while those two formats are wanted, so
 this is close to the floor for a build that still converts anything.
+
+**Both ratios were measured twice, in two checkouts, and one of the two
+figures does not reproduce exactly.** The CLI binary is byte-identical
+across build directories; the wasm module is not — the same source at a
+different path differs by about 0.03% (1,846,226 against 1,846,003 for the
+all-formats module), so the module embeds something path-dependent that the
+binary does not. The ratio is stable and is what the claim rests on; an
+exact byte count for the module is only reproducible from the same
+directory.
 
 CI builds and tests one subset on all three platforms; a `#[cfg]` that was
 never added shows up nowhere else, because the default build compiles

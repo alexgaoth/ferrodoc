@@ -326,18 +326,22 @@ cargo build --release --target wasm32-unknown-unknown \
 - **And you can pay for less.** Every format is a cargo feature, with
   `default = ["all"]`, so nothing changes for anyone who does not ask. A
   caller who converts markdown and HTML can leave the other nine out:
-  `--no-default-features --features markdown,html` takes the wasm module
-  from **679,019 to 402,019 gzipped bytes** (59% of it) and the CLI binary
-  from 6,408,248 to 3,871,424 (60%), both measured today by the commands
-  below. A trimmed build cannot quietly do less than it says: `--help`
-  lists exactly the formats it contains, and asking for one it does not
-  have is an error naming the reason, not a wrong answer.
+  `--no-default-features --features markdown,html` takes the wasm module to
+  **59%** of its gzipped size and the CLI binary to **60%** of its own. Both
+  ratios were measured twice, independently, in two different checkouts.
+  The exact byte counts below are from one of them: the CLI is reproducible
+  to the byte, and the wasm module varies by about 0.03% with the build
+  path, so the ratio is the claim and the byte count is an illustration of
+  it. A trimmed build cannot quietly do less than it says: `--help` lists
+  exactly the formats it contains, and asking for one it does not have is
+  an error naming the reason, not a wrong answer.
 
 ```sh
 ./bindings/wasm/build.sh                       # every format: 1,846,226 bytes, 679,019 gzipped
 ./bindings/wasm/build.sh --no-default-features --features ferrodoc/markdown,ferrodoc/html
                                                # markdown + HTML: 1,162,137 bytes, 402,019 gzipped
 cargo build --release -p ferrodoc --no-default-features --features markdown,html
+                                               # 3,871,424 bytes, against 6,408,248
 ```
 
 Every gate, every known loss and every deliberate divergence is listed one

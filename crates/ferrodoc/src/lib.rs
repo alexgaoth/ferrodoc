@@ -550,10 +550,21 @@ pub fn render_latex_standalone(doc: &Pandoc) -> String {
 /// [`render`] to [`Format::Html`] emits the body only, which is what a
 /// template engine wants and what a browser does not. `css`, if given, is
 /// inlined into a `<style>` element; reading it from a file is the
-/// caller's job, because no crate below this one does IO.
+/// caller's job, because no crate below this one does IO. With `toc`, the
+/// page opens with pandoc's `<nav id="TOC" role="doc-toc">`.
 #[cfg(feature = "html")]
-pub fn render_html_standalone(doc: &Pandoc, css: Option<&str>) -> Vec<u8> {
-    ferrodoc_html::write_html_standalone(doc, css).into_bytes()
+pub fn render_html_standalone(doc: &Pandoc, css: Option<&str>, toc: bool) -> Vec<u8> {
+    ferrodoc_html::write_html_standalone(doc, css, toc).into_bytes()
+}
+
+/// Number a document's headings, as pandoc's `--number-sections` does.
+///
+/// The markup is HTML's — a `data-number` attribute and a
+/// `header-section-number` span — so this is an HTML-output transform, and
+/// every other writer will render the span as whatever it makes of one.
+#[cfg(feature = "html")]
+pub fn number_sections(doc: &mut Pandoc) {
+    ferrodoc_html::number_sections(doc);
 }
 
 /// Convert a document from one format to another.

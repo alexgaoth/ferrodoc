@@ -28,6 +28,18 @@ OPTIONS:
                             they fall unless asked. Only the markdown
                             writers fill.
         --columns <N>       Fill width for --wrap=auto [72]
+        --toc               Put a table of contents at the top of the page.
+                            HTML output with --standalone; accepted and
+                            ignored otherwise, which is what pandoc does.
+                            Three levels deep, pandoc's --toc-depth default.
+    -N, --number-sections   Number the headings, and the contents entries
+                            with them. HTML output; a heading whose classes
+                            include `unnumbered` keeps its place and takes
+                            no number.
+    -M, --metadata <K[=V]>  Set a metadata field: `-M title=Report` names an
+                            HTML page or a DOCX. A bare `-M draft` sets it
+                            to true. Nothing is invented in the page head
+                            beyond title, author and lang.
         --extract-media <DIR>
                             Write the input's embedded images under DIR and
                             point the output at them. Without it a
@@ -84,6 +96,8 @@ EXAMPLES:
     ferrodoc README.md -o readme.html
     ferrodoc README.md -s -o readme.html    # a page a browser can open
     ferrodoc notes.md -s --css site.css -o notes.html
+    ferrodoc manual.md -s --toc -N -o manual.html   # contents and numbering
+    ferrodoc notes.md -M title='Q3 review' -o notes.docx
     ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out
     ferrodoc report.docx -t markdown        # DOCX in, CommonMark out
     ferrodoc page.html -t markdown          # HTML in, markdown out
@@ -149,6 +163,35 @@ struct Options {
     extract_media: Option<PathBuf>,
     /// The width to fill to, or `None` to leave lines where they fall.
     wrap_columns: Option<usize>,
+    toc: bool,
+    number_sections: bool,
+    /// `-M key=value`, in the order given: a later one wins.
+    metadata: Vec<(String, Option<String>)>,
+}
+
+/// `--wrap=auto` fills to `--columns`; `none` and `preserve` are the same
+/// thing for this writer, which never inserted a break of its own, so both
+/// leave every line where the document put it. `Some(0)` is a placeholder
+/// the caller replaces once `--columns` has been seen — the flags may come
+/// in either order.
+///
+/// Extracted from `parse_args` only because the three flags added beside it
+/// took that function past its line budget; the behaviour is unchanged.
+fn wrap_mode(mode: &str) -> Result<Option<usize>, String> {
+    match mode {
+        "auto" => Ok(Some(0)),
+        "none" | "preserve" => Ok(None),
+        other => Err(format!("unknown --wrap {other:?}; expected auto, none or preserve")),
+    }
+}
+
+/// `-M key=value` is a string; a bare `-M key` is `true`, which is what
+/// `pandoc -M draft -t json` shows in `meta`.
+fn metadata_pair(raw: String) -> (String, Option<String>) {
+    match raw.split_once('=') {
+        Some((key, value)) => (key.to_owned(), Some(value.to_owned())),
+        None => (raw, None),
+    }
 }
 
 /// Parse the command line. `Ok(None)` means `--help` or `--version`
@@ -167,6 +210,9 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     // line where the document put it. Only `auto` fills.
     let mut wrap_columns: Option<usize> = None;
     let mut columns = 72usize;
+    let mut toc = false;
+    let mut number_sections = false;
+    let mut metadata: Vec<(String, Option<String>)> = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -205,21 +251,13 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
             "-s" | "--standalone" => standalone = true,
             "--css" => css = Some(PathBuf::from(value("--css")?)),
+            "--toc" | "--table-of-contents" => toc = true,
+            "-N" | "--number-sections" => number_sections = true,
+            "-M" | "--metadata" => metadata.push(metadata_pair(value("--metadata")?)),
             "--extract-media" => {
                 extract_media = Some(PathBuf::from(value("--extract-media")?));
             }
-            "--wrap" => {
-                let mode = value("--wrap")?;
-                match mode.as_str() {
-                    "auto" => wrap_columns = Some(0), // resolved after --columns
-                    "none" | "preserve" => wrap_columns = None,
-                    other => {
-                        return Err(format!(
-                            "unknown --wrap {other:?}; expected auto, none or preserve"
-                        ));
-                    }
-                }
-            }
+            "--wrap" => wrap_columns = wrap_mode(&value("--wrap")?)?,
             "--columns" => {
                 let raw = value("--columns")?;
                 columns = raw
@@ -264,6 +302,9 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         css,
         extract_media,
         wrap_columns: wrap_columns.map(|_| columns),
+        toc,
+        number_sections,
+        metadata,
     }))
 }
 
@@ -278,6 +319,9 @@ fn run() -> Result<(), String> {
         css,
         extract_media,
         wrap_columns,
+        toc,
+        number_sections,
+        metadata,
     }) = parse_args(&args)?
     else {
         return Ok(());
@@ -325,8 +369,36 @@ a heading in the body"
     if let Some(dir) = extract_media.as_deref() {
         extract(&mut doc, &embedded, dir)?;
     }
+    for (key, value) in metadata {
+        let value = match value {
+            Some(value) => ferrodoc::ast::MetaValue::MetaString(value),
+            // A bare `-M draft` is `true`, not the empty string: probed
+            // with `pandoc -M draft -t json`.
+            None => ferrodoc::ast::MetaValue::MetaBool(true),
+        };
+        doc.meta.insert(key, value);
+    }
+    if number_sections {
+        #[cfg(feature = "html")]
+        if to == Format::Html {
+            ferrodoc::number_sections(&mut doc);
+        }
+        if to != Format::Html {
+            // Pandoc numbers headings for LaTeX, DOCX and the rest as
+            // well. Here it is an HTML transform, so saying nothing would
+            // be a silent loss — the one thing the dialect warning in
+            // 7c06bb3 exists to avoid.
+            eprintln!("ferrodoc: --number-sections is HTML-only here; the {to} output is unnumbered");
+        }
+    }
+    // `--toc` without `-s` is accepted and emits nothing, because there is
+    // no page to put the contents in — probed, pandoc does the same, and
+    // erroring would fail a Makefile that pandoc runs happily.
+    if toc && to != Format::Html {
+        eprintln!("ferrodoc: --toc is HTML-only here; the {to} output has no contents");
+    }
     let converted = if standalone {
-        render_page(&doc, to, css.as_deref())?
+        render_page(&doc, to, css.as_deref(), toc)?
     } else {
         if css.is_some() {
             return Err("--css needs --standalone: a fragment has no <head>".to_owned());
@@ -369,14 +441,19 @@ fn write_output(output: Option<&std::path::Path>, bytes: &[u8]) -> Result<(), St
 ///
 /// Only those two have a fragment/whole distinction; saying so beats
 /// writing the fragment the flag was meant to prevent.
+#[cfg_attr(not(any(feature = "html", feature = "latex")), allow(unused_variables))]
 fn render_page(
     doc: &ferrodoc::Pandoc,
     to: Format,
     css: Option<&std::path::Path>,
+    toc: bool,
 ) -> Result<Vec<u8>, String> {
     if to == Format::Latex {
         if css.is_some() {
             return Err("--css applies to html output, not latex".to_owned());
+        }
+        if toc {
+            eprintln!("ferrodoc: --toc is HTML-only here; the latex output has no contents");
         }
         // Without this, `-s` on LaTeX would hand pdflatex a fragment with
         // no preamble — which is the exact mistake the flag prevents for
@@ -398,7 +475,7 @@ fn render_page(
         })
         .transpose()?;
     #[cfg(feature = "html")]
-    return Ok(ferrodoc::render_html_standalone(doc, css.as_deref()));
+    return Ok(ferrodoc::render_html_standalone(doc, css.as_deref(), toc));
     #[cfg(not(feature = "html"))]
     return Err(format!("{to} support was not compiled into this build"));
 }

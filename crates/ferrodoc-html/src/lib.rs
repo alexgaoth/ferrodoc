@@ -70,7 +70,7 @@ pub fn write_html(doc: &Pandoc) -> String {
 /// The head carries what the document actually knows: `title` and
 /// `author` from its metadata, and `lang` on the root element. Nothing is
 /// invented, and a document with no metadata still produces a valid page.
-pub fn write_html_standalone(doc: &Pandoc, css: Option<&str>) -> String {
+pub fn write_html_standalone(doc: &Pandoc, css: Option<&str>, toc: bool) -> String {
     let mut out = String::from("<!DOCTYPE html>\n<html");
     if let Some(lang) = meta_text(doc, "lang") {
         out.push_str(" lang=\"");
@@ -98,9 +98,202 @@ pub fn write_html_standalone(doc: &Pandoc, css: Option<&str>) -> String {
         out.push_str("\n</style>\n");
     }
     out.push_str("</head>\n<body>\n");
+    // Pandoc puts the contents immediately after `<body>`, before the first
+    // block — probed, `pandoc -f gfm -t html -s --toc --wrap=none`.
+    if toc {
+        out.push_str(&write_toc(doc));
+    }
     out.push_str(&write_html(doc));
     out.push_str("</body>\n</html>\n");
     out
+}
+
+/// How deep the contents go, matching **pandoc's `--toc-depth` default**
+/// rather than anything inherent to the format: `pandoc --toc-depth=4`
+/// disagrees with this, which is how a reader can check that claim.
+const TOC_DEPTH: i64 = 3;
+
+/// Number the headings, as pandoc's `--number-sections` does.
+///
+/// Probed against pandoc 3.8.2.1, with `--wrap=none` so no rule here comes
+/// from a line pandoc happened to break:
+///
+/// - the header gains a `number` attribute, which this writer emits as
+///   `data-number` **before** the `id`, and a leading
+///   `<span class="header-section-number">` followed by a space;
+/// - a header whose classes contain `unnumbered` is skipped and keeps the
+///   class — pandoc emits neither the attribute nor the span for it;
+/// - a number has one component per level **from the document's shallowest
+///   heading down**, which is not the same as one per absolute level: a
+///   document whose headings are all `##` numbers `1`, `2`, while one that
+///   mixes `##` with a `#` numbers the `##` as `0.1`. An `unnumbered`
+///   heading still counts toward that shallowest level, and a heading
+///   inside a `Div` does too;
+/// - headings inside a `Div` are numbered; headings inside a `BlockQuote`
+///   are **not**, and neither reach the contents.
+pub fn number_sections(doc: &mut Pandoc) {
+    let Some(base) = shallowest_header(&doc.blocks) else {
+        return;
+    };
+    let mut counters = [0usize; 6];
+    number_blocks(&mut doc.blocks, &mut counters, base);
+}
+
+/// The shallowest heading level anywhere numbering reaches, which is where
+/// a section number's first component comes from.
+fn shallowest_header(blocks: &[Block]) -> Option<usize> {
+    let mut shallowest: Option<usize> = None;
+    for block in blocks {
+        let depth = match block {
+            Block::Header(level, _, _) => usize::try_from(*level).unwrap_or(1).clamp(1, 6),
+            Block::Div(_, blocks) => match shallowest_header(blocks) {
+                Some(depth) => depth,
+                None => continue,
+            },
+            _ => continue,
+        };
+        shallowest = Some(shallowest.map_or(depth, |current: usize| current.min(depth)));
+    }
+    shallowest
+}
+
+fn number_blocks(blocks: &mut [Block], counters: &mut [usize; 6], base: usize) {
+    for block in blocks {
+        match block {
+            Block::Header(level, attr, inlines) => {
+                if attr.classes.iter().any(|class| class == "unnumbered") {
+                    continue;
+                }
+                let depth = usize::try_from(*level).unwrap_or(1).clamp(1, 6);
+                counters[depth - 1] += 1;
+                for counter in &mut counters[depth..] {
+                    *counter = 0;
+                }
+                let number = counters[base - 1..depth.max(base)]
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(".");
+                attr.attributes.push(("number".to_owned(), number.clone()));
+                // Built in one pass rather than two `insert(0, …)` calls,
+                // which is the quadratic shape this repo keeps re-finding.
+                let mut numbered = Vec::with_capacity(inlines.len() + 2);
+                numbered.push(Inline::Span(
+                    Box::new(Attr {
+                        identifier: String::new(),
+                        classes: vec!["header-section-number".to_owned()],
+                        attributes: Vec::new(),
+                    }),
+                    vec![Inline::Str(number)],
+                ));
+                numbered.push(Inline::Space);
+                numbered.append(inlines);
+                *inlines = numbered;
+            }
+            Block::Div(_, blocks) => number_blocks(blocks, counters, base),
+            _ => {}
+        }
+    }
+}
+
+/// The `<nav id="TOC" role="doc-toc">` block pandoc's `--toc` writes.
+///
+/// Empty when the document has no heading within [`TOC_DEPTH`]: pandoc
+/// writes no element at all rather than an empty one.
+///
+/// Two rules are easy to get wrong and both are probed. **Nesting is
+/// relative, not absolute**: `#`, then `###`, then `##` puts the last two
+/// as siblings one level in, because a jump opens exactly one list. And a
+/// heading with **no identifier gets no link** — its text goes into the
+/// item bare, which is what `-f commonmark` produces, where headings carry
+/// no identifiers at all.
+pub fn write_toc(doc: &Pandoc) -> String {
+    let mut entries = Vec::new();
+    collect_toc(&doc.blocks, &mut entries);
+    if entries.is_empty() {
+        return String::new();
+    }
+    let mut roots: Vec<TocNode> = Vec::new();
+    // Indices into the tree, one per open level, with the level beside it.
+    let mut path: Vec<(i64, usize)> = Vec::new();
+    for (level, html) in entries {
+        while path.last().is_some_and(|(open, _)| *open >= level) {
+            path.pop();
+        }
+        let node = TocNode { html, children: Vec::new() };
+        let mut siblings = &mut roots;
+        for (_, index) in &path {
+            siblings = &mut siblings[*index].children;
+        }
+        siblings.push(node);
+        path.push((level, siblings.len() - 1));
+    }
+    format!("<nav id=\"TOC\" role=\"doc-toc\">\n{}\n</nav>\n", write_toc_list(&roots))
+}
+
+struct TocNode {
+    html: String,
+    children: Vec<TocNode>,
+}
+
+/// `<ul>` … `</ul>`, with no trailing newline: a nested list closes as
+/// `</ul></li>` on one line, which is pandoc's shape.
+fn write_toc_list(nodes: &[TocNode]) -> String {
+    let mut out = String::from("<ul>\n");
+    for node in nodes {
+        out.push_str("<li>");
+        out.push_str(&node.html);
+        if !node.children.is_empty() {
+            out.push('\n');
+            out.push_str(&write_toc_list(&node.children));
+        }
+        out.push_str("</li>\n");
+    }
+    out.push_str("</ul>");
+    out
+}
+
+/// Every heading within [`TOC_DEPTH`], as `(level, rendered entry)`.
+fn collect_toc(blocks: &[Block], out: &mut Vec<(i64, String)>) {
+    for block in blocks {
+        match block {
+            Block::Header(level, attr, inlines) => {
+                if *level > TOC_DEPTH {
+                    continue;
+                }
+                let mut html = String::new();
+                if !attr.identifier.is_empty() {
+                    html.push_str("<a href=\"#");
+                    escape_attribute(&mut html, &attr.identifier);
+                    html.push_str("\" id=\"toc-");
+                    escape_attribute(&mut html, &attr.identifier);
+                    html.push_str("\">");
+                }
+                // A numbered document has already had its section number
+                // put into the heading as a `header-section-number` span;
+                // the contents carry the same number under a different
+                // class, so that span is replaced rather than repeated.
+                let mut inlines = inlines.as_slice();
+                if let Some(number) = attr.attributes.iter().find(|(key, _)| key == "number") {
+                    html.push_str("<span class=\"toc-section-number\">");
+                    escape_text(&mut html, &number.1);
+                    html.push_str("</span> ");
+                    if let [Inline::Span(attr, _), Inline::Space, rest @ ..] = inlines {
+                        if attr.classes.iter().any(|class| class == "header-section-number") {
+                            inlines = rest;
+                        }
+                    }
+                }
+                write_inlines(&mut html, inlines);
+                if !attr.identifier.is_empty() {
+                    html.push_str("</a>");
+                }
+                out.push((*level, html));
+            }
+            Block::Div(_, blocks) => collect_toc(blocks, out),
+            _ => {}
+        }
+    }
 }
 
 /// A metadata value as plain text, however it was spelled.
@@ -168,7 +361,7 @@ fn write_block(out: &mut String, block: &Block) {
         }
         Block::Header(level, attr, inlines) => {
             let _ = write!(out, "<h{level}");
-            write_attr(out, attr);
+            write_header_attr(out, attr);
             out.push('>');
             write_inlines(out, inlines);
             let _ = write!(out, "</h{level}>");
@@ -554,34 +747,74 @@ fn wrap_tag(out: &mut String, tag: &str, inner: &[Inline]) {
     let _ = write!(out, "</{tag}>");
 }
 
-/// Render attributes as ` id=".." class=".." k="v"`, pandoc's order.
+/// A heading's attributes, which are **not** in the order every other
+/// element's are: the identifier comes last, and a section number comes
+/// first among the key-values. Probed against pandoc 3.8.2.1 with
+/// `--wrap=none`, on `# H {#i .foo data-k=v}`:
+///
+/// ```text
+/// pandoc                       <h1 class="foo" data-k="v" id="i">H</h1>
+/// pandoc --number-sections     <h1 class="foo" data-number="1" data-k="v" id="i">…
+/// ```
+///
+/// A `Div` with the same attributes gets `id` first, so this is a heading
+/// rule rather than a document-wide one. No gate reached it before
+/// `--number-sections` existed: the `CommonMark` spec's headings carry no
+/// attributes at all, so `diff-html` scores 652/652 either way.
+fn write_header_attr(out: &mut String, attr: &Attr) {
+    write_classes(out, attr);
+    if let Some((_, number)) = attr.attributes.iter().find(|(key, _)| key == "number") {
+        write_kv(out, "number", number);
+    }
+    for (key, value) in attr.attributes.iter().filter(|(key, _)| key != "number") {
+        write_kv(out, key, value);
+    }
+    write_id(out, attr);
+}
+
+fn write_id(out: &mut String, attr: &Attr) {
+    if attr.identifier.is_empty() {
+        return;
+    }
+    out.push_str(" id=\"");
+    escape_attribute(out, &attr.identifier);
+    out.push('"');
+}
+
+fn write_classes(out: &mut String, attr: &Attr) {
+    if attr.classes.is_empty() {
+        return;
+    }
+    out.push_str(" class=\"");
+    escape_attribute(out, &attr.classes.join(" "));
+    out.push('"');
+}
+
+fn write_kv(out: &mut String, key: &str, value: &str) {
+    out.push(' ');
+    // An attribute name the AST invented is written back behind `data-`,
+    // exactly as pandoc's writer does. Without this a document carrying an
+    // `onclick` — which any HTML reader will produce from `data-onclick`,
+    // and which a JSON AST can simply state — would come out of a
+    // conversion as a live event handler.
+    if !read::is_reserved(key) {
+        out.push_str("data-");
+    }
+    // Keys come from the same untrusted AST as values; drop characters
+    // that could break out of the tag.
+    out.extend(key.chars().filter(|c| !c.is_whitespace() && !"\"'<>=/&".contains(*c)));
+    out.push_str("=\"");
+    escape_attribute(out, value);
+    out.push('"');
+}
+
+/// Render attributes as ` id=".." class=".." k="v"`, pandoc's order —
+/// except on a heading, which has its own order; see [`write_header_attr`].
 fn write_attr(out: &mut String, attr: &Attr) {
-    if !attr.identifier.is_empty() {
-        out.push_str(" id=\"");
-        escape_attribute(out, &attr.identifier);
-        out.push('"');
-    }
-    if !attr.classes.is_empty() {
-        out.push_str(" class=\"");
-        escape_attribute(out, &attr.classes.join(" "));
-        out.push('"');
-    }
+    write_id(out, attr);
+    write_classes(out, attr);
     for (key, value) in &attr.attributes {
-        out.push(' ');
-        // An attribute name the AST invented is written back behind
-        // `data-`, exactly as pandoc's writer does. Without this a
-        // document carrying an `onclick` — which any HTML reader will
-        // produce from `data-onclick`, and which a JSON AST can simply
-        // state — would come out of a conversion as a live event handler.
-        if !read::is_reserved(key) {
-            out.push_str("data-");
-        }
-        // Keys come from the same untrusted AST as values; drop characters
-        // that could break out of the tag.
-        out.extend(key.chars().filter(|c| !c.is_whitespace() && !"\"'<>=/&".contains(*c)));
-        out.push_str("=\"");
-        escape_attribute(out, value);
-        out.push('"');
+        write_kv(out, key, value);
     }
 }
 
@@ -655,6 +888,129 @@ mod tests {
         write_html(&ferrodoc_markdown::read_commonmark(md).expect("convertible"))
     }
 
+    fn header(level: i64, id: &str, classes: &[&str], text: &str) -> Block {
+        Block::Header(
+            level,
+            Attr {
+                identifier: id.to_owned(),
+                classes: classes.iter().map(|class| (*class).to_owned()).collect(),
+                attributes: Vec::new(),
+            },
+            vec![Inline::Str(text.to_owned())],
+        )
+    }
+
+    fn doc(blocks: Vec<Block>) -> Pandoc {
+        Pandoc { blocks, ..Pandoc::default() }
+    }
+
+    /// Three rules `scripts/compare-toc.sh` cannot reach, because none of
+    /// them can be written in the markdown this project reads: a class on
+    /// a heading, a `Div`, and a `BlockQuote` around one. Each was probed
+    /// against pandoc 3.8.2.1 with `--number-sections --wrap=none`.
+    #[test]
+    fn numbering_skips_unnumbered_and_blockquotes_but_not_divs() {
+        let mut document = doc(vec![
+            header(1, "one", &[], "One"),
+            header(2, "two", &[], "Two"),
+            // `pandoc -f markdown -t html --number-sections` on
+            // `# Three {.unnumbered}` emits no number and keeps the class —
+            // and the heading after it continues at 1.2, so an unnumbered
+            // heading consumes nothing.
+            header(1, "three", &["unnumbered"], "Three"),
+            header(2, "four", &[], "Four"),
+            Block::Div(Attr::default(), vec![header(2, "in-div", &[], "In a div")]),
+            Block::BlockQuote(vec![header(2, "in-quote", &[], "In a quote")]),
+        ]);
+        number_sections(&mut document);
+        let page = write_html(&document);
+        assert!(page.contains(r#"<h1 data-number="1" id="one">"#), "{page}");
+        assert!(page.contains(r#"<h2 data-number="1.1" id="two">"#), "{page}");
+        assert!(page.contains(r#"<h1 class="unnumbered" id="three">"#), "{page}");
+        assert!(page.contains(r#"<h2 data-number="1.2" id="four">"#), "{page}");
+        assert!(page.contains(r#"<h2 data-number="1.3" id="in-div">"#), "{page}");
+        assert!(page.contains(r#"<h2 id="in-quote">"#), "{page}");
+        assert!(!page.contains(r#"id="in-quote" data"#), "{page}");
+    }
+
+    /// A heading inside a `BlockQuote` is not in the contents either, and a
+    /// document with no heading gets **no** `<nav>` rather than an empty
+    /// one — pandoc emits nothing at all.
+    #[test]
+    fn the_contents_hold_what_pandoc_puts_in_them() {
+        assert_eq!(write_toc(&doc(vec![Block::Para(vec![Inline::Str("x".to_owned())])])), "");
+        let quoted = doc(vec![Block::BlockQuote(vec![header(1, "q", &[], "Q")])]);
+        assert_eq!(write_toc(&quoted), "");
+        let nested = doc(vec![
+            header(1, "one", &[], "One"),
+            header(3, "three", &[], "Three"),
+            header(2, "two", &[], "Two"),
+        ]);
+        // A jump from level 1 to level 3 opens exactly one list, so the
+        // level-2 heading after it is a *sibling* of the level-3 one.
+        assert_eq!(
+            write_toc(&nested),
+            concat!(
+                "<nav id=\"TOC\" role=\"doc-toc\">\n",
+                "<ul>\n",
+                "<li><a href=\"#one\" id=\"toc-one\">One</a>\n",
+                "<ul>\n",
+                "<li><a href=\"#three\" id=\"toc-three\">Three</a></li>\n",
+                "<li><a href=\"#two\" id=\"toc-two\">Two</a></li>\n",
+                "</ul></li>\n",
+                "</ul>\n",
+                "</nav>\n",
+            )
+        );
+        // A heading with no identifier gets no link: that is every heading
+        // in a `-f commonmark` document, where identifiers are not read.
+        let bare = doc(vec![header(1, "", &[], "Bare")]);
+        assert!(bare_entry(&bare).contains("<li>Bare</li>"), "{}", bare_entry(&bare));
+    }
+
+    fn bare_entry(document: &Pandoc) -> String {
+        write_toc(document)
+    }
+
+    /// The head and the reader are a matched pair: `-s` writes `title`,
+    /// `author` and `lang`, and `read_html` reads exactly those back. No
+    /// differential gate covers it — `diff-html-read` reads `corpus/*.html`
+    /// and never this writer's own output — so it is asserted here.
+    #[test]
+    fn the_head_this_writer_produces_reads_back_as_the_metadata_it_came_from() {
+        let mut document = doc(vec![Block::Para(vec![Inline::Str("body".to_owned())])]);
+        document.meta.insert(
+            "title".to_owned(),
+            ferrodoc_ast::MetaValue::MetaString("A Title".to_owned()),
+        );
+        document.meta.insert(
+            "author".to_owned(),
+            ferrodoc_ast::MetaValue::MetaString("An Author".to_owned()),
+        );
+        document.meta.insert(
+            "lang".to_owned(),
+            ferrodoc_ast::MetaValue::MetaString("fr".to_owned()),
+        );
+        let page = write_html_standalone(&document, None, false);
+        assert!(page.contains("<title>A Title</title>"), "{page}");
+        assert!(page.contains(r#"<meta name="author" content="An Author" />"#), "{page}");
+        assert!(page.contains(r#"<html lang="fr">"#), "{page}");
+        // Metadata the head has no place for stays out of it rather than
+        // being invented as a `<meta name="…">`, which the reader would
+        // then read back as a field the document never had.
+        document.meta.insert(
+            "custom".to_owned(),
+            ferrodoc_ast::MetaValue::MetaString("value".to_owned()),
+        );
+        let page = write_html_standalone(&document, None, false);
+        assert!(!page.contains("custom"), "{page}");
+
+        let back = read_html(&page).expect("the page this crate wrote is readable");
+        for key in ["title", "author", "lang"] {
+            assert!(back.meta.contains_key(key), "{key} did not survive: {:?}", back.meta);
+        }
+    }
+
     /// Pandoc keeps a table's alignment in the **column specs**, and
     /// leaves every cell `AlignDefault`. Reading only the cell therefore
     /// dropped the alignment of every table that had one — and no gate
@@ -726,7 +1082,7 @@ mod tests {
                 MetaValue::MetaInlines(vec![Inline::Str("Grace".to_owned())]),
             ]),
         );
-        let page = write_html_standalone(&doc, Some("body { color: red }"));
+        let page = write_html_standalone(&doc, Some("body { color: red }"), false);
 
         // The body is the fragment, unchanged: one writer, two framings.
         assert!(page.contains(&format!("<body>\n{}</body>", write_html(&doc))), "{page}");
@@ -743,7 +1099,7 @@ mod tests {
     #[test]
     fn a_page_without_metadata_is_still_a_page() {
         let doc = ferrodoc_markdown::read_commonmark("text\n").expect("convertible");
-        let page = write_html_standalone(&doc, None);
+        let page = write_html_standalone(&doc, None, false);
         // No `lang`, no `<style>`, but the required title element is
         // there: leaving it out makes the browser show the file name.
         assert!(page.starts_with("<!DOCTYPE html>\n<html>\n"), "{page}");
@@ -758,7 +1114,7 @@ mod tests {
         // selector — so the one sequence that could end the element early
         // is the one thing neutralized.
         let doc = ferrodoc_markdown::read_commonmark("t\n").expect("convertible");
-        let page = write_html_standalone(&doc, Some("a{}</style><script>evil()</script>"));
+        let page = write_html_standalone(&doc, Some("a{}</style><script>evil()</script>"), false);
         // Exactly one `</style>`: the writer's own. The injected text is
         // still there and still inside the element, which is inert.
         assert_eq!(page.matches("</style>").count(), 1, "{page}");
