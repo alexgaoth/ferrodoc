@@ -1016,6 +1016,41 @@ sanitized.** The key comes out of somebody's zip, so a `..` component would
 place a file anywhere the process can write. Renaming it instead invites a
 second question about what the new name now collides with.
 
+### Trimmed builds — what a feature subset drops, and how it says so
+
+Every format is a cargo feature of `crates/ferrodoc`, and `default =
+["all"]`: a caller who does nothing gets what this document measures
+everywhere else. Three features imply another — `odt` implies `docx`,
+`epub` implies `html` and `docx`, `ipynb` implies `markdown` — because each
+of those crates already depends on the one it pulls in, so the implication
+costs no bytes.
+
+What a trimmed build does with a format it does not contain:
+
+| | |
+|---|---|
+| `ferrodoc -f docx` | `docx support was not compiled into this build; known formats: …`, exit 1 |
+| `ferrodoc --help` | the `FORMATS:` block lists exactly what is compiled in; the default build's block is byte-identical to before features existed |
+| `ferrodoc::parse` / `render` | `Error::NotCompiled(Format::Docx)` — the name is real, the code is absent, which is a different answer from `unknown format` |
+| `Format::parse("docx")` | still `Some(Format::Docx)`: the enum keeps every variant in every configuration, so the three bindings compile unchanged |
+
+Measured on this machine, at the commit that added the features:
+
+    ./bindings/wasm/build.sh
+    target/wasm32-unknown-unknown/release/ferrodoc_wasm.wasm  1846226 bytes (679019 gzipped)
+
+    ./bindings/wasm/build.sh --no-default-features --features ferrodoc/markdown,ferrodoc/html
+    target/wasm32-unknown-unknown/release/ferrodoc_wasm.wasm  1162137 bytes (402019 gzipped)
+
+That is **59%** of the gzipped module for markdown plus HTML, and 60% of
+the CLI binary (6,408,248 → 3,871,424). comrak and html5ever are what
+remains and neither can be dropped while those two formats are wanted, so
+this is close to the floor for a build that still converts anything.
+
+CI builds and tests one subset on all three platforms; a `#[cfg]` that was
+never added shows up nowhere else, because the default build compiles
+whatever the features forgot.
+
 ## Where ferrodoc behaves differently on purpose
 
 - **Deterministic output.** The same AST always produces the same `.docx`

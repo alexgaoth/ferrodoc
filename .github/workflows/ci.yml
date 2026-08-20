@@ -32,6 +32,11 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
         # `verify.sh --quick` is the same three on Linux; the matrix runs
         # them directly so a Windows failure names the step that broke.
+      # One trimmed build, because per-format features are what make the
+      # size claim payable down and a missing `#[cfg]` only shows up here:
+      # the default build compiles whatever the features forgot.
+      - run: cargo test -p ferrodoc --no-default-features --features markdown,html
+      - run: cargo clippy -p ferrodoc --all-targets --no-default-features --features markdown,html -- -D warnings
 
   # The browser and edge-worker story is a claim in the README; check it.
   wasm:

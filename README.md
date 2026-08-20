@@ -323,6 +323,23 @@ cargo build --release --target wasm32-unknown-unknown \
   -p ferrodoc-docx -p ferrodoc-odt
 ```
 
+- **And you can pay for less.** Every format is a cargo feature, with
+  `default = ["all"]`, so nothing changes for anyone who does not ask. A
+  caller who converts markdown and HTML can leave the other nine out:
+  `--no-default-features --features markdown,html` takes the wasm module
+  from **679,019 to 402,019 gzipped bytes** (59% of it) and the CLI binary
+  from 6,408,248 to 3,871,424 (60%), both measured today by the commands
+  below. A trimmed build cannot quietly do less than it says: `--help`
+  lists exactly the formats it contains, and asking for one it does not
+  have is an error naming the reason, not a wrong answer.
+
+```sh
+./bindings/wasm/build.sh                       # every format: 1,846,226 bytes, 679,019 gzipped
+./bindings/wasm/build.sh --no-default-features --features ferrodoc/markdown,ferrodoc/html
+                                               # markdown + HTML: 1,162,137 bytes, 402,019 gzipped
+cargo build --release -p ferrodoc --no-default-features --features markdown,html
+```
+
 Every gate, every known loss and every deliberate divergence is listed one
 by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
 produces it. CI runs all nineteen against a pinned pandoc, and builds and tests on
