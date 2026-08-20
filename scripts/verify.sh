@@ -134,6 +134,13 @@ if [ "$want_gates" = 1 ]; then
     gate "GFM reader (spec)"    $HARNESS diff-gfm        $SPEC --fail-under 99.8
     gate "GFM writer"           $HARNESS diff-gfm-md     corpus/gfm $SPEC --fail-under 100
     gate "pandoc-markdown"      $HARNESS diff-pandoc-md  corpus/pandoc-markdown --fail-under 100
+    # `--toc` and `--number-sections` have no gate in the harness: the
+    # rest of a standalone page is deliberately not pandoc's, so only
+    # the `<nav>` block and the heading lines are comparable. The
+    # script does that comparison, and it runs here because
+    # `COMPATIBILITY.md` publishes its 6/6 — a number nothing re-checks
+    # is the defect `samples/` was added to fix.
+    gate "toc and numbering"    ./scripts/compare-toc.sh
     gate "DOCX reader"          $HARNESS diff-docx       corpus/docx --fail-under 96
     gate "DOCX reader (LO)"     $HARNESS diff-docx       corpus/docx-libreoffice --fail-under 87
     gate "DOCX writer"          $HARNESS diff-write      corpus --fail-under 90
