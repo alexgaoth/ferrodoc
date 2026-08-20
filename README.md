@@ -237,7 +237,7 @@ library to a project:
 
 ```toml
 [dependencies]
-ferrodoc = "0.1"
+ferrodoc = "0.2"
 ```
 
 ```sh
