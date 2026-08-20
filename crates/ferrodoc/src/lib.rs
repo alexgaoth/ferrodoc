@@ -44,6 +44,16 @@ pub enum Format {
     /// `GitHub Flavored Markdown`: `CommonMark` plus tables, task lists,
     /// strikethrough and extended autolinks. Readable and writable.
     Gfm,
+    /// **Pandoc's** markdown, which is not `CommonMark`: a YAML metadata
+    /// block, header attributes, definition lists and
+    /// superscript/subscript on top of what [`Format::Gfm`] reads.
+    ///
+    /// A separate name rather than a change to [`Format::Markdown`],
+    /// because the two disagree on documents valid in both and a silent
+    /// change of meaning is worse than a flag someone has to type.
+    /// Readable only: writing it would be a second markdown writer, and
+    /// [`Format::Markdown`] already round-trips what the AST can hold.
+    PandocMarkdown,
     /// HTML. Readable and writable.
     Html,
     /// Office Open XML word processing documents. Readable and writable.
@@ -76,8 +86,8 @@ pub enum Format {
 impl Format {
     /// Every format name accepted on the command line, in help order.
     pub const NAMES: &'static [&'static str] = &[
-        "markdown", "commonmark", "gfm", "html", "docx", "odt", "epub", "ipynb", "latex",
-        "rst", "asciidoc", "json", "plain",
+        "markdown", "commonmark", "gfm", "pandoc_markdown", "html", "docx", "odt", "epub",
+        "ipynb", "latex", "rst", "asciidoc", "json", "plain",
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
@@ -85,6 +95,7 @@ impl Format {
         match name.to_ascii_lowercase().as_str() {
             "markdown" | "commonmark" | "md" => Some(Format::Markdown),
             "gfm" | "markdown_github" => Some(Format::Gfm),
+            "pandoc_markdown" | "pandoc-markdown" => Some(Format::PandocMarkdown),
             "html" | "htm" => Some(Format::Html),
             "docx" => Some(Format::Docx),
             "odt" => Some(Format::Odt),
@@ -119,7 +130,7 @@ impl Format {
     /// formats this returns `true` for.
     pub fn compiled(self) -> bool {
         match self {
-            Format::Markdown | Format::Gfm => cfg!(feature = "markdown"),
+            Format::Markdown | Format::Gfm | Format::PandocMarkdown => cfg!(feature = "markdown"),
             Format::Html => cfg!(feature = "html"),
             Format::Docx => cfg!(feature = "docx"),
             Format::Odt => cfg!(feature = "odt"),
@@ -145,11 +156,12 @@ impl Format {
 
     /// Whether documents can be written to this format.
     ///
-    /// Every format is, now that EPUB has a writer. Kept because callers
-    /// pair it with [`Format::readable`], which still has an answer other
-    /// than yes.
+    /// All but one: `pandoc_markdown` is read only. Writing it would be a
+    /// second markdown writer for constructs [`Format::Markdown`] already
+    /// round-trips, and a writer nothing gates is worth less than the
+    /// error saying it does not exist.
     pub fn writable(self) -> bool {
-        true
+        self != Format::PandocMarkdown
     }
 
     /// The name used in messages.
@@ -157,6 +169,7 @@ impl Format {
         match self {
             Format::Markdown => "markdown",
             Format::Gfm => "gfm",
+            Format::PandocMarkdown => "pandoc_markdown",
             Format::Html => "html",
             Format::Docx => "docx",
             Format::Odt => "odt",
@@ -182,6 +195,8 @@ impl fmt::Display for Format {
 pub enum Error {
     /// The input format cannot be read (only written).
     NotReadable(Format),
+    /// The output format cannot be written (only read).
+    NotWritable(Format),
     /// The format is supported, but this build was compiled without it.
     /// Only a build that trimmed the default feature set can produce
     /// this; see [`Format::compiled`].
@@ -200,6 +215,9 @@ impl fmt::Display for Error {
         match self {
             Error::NotReadable(format) => {
                 write!(f, "cannot read {format}: it is an output-only format")
+            }
+            Error::NotWritable(format) => {
+                write!(f, "cannot write {format}: it is an input-only format")
             }
             Error::NotCompiled(format) => {
                 write!(f, "cannot handle {format}: this build was compiled without it")
@@ -280,6 +298,15 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
         }),
         #[cfg(not(feature = "markdown"))]
         Format::Gfm => Err(Error::NotCompiled(from)),
+        #[cfg(feature = "markdown")]
+        Format::PandocMarkdown => {
+            ferrodoc_markdown::read_pandoc_markdown(&text(input)?).map_err(|e| Error::Invalid {
+                format: from,
+                detail: e.to_string(),
+            })
+        }
+        #[cfg(not(feature = "markdown"))]
+        Format::PandocMarkdown => Err(Error::NotCompiled(from)),
         #[cfg(feature = "docx")]
         Format::Docx => ferrodoc_docx::read_docx(input).map_err(|e| Error::Invalid {
             format: from,
@@ -458,6 +485,7 @@ pub fn render_with_media(
         Format::Gfm => Ok(ferrodoc_markdown::write_gfm(doc).into_bytes()),
         #[cfg(not(feature = "markdown"))]
         Format::Gfm => Err(Error::NotCompiled(to)),
+        Format::PandocMarkdown => Err(Error::NotWritable(to)),
         #[cfg(feature = "html")]
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         #[cfg(not(feature = "html"))]

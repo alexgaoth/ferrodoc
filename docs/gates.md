@@ -38,6 +38,7 @@ The gates, and what each one proves:
 | `diff-html-read` | the HTML reader produces pandoc's AST |
 | `diff-md` | the markdown writer round-trips the document |
 | `diff-gfm` / `diff-gfm-md` | the same, for GFM |
+| `diff-pandoc-md` | the **pandoc-markdown** reader produces pandoc's AST — a YAML metadata block, header attributes, definition lists and super/subscript, on its own corpus with its own extension so that a document written for one dialect is not scored by writers that have none |
 | `diff-docx` / `diff-odt` | the office readers produce pandoc's AST, over *two* corpora each: pandoc's own output, and a word processor's |
 | `diff-write` / `diff-odt-write` | the office writers survive a round trip — ours through pandoc against pandoc's through pandoc, which is what isolates the writer from the format |
 | `diff-epub` | the EPUB reader produces pandoc's AST, over three corpora that measure three different things |

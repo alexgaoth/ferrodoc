@@ -1,0 +1,31 @@
+---
+title: A quarterly *report*
+author:
+  - Ann Example
+  - Bo Example
+date: 2026-08-19
+draft: true
+---
+
+# Findings {#findings .summary}
+
+Two headings carry attributes, because one of a thing is not coverage.
+
+## Method {#method .detail data-source=survey}
+
+Water is H~2~O and the energy is E=mc^2^, twice each: H~2~SO~4~ and x^2^ + y^3^.
+
+Term
+:   A definition, tight, so its body is `Plain` rather than `Para`.
+
+Second term
+:   One definition.
+:   A second definition of the same term.
+
+A footnote lives here.[^note]
+
+[^note]: And its body is down here.
+
+| Region | Q1 |
+|--------|---:|
+| North  | 120 |

@@ -57,7 +57,10 @@ serde = { version = "1", features = ["derive"] }
 # so comparing our AST against pandoc's JSON never reports a phantom
 # 1-ULP difference in table column widths.
 serde_json = { version = "1", features = ["float_roundtrip"] }
-comrak = { version = "0.54", default-features = false }
+# `attributes` is a code-only feature — its entry in comrak's manifest is
+# `attributes = []`, no dependency behind it. It is what carries
+# `# H {#id .cls key=val}` off the heading line for `pandoc_markdown`.
+comrak = { version = "0.54", default-features = false, features = ["attributes"] }
 anyhow = "1"
 
 [workspace.lints.rust]

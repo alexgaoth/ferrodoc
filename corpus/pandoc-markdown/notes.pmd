@@ -1,0 +1,24 @@
+---
+title: "Quoted: a title with a colon"
+subtitle: plain scalar
+tags:
+  - one
+  - two
+published: false
+---
+
+# Definitions {#defs}
+
+Alpha
+:   The first letter.
+
+Beta
+:   The second letter.
+
+    A second paragraph, so this definition is loose and its body is `Para`.
+
+# Attributes {#attrs .wide k=v}
+
+Contact <someone@example.com> or read <https://example.com>.
+
+Nested sup and sub: a^b^ and c~d~ and a^*emphasised*^.

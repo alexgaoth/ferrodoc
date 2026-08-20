@@ -957,6 +957,74 @@ Two divergences, both deliberate:
       printf '%s' "$html" | pandoc   -f html -t json
       printf '%s' "$html" | ferrodoc -f html -t json
 
+### `pandoc_markdown` — pandoc's dialect, and the four shapes it still misses
+
+`-f pandoc_markdown` reads what `pandoc -f markdown` reads and
+`-f markdown` here does not: a **YAML metadata block**, **header
+attributes** (`# H {#id .cls k=v}`), **definition lists**, and
+**superscript/subscript** (`H~2~O`, `E=mc^2^`). It is a separate name
+rather than a change to `markdown`, so no document that converts today
+changes meaning; the section above says what `markdown` is.
+
+```sh
+cargo run --release -p ferrodoc-harness -- diff-pandoc-md corpus/pandoc-markdown --fail-under 100
+```
+
+**3/3 on its own corpus**, which has its own extension (`.pmd`) for the
+same reason the GFM corpus uses `.gfm`: a `.md` file under `corpus/` is in
+the denominators of `diff-rst` and `diff-latex`, and a document written to
+exercise a dialect those writers do not have is not a fair input to them.
+Every rule is mutation-tested — turning off any one of header attributes,
+definition lists, superscript, subscript or the metadata block takes the
+gate from 3/3 to 1/3.
+
+It is **read only**. `-t pandoc_markdown` is an error naming the reason:
+writing it would be a second markdown writer for constructs the
+`markdown` writer already round-trips, and a writer no gate scores is
+worth less than the error.
+
+**Four divergences, each probed and each left rather than guessed at.**
+They were found by sweeping 42 shapes against `pandoc -f markdown -t json`;
+38 agree.
+
+| shape | pandoc | here |
+|---|---|---|
+| `a^b c^` — a space inside superscript | literal text: pandoc requires the space escaped | `Superscript` |
+| `H~2 O~` — a space inside subscript | literal text | `Subscript` |
+| `a^^b` — an empty superscript | `Superscript []` | literal text |
+| a metadata block that is **not** the first thing in the file | read as metadata | read as a thematic break and a heading, as `CommonMark` does |
+
+The first three are comrak's rules for `^…^` and `~…~` rather than
+pandoc's, and reconstructing the literal text for them would mean
+re-deriving the source from the AST. The fourth is a second metadata block
+mid-document, which pandoc supports for concatenated files.
+
+One more, narrower: a hand-written `[http://x](http://x)` — a link whose
+text is exactly its target — takes the `uri` class here, where pandoc
+gives it only to the `<http://x>` form. Telling them apart means reading
+source positions for two identical ASTs, and the class is what pandoc's
+own markdown reader puts on autolinks:
+
+    printf 'see <http://x.example> and <a@b.example>\n' | pandoc -f markdown -t json
+    printf 'see <http://x.example> and <a@b.example>\n' | pandoc -f gfm -t json
+
+The first classes them `uri` and `email`; the second classes neither, which
+is why this belongs to one dialect and stays out of `gfm`.
+
+**A YAML block outside the subset is refused, not guessed.** `key: scalar`,
+`key:` with `- item` lines, `#` comments and blank lines are read; nested
+maps, block scalars (`|`, `>`), flow collections and anchors are an error
+naming the line. A metadata block is the one construct where reading it
+nearly right is worse than refusing it — the values become the document's
+title and authors, and a wrong one is invisible in the output. Pandoc's
+value semantics are matched: a scalar is parsed **as markdown inlines**
+(`title: A *report*` is `MetaInlines [Str "A", Space, Emph …]`), `true` and
+`false` are `MetaBool`, and a number is `MetaInlines`, not a number.
+
+**Extension syntax is refused by name.** `-f markdown+footnotes` is an
+error listing what the three dialects read, rather than a flag that looks
+accepted and changes nothing.
+
 ### `markdown` means CommonMark, not pandoc's markdown
 
 The flag spelling is the same and the dialects are not. `pandoc -f

@@ -35,7 +35,8 @@ use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue, TableAlignment}
 use comrak::{Arena, Options, parse_document};
 use ferrodoc_ast::{
     Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Format, Inline, MathType, ListAttributes,
-    ListNumberDelim, ListNumberStyle, Pandoc, Row, Table, TableBody, TableFoot, TableHead, Target,
+    ListNumberDelim, ListNumberStyle, Meta, MetaValue, Pandoc, Row, Table, TableBody, TableFoot,
+    TableHead, Target,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -48,6 +49,11 @@ pub enum Error {
     /// process, so it is refused instead — and refused loudly, rather than
     /// returned truncated.
     TooDeeplyNested,
+    /// A YAML metadata block using something this reader does not read.
+    /// The line is quoted, because the whole point is that the document
+    /// is refused loudly rather than converted into a plausible wrong
+    /// answer — which is what `CommonMark` does with a metadata block.
+    Metadata(String),
 }
 
 impl std::fmt::Display for Error {
@@ -56,6 +62,11 @@ impl std::fmt::Display for Error {
             Error::TooDeeplyNested => write!(
                 f,
                 "document nests containers {MAX_NESTING} or more levels deep"
+            ),
+            Error::Metadata(line) => write!(
+                f,
+                "metadata block: {line} is outside the YAML subset this reads \
+                 (`key: value`, `key:` with `- item` lines, `#` comments)"
             ),
         }
     }
@@ -70,7 +81,7 @@ impl std::error::Error for Error {}
 ///
 /// Returns [`Error::TooDeeplyNested`] for pathologically nested input.
 pub fn read_commonmark(input: &str) -> Result<Pandoc, Error> {
-    read(input, false)
+    read(input, Dialect::Commonmark)
 }
 
 /// Parse a `GitHub Flavored Markdown` document into a [`Pandoc`] AST.
@@ -92,19 +103,65 @@ pub fn read_commonmark(input: &str) -> Result<Pandoc, Error> {
 ///
 /// Returns [`Error::TooDeeplyNested`] for pathologically nested input.
 pub fn read_gfm(input: &str) -> Result<Pandoc, Error> {
-    read(input, true)
+    read(input, Dialect::Gfm)
 }
 
-fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
-    let prepared = preprocess(input);
+/// Read **pandoc's** markdown rather than `CommonMark`: a YAML metadata
+/// block, header attributes, definition lists and `H~2~O`/`E=mc^2^`, on
+/// top of what `gfm` reads.
+///
+/// It is a separate format name rather than a change to
+/// [`read_commonmark`], because the two dialects disagree on documents
+/// that are valid in both and a silent change of meaning is worse than a
+/// flag someone has to type. What is **not** read is in the crate's
+/// `CLAUDE.md` and in `COMPATIBILITY.md`, with the probe behind each.
+///
+/// # Errors
+///
+/// [`Error::TooDeeplyNested`] for pathologically nested input, and
+/// [`Error::Metadata`] for a YAML block outside the subset this reads —
+/// which is an error rather than a guess, because a metadata block read
+/// wrongly is a document that converts to something plausible and wrong.
+pub fn read_pandoc_markdown(input: &str) -> Result<Pandoc, Error> {
+    read(input, Dialect::Pandoc)
+}
+
+/// Which markdown. The three disagree on real documents, so the reader is
+/// told which one it is reading rather than guessing from the content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Dialect {
+    Commonmark,
+    Gfm,
+    Pandoc,
+}
+
+impl Dialect {
+    /// Everything `gfm` reads, `pandoc_markdown` reads too.
+    fn is_extended(self) -> bool {
+        matches!(self, Dialect::Gfm | Dialect::Pandoc)
+    }
+}
+
+fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
+    let mut prepared: String = preprocess(input).into_owned();
+    // comrak does not recognise an **empty** front-matter block, so
+    // `---\n---` reaches the parser as two thematic breaks where pandoc
+    // reads an empty metadata block and emits nothing.
+    if dialect == Dialect::Pandoc {
+        for opening in ["---\n---\n", "---\r\n---\r\n"] {
+            if let Some(rest) = prepared.strip_prefix(opening) {
+                prepared = rest.trim_start_matches(['\n', '\r']).to_owned();
+                break;
+            }
+        }
+    }
     let src = Src::new(&prepared);
     let arena = Arena::new();
     let mut options = Options::default();
-    if gfm {
+    if dialect.is_extended() {
         options.extension.table = true;
         options.extension.strikethrough = true;
         options.extension.tasklist = true;
-        options.extension.autolink = true;
         // Probed: pandoc's `gfm` reader has `tex_math_dollars` on, so
         // `$x$` is `Math InlineMath` and `$$x$$` is `Math DisplayMath`
         // there — while `-f commonmark` leaves both as literal `Str`.
@@ -115,6 +172,19 @@ fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
         // branch — `diff-spec` and `diff-md` would drop if it leaked out.
         options.extension.footnotes = true;
     }
+    // Probed: `pandoc -f gfm` links a bare `example.com`; `pandoc -f
+    // markdown` does not, so this one belongs to gfm alone.
+    options.extension.autolink = dialect == Dialect::Gfm;
+    if dialect == Dialect::Pandoc {
+        // Each of the four is a construct `-f markdown` reads and
+        // `-f commonmark` does not; each is probed in the crate's
+        // `CLAUDE.md` against `pandoc -f markdown -t json`.
+        options.extension.header_attributes = true;
+        options.extension.description_lists = true;
+        options.extension.superscript = true;
+        options.extension.subscript = true;
+        options.extension.front_matter_delimiter = Some("---".to_owned());
+    }
     let root = parse_document(&arena, &prepared, &options);
     // Check the depth once, without recursing, and leave the conversion
     // itself exactly as shallow-document-shaped as it was: threading a
@@ -124,12 +194,139 @@ fn read(input: &str, gfm: bool) -> Result<Pandoc, Error> {
     }
     // Definitions first: a reference is converted by cloning the body, so
     // the bodies have to exist before the block walk reaches the reference.
-    let defs = if gfm { footnotes(root, &src) } else { Notes::new() };
-    let mut blocks = blocks(root.children(), &src, false, &defs);
-    if gfm {
+    let defs = if dialect.is_extended() { footnotes(root, &src, dialect) } else { Notes::new() };
+    let mut blocks = blocks(root.children(), &src, false, &defs, dialect);
+    if dialect.is_extended() {
         Identifiers::default().assign(&mut blocks);
     }
-    Ok(Pandoc::new(blocks))
+    let mut document = Pandoc::new(blocks);
+    if dialect == Dialect::Pandoc {
+        document.meta = front_matter(root)?;
+    }
+    Ok(document)
+}
+
+/// The class `pandoc -f markdown` gives `<http://x>` and `<a@b.example>`.
+///
+/// Probed on `see <http://x.example> and <a@b.example>`: `-f markdown`
+/// classes them `uri` and `email`; `-f gfm` and `-f commonmark` class
+/// neither, so this belongs to one dialect and would break `diff-gfm` if
+/// it leaked out.
+///
+/// The shape is a link whose text is its own target. That also catches a
+/// hand-written `[http://x](http://x)`, which pandoc leaves bare —
+/// recorded in `COMPATIBILITY.md` rather than papered over, because the
+/// alternative is reading source positions to tell two identical ASTs
+/// apart.
+fn autolink_class(dialect: Dialect, text: &[Inline], url: &str) -> Attr {
+    if dialect != Dialect::Pandoc {
+        return Attr::default();
+    }
+    let [Inline::Str(literal)] = text else {
+        return Attr::default();
+    };
+    let class = if url == literal {
+        "uri"
+    } else if url.strip_prefix("mailto:") == Some(literal.as_str()) {
+        "email"
+    } else {
+        return Attr::default();
+    };
+    Attr { classes: vec![class.to_owned()], ..Attr::default() }
+}
+
+/// The document's YAML metadata block, converted to pandoc's `Meta`.
+///
+/// **A deliberately small subset of YAML**, and everything outside it is
+/// an error rather than a guess: `key: scalar`, `key:` followed by
+/// `- item` lines, `#` comments and blank lines. Nested maps, block
+/// scalars (`|`, `>`), flow collections (`[a, b]`), anchors and aliases
+/// are refused by name. A metadata block is the one construct where
+/// reading it *nearly* right is worse than refusing it — the values become
+/// the document's title and authors, and a wrong one is invisible in the
+/// output.
+///
+/// The value semantics are pandoc's, probed with
+/// `pandoc -f markdown -t json`:
+///
+/// - a scalar is parsed **as markdown inlines**, so `title: A *report*`
+///   is `MetaInlines [Str "A", Space, Emph [Str "report"]]`;
+/// - `true` and `false` are `MetaBool`; a number is `MetaInlines`, not a
+///   number — `count: 3` is `MetaInlines [Str "3"]`;
+/// - a list is `MetaList` of whatever its items are.
+fn front_matter<'a>(root: &'a AstNode<'a>) -> Result<Meta, Error> {
+    let mut meta = Meta::new();
+    for node in root.children() {
+        let NodeValue::FrontMatter(text) = &node.data.borrow().value else {
+            continue;
+        };
+        let mut pending: Option<(String, Vec<MetaValue>)> = None;
+        for line in text.lines() {
+            let trimmed = line.trim_end();
+            // The delimiters comrak hands back with the block, and the
+            // two things YAML ignores.
+            if trimmed.trim().is_empty()
+                || trimmed.trim() == "---"
+                || trimmed.trim_start().starts_with('#')
+            {
+                continue;
+            }
+            if let Some(item) = trimmed.trim_start().strip_prefix("- ") {
+                let Some((_, items)) = pending.as_mut() else {
+                    return Err(Error::Metadata(format!("{trimmed:?}")));
+                };
+                items.push(scalar(item.trim()));
+                continue;
+            }
+            if let Some((key, items)) = pending.take() {
+                meta.insert(key, MetaValue::MetaList(items));
+            }
+            // A key at the left margin, and nothing else: an indented key
+            // is a nested map, which this does not read.
+            if trimmed.starts_with(char::is_whitespace) {
+                return Err(Error::Metadata(format!("{trimmed:?}")));
+            }
+            let Some((key, value)) = trimmed.split_once(':') else {
+                return Err(Error::Metadata(format!("{trimmed:?}")));
+            };
+            let value = value.trim();
+            if value.is_empty() {
+                pending = Some((key.trim().to_owned(), Vec::new()));
+            } else if value.starts_with(['|', '>', '[', '{', '&', '*']) {
+                return Err(Error::Metadata(format!("{trimmed:?}")));
+            } else {
+                meta.insert(key.trim().to_owned(), scalar(value));
+            }
+        }
+        if let Some((key, items)) = pending.take() {
+            meta.insert(key, MetaValue::MetaList(items));
+        }
+    }
+    Ok(meta)
+}
+
+/// One YAML scalar as pandoc reads it: a bool, or markdown inlines.
+fn scalar(text: &str) -> MetaValue {
+    let unquoted = text
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .or_else(|| text.strip_prefix('\'').and_then(|rest| rest.strip_suffix('\'')))
+        .unwrap_or(text);
+    match unquoted {
+        "true" => return MetaValue::MetaBool(true),
+        "false" => return MetaValue::MetaBool(false),
+        _ => {}
+    }
+    // Parsed as markdown, which is what makes `title: A *report*` an
+    // `Emph` rather than three literal characters.
+    let inlines = match read_commonmark(unquoted) {
+        Ok(document) => match document.blocks.into_iter().next() {
+            Some(Block::Para(inlines) | Block::Plain(inlines)) => inlines,
+            _ => vec![Inline::Str(unquoted.to_owned())],
+        },
+        Err(_) => vec![Inline::Str(unquoted.to_owned())],
+    };
+    MetaValue::MetaInlines(inlines)
 }
 
 /// Footnote bodies keyed by the label comrak parsed them under. Empty for
@@ -146,13 +343,16 @@ type Notes = HashMap<String, Vec<Block>>;
 /// matters more than matching a quirk: `[^1]: see [^1]` hangs pandoc
 /// indefinitely (measured — killed at 20 s), and a reader here must
 /// terminate on every input.
-fn footnotes<'a>(root: &'a AstNode<'a>, src: &Src) -> Notes {
+fn footnotes<'a>(root: &'a AstNode<'a>, src: &Src, dialect: Dialect) -> Notes {
     let empty = Notes::new();
     let mut found = Notes::new();
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if let NodeValue::FootnoteDefinition(def) = &node.data.borrow().value {
-            found.insert(def.name.clone(), blocks(node.children(), src, false, &empty));
+            found.insert(
+                def.name.clone(),
+                blocks(node.children(), src, false, &empty, dialect),
+            );
         }
         stack.extend(node.children());
     }
@@ -261,6 +461,7 @@ fn blocks<'a>(
     src: &Src,
     in_quote: bool,
     defs: &Notes,
+    dialect: Dialect,
 ) -> Vec<Block> {
     let mut out = Vec::new();
     for node in nodes {
@@ -272,8 +473,8 @@ fn blocks<'a>(
             _ => None,
         };
         if let Some(nl) = list {
-            out.extend(lists(node, &nl, src, in_quote, defs));
-        } else if let Some(block) = block(node, src, in_quote, defs) {
+            out.extend(lists(node, &nl, src, in_quote, defs, dialect));
+        } else if let Some(block) = block(node, src, in_quote, defs, dialect) {
             out.push(block);
         }
     }
@@ -293,6 +494,7 @@ fn lists<'a>(
     src: &Src,
     in_quote: bool,
     defs: &Notes,
+    dialect: Dialect,
 ) -> Vec<Block> {
     // Only bullet lists have task items in pandoc, so an ordered list is
     // never split.
@@ -312,7 +514,7 @@ fn lists<'a>(
             let items: Vec<Vec<Block>> = nodes
                 .iter()
                 .map(|item| {
-                    let mut item_blocks = blocks(item.children(), src, in_quote, defs);
+                    let mut item_blocks = blocks(item.children(), src, in_quote, defs, dialect);
                     if tight {
                         for block in &mut item_blocks {
                             if let Block::Para(inlines) = block {
@@ -362,11 +564,11 @@ fn is_loose<'a>(items: &[&'a AstNode<'a>], src: &Src) -> bool {
         })
 }
 
-fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes) -> Option<Block> {
+fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dialect: Dialect) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
         NodeValue::Paragraph => {
-            let content = inlines(node.children(), defs);
+            let content = inlines(node.children(), defs, dialect);
             // Comrak quirk: a paragraph of link reference definitions whose
             // last line is a dash-run comes out as a literal `---` paragraph;
             // pandoc consumes the definitions and reads the dashes as a
@@ -384,10 +586,17 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes) -> 
         }
         NodeValue::Heading(h) => Some(Block::Header(
             i64::from(h.level),
-            Attr::default(),
-            inlines(node.children(), defs),
+            // `{#id .cls key=val}` off the end of the heading line, which
+            // only `pandoc_markdown` turns on. comrak's `Attributes` is
+            // pandoc's `Attr` field for field.
+            data.attrs.as_ref().map_or_else(Attr::default, |attrs| Attr {
+                identifier: attrs.id.clone().unwrap_or_default(),
+                classes: attrs.classes.clone(),
+                attributes: attrs.pairs.clone(),
+            }),
+            inlines(node.children(), defs, dialect),
         )),
-        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src, true, defs))),
+        NodeValue::BlockQuote => Some(Block::BlockQuote(blocks(node.children(), src, true, defs, dialect))),
         NodeValue::CodeBlock(cb) => {
             // Pandoc keeps the literal untouched only for a fence that is
             // never closed, sits outside any blockquote, and is followed by
@@ -434,7 +643,59 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes) -> 
             Some(Block::RawBlock(Format("html".to_owned()), literal))
         }
         NodeValue::ThematicBreak => Some(Block::HorizontalRule),
-        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments, defs)))),
+        // A definition list is a `DescriptionList` of `DescriptionItem`s,
+        // each holding a `DescriptionTerm` and one `DescriptionDetails`.
+        // Pandoc holds the same shape as one term with a list of
+        // definitions, so consecutive items sharing a term would merge —
+        // and pandoc keeps them separate, which is what this does.
+        NodeValue::DescriptionList => {
+            let mut items: Vec<(Vec<Inline>, Vec<Vec<Block>>)> = Vec::new();
+            for item in node.children() {
+                let mut term = Vec::new();
+                let mut definitions = Vec::new();
+                // comrak wraps both halves in a `Paragraph`; the term is
+                // inlines in pandoc's AST, and a **tight** item's
+                // definition is `Plain` where a loose one is `Para` —
+                // probed, `Term\n:   text` gives `Plain` and a blank line
+                // before the definition gives `Para`.
+                let tight = matches!(
+                    item.data.borrow().value,
+                    NodeValue::DescriptionItem(ref d) if d.tight
+                );
+                for part in item.children() {
+                    match part.data.borrow().value {
+                        NodeValue::DescriptionTerm => {
+                            term = part
+                                .children()
+                                .next()
+                                .map_or_else(Vec::new, |para| inlines(para.children(), defs, dialect));
+                        }
+                        NodeValue::DescriptionDetails => {
+                            let mut definition = blocks(part.children(), src, in_quote, defs, dialect);
+                            if tight {
+                                for block in &mut definition {
+                                    if let Block::Para(inlines) = block {
+                                        *block = Block::Plain(std::mem::take(inlines));
+                                    }
+                                }
+                            }
+                            definitions.push(definition);
+                        }
+                        _ => {}
+                    }
+                }
+                // `Term` / `: one` / `: two` gives comrak a second item
+                // with an **empty** term, where pandoc gives one term with
+                // two definitions. Merging on the empty term is what makes
+                // the two agree.
+                match items.last_mut() {
+                    Some((_, previous)) if term.is_empty() => previous.extend(definitions),
+                    _ => items.push((term, definitions)),
+                }
+            }
+            Some(Block::DefinitionList(items))
+        }
+        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments, defs, dialect)))),
         // Only core-CommonMark nodes occur with default comrak options, and
         // the GFM extensions add exactly the ones handled above; the
         // differential harness would surface anything dropped here.
@@ -491,13 +752,13 @@ fn prepend(item: &mut Vec<Block>, mut prefix: Vec<Inline>, tight: bool) {
 /// Map a GFM pipe table. comrak has already padded short rows and dropped
 /// cells past the column count, which is what pandoc does too, so the grid
 /// arrives rectangular.
-fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment], defs: &Notes) -> Table {
+fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment], defs: &Notes, dialect: Dialect) -> Table {
     let row = |n: &'a AstNode<'a>| Row {
         attr: Attr::default(),
         cells: n
             .children()
             .map(|c| {
-                let content = inlines(c.children(), defs);
+                let content = inlines(c.children(), defs, dialect);
                 Cell {
                     attr: Attr::default(),
                     alignment: Alignment::AlignDefault,
@@ -568,9 +829,19 @@ impl Identifiers {
         for block in blocks {
             match block {
                 Block::Header(_, attr, inlines) => {
-                    let mut text = String::new();
-                    stringify(inlines, &mut text);
-                    attr.identifier = self.unique(&slug(&text));
+                    // A heading that named itself keeps its name: only
+                    // `pandoc_markdown` reads `{#custom-id}`, and pandoc
+                    // slugs the heading text solely when there is none.
+                    // The explicit one still counts toward uniquing, so a
+                    // later heading slugging to the same word gets `-1`.
+                    if attr.identifier.is_empty() {
+                        let mut text = String::new();
+                        stringify(inlines, &mut text);
+                        attr.identifier = self.unique(&slug(&text));
+                    } else {
+                        let taken = attr.identifier.clone();
+                        let _ = self.unique(&taken);
+                    }
                 }
                 Block::BlockQuote(inner) => self.assign(inner),
                 Block::BulletList(items) | Block::OrderedList(_, items) => {
@@ -655,11 +926,11 @@ fn contains_closer(literal: &str, block_type: u8) -> bool {
     }
 }
 
-fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes) -> Vec<Inline> {
+fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes, dialect: Dialect) -> Vec<Inline> {
     let iter = nodes.into_iter();
     let mut out = Vec::with_capacity(iter.size_hint().0 * 2);
     for node in iter {
-        inline(node, &mut out, defs);
+        inline(node, &mut out, defs, dialect);
     }
     merge_adjacent_emphasis(out)
 }
@@ -679,7 +950,7 @@ fn merge_adjacent_emphasis(tokens: Vec<Inline>) -> Vec<Inline> {
     out
 }
 
-fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes) {
+fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialect: Dialect) {
     match &node.data.borrow().value {
         NodeValue::Text(t) => text_tokens(t, out),
         NodeValue::SoftBreak => out.push(Inline::SoftBreak),
@@ -688,18 +959,23 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes) {
         NodeValue::HtmlInline(h) => {
             out.push(Inline::RawInline(Box::new(Format("html".to_owned())), h.clone()));
         }
-        NodeValue::Emph => out.push(Inline::Emph(inlines(node.children(), defs))),
-        NodeValue::Strong => out.push(Inline::Strong(inlines(node.children(), defs))),
-        NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children(), defs))),
+        NodeValue::Emph => out.push(Inline::Emph(inlines(node.children(), defs, dialect))),
+        NodeValue::Strong => out.push(Inline::Strong(inlines(node.children(), defs, dialect))),
+        NodeValue::Strikethrough => out.push(Inline::Strikeout(inlines(node.children(), defs, dialect))),
+        NodeValue::Superscript => out.push(Inline::Superscript(inlines(node.children(), defs, dialect))),
+        NodeValue::Subscript => out.push(Inline::Subscript(inlines(node.children(), defs, dialect))),
         NodeValue::Math(m) => out.push(Inline::Math(
             if m.display_math { MathType::DisplayMath } else { MathType::InlineMath },
             m.literal.clone(),
         )),
-        NodeValue::Link(l) => out.push(Inline::Link(
-            Box::default(),
-            inlines(node.children(), defs),
-            Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
-        )),
+        NodeValue::Link(l) => {
+            let text = inlines(node.children(), defs, dialect);
+            out.push(Inline::Link(
+                Box::new(autolink_class(dialect, &text, &l.url)),
+                text,
+                Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
+            ));
+        }
         // One `Note` per reference, body cloned: pandoc duplicates the
         // body when a label is referenced twice rather than sharing it.
         // A label with no definition is `Str ""` — see `footnotes`.
@@ -711,7 +987,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes) {
         }
         NodeValue::Image(l) => out.push(Inline::Image(
             Box::default(),
-            inlines(node.children(), defs),
+            inlines(node.children(), defs, dialect),
             Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
         )),
         _ => {}
@@ -1144,5 +1420,75 @@ mod tests {
                 {"t": "Str", "c": "_b"}, {"t": "Space"}, {"t": "Str", "c": "c"}
             ]}])
         );
+    }
+
+    /// The document from `ADOPTION.md` §3.2, which was five separate
+    /// losses under `-f markdown`: the metadata block became a thematic
+    /// break and a heading in the *body*, and four constructs came through
+    /// as the literal characters they are written with.
+    #[test]
+    fn the_five_losses_are_read() {
+        let document = read_pandoc_markdown(concat!(
+            "---\ntitle: A report\nauthor: Someone\n---\n\n",
+            "# Heading {#custom-id .fancy}\n\n",
+            "Text with a footnote.[^1]\n\n[^1]: The note body.\n\n",
+            "Term\n:   Definition of the term.\n\nH~2~O and E=mc^2^.\n",
+        ))
+        .expect("readable");
+        assert!(document.meta.contains_key("title"), "{:?}", document.meta);
+        assert!(document.meta.contains_key("author"), "{:?}", document.meta);
+        let Some(Block::Header(1, attr, _)) = document.blocks.first() else {
+            panic!("{:?}", document.blocks.first())
+        };
+        assert_eq!(attr.identifier, "custom-id");
+        assert_eq!(attr.classes, ["fancy"]);
+        assert!(
+            document.blocks.iter().any(|b| matches!(b, Block::DefinitionList(_))),
+            "{:?}",
+            document.blocks
+        );
+        // The same document under `CommonMark`, which is what the other
+        // two readers must go on doing: no metadata, and the block is a
+        // rule and a heading in the body.
+        let commonmark = read_commonmark("---\ntitle: A report\n---\n\ntext\n").expect("readable");
+        assert!(commonmark.meta.is_empty());
+        assert!(matches!(commonmark.blocks.first(), Some(Block::HorizontalRule)));
+    }
+
+    /// A metadata block outside the subset is an **error**, not a guess.
+    /// A wrong title is invisible in the output, which is the one place
+    /// where refusing beats approximating.
+    #[test]
+    fn metadata_outside_the_subset_is_refused() {
+        for source in [
+            "---\nauthor:\n  name: Ann\n---\n\nx\n",   // a nested map
+            "---\nabstract: |\n  a block scalar\n---\n\nx\n",
+            "---\ntags: [a, b]\n---\n\nx\n",             // a flow sequence
+            "---\nanchor: &a value\n---\n\nx\n",
+        ] {
+            assert!(
+                matches!(read_pandoc_markdown(source), Err(Error::Metadata(_))),
+                "{source:?} was not refused"
+            );
+        }
+        // And the subset itself still reads.
+        assert!(read_pandoc_markdown("---\ntitle: T\nlist:\n  - a\n  - b\n---\n\nx\n").is_ok());
+    }
+
+    /// A heading that names itself keeps its name, and the name it took
+    /// still counts toward uniquing the ones that are slugged.
+    #[test]
+    fn an_explicit_identifier_wins_and_still_uniques() {
+        let document =
+            read_pandoc_markdown("# Same {#same}\n\n# Same\n\n# Same\n").expect("readable");
+        let ids: Vec<&str> = document
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Header(_, attr, _) => Some(attr.identifier.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, ["same", "same-1", "same-2"]);
     }
 }

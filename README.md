@@ -115,6 +115,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
+| `ferrodoc-markdown` pandoc-markdown reader | **3/3** corpus documents produce identical ASTs — a YAML metadata block, header attributes, definition lists and super/subscript |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
@@ -142,6 +143,7 @@ cargo run -p ferrodoc-harness -- diff-md    corpus/commonmark-spec-0.31.2.json -
 cargo run -p ferrodoc-harness -- diff-gfm    corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm    corpus/commonmark-spec-0.31.2.json --fail-under 99.8
 cargo run -p ferrodoc-harness -- diff-gfm-md corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
+cargo run -p ferrodoc-harness -- diff-pandoc-md corpus/pandoc-markdown --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96
 ```
 

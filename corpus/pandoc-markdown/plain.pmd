@@ -1,0 +1,20 @@
+# A document with no metadata block at all
+
+The dialect must not require one: this file opens with a heading, carries no
+attributes on it, and still has to read exactly as `pandoc -f markdown` does.
+
+- A bullet
+- Another, with `code` and *emphasis*
+
+> A quote with a [link](https://example.com "and a title").
+
+```rust
+fn main() {}
+```
+
+Inline math $x^2 + y^2$ and a task list:
+
+- [x] done
+- [ ] not done
+
+Ordinary text with a ~~strikeout~~ and an ampersand & a less-than <.

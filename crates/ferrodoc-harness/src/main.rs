@@ -59,12 +59,13 @@ fn main() -> Result<()> {
         Some("diff-html-read") => diff_html_read(&args[1..], verbose, fail_under),
         Some("bench") => bench(&args[1..], iters),
         Some("bench-sizes") => bench_sizes(&args[1..], iters),
+        Some("diff-pandoc-md") => diff_pandoc_md(&args[1..], verbose, fail_under),
         Some("bench-rss") => bench_rss(&args[1..], max_rss_ratio),
         Some("rss-one") => rss_one(&args[1..]),
         Some("fuzz") => fuzz(&args[1..], iters),
         Some("bench-docx") => bench_docx(&args[1..], iters),
         _ => bail!(
-            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-ipynb|diff-write|diff-odt-write|diff-epub-write|diff-ipynb-write|diff-latex|diff-rst|diff-md|diff-gfm|diff-gfm-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
+            "usage: ferrodoc-harness <diff-ast|diff-spec|diff-html|diff-html-read|diff-docx|diff-odt|diff-epub|diff-ipynb|diff-write|diff-odt-write|diff-epub-write|diff-ipynb-write|diff-latex|diff-rst|diff-md|diff-gfm|diff-gfm-md|diff-pandoc-md|bench|bench-sizes|bench-rss|bench-docx|fuzz> [--verbose] [--fail-under PCT] [--iters N] <paths>"
         ),
     }
 }
@@ -401,6 +402,41 @@ fn collect_by_extension(path: &Path, extension: &str, cases: &mut Vec<Case>) -> 
         });
     }
     Ok(())
+}
+
+/// Compare our **pandoc-markdown** reader against `pandoc -f markdown`.
+///
+/// A separate corpus with its own extension, `.pmd`, exactly as the GFM
+/// corpus uses `.gfm`: a `.md` file under `corpus/` is in the denominators
+/// of `diff-rst` and `diff-latex`, and a document written to exercise a
+/// dialect neither of those writers has is not a fair input to them.
+fn diff_pandoc_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
+    let mut cases = Vec::new();
+    for p in paths {
+        collect_by_extension(Path::new(p), "pmd", &mut cases)?;
+    }
+    if cases.is_empty() {
+        bail!("no pandoc-markdown inputs found");
+    }
+    let mut matched = 0usize;
+    let mut failures = Vec::new();
+    for case in &cases {
+        let ours = serde_json::to_value(
+            ferrodoc_markdown::read_pandoc_markdown(&case.markdown)
+                .map_err(|e| anyhow::anyhow!("{e}"))?,
+        )?;
+        let theirs: Value = serde_json::from_slice(&run_pandoc(
+            &case.markdown,
+            &["-f", "markdown", "-t", "json"],
+        )?)
+        .with_context(|| format!("pandoc failed on {}", case.name))?;
+        if ours == theirs {
+            matched += 1;
+        } else {
+            failures.push((case, first_divergence(&ours, &theirs, "")));
+        }
+    }
+    report(&cases, matched, &failures, verbose, fail_under)
 }
 
 fn gfm_json(markdown: &str) -> Result<Value> {

@@ -133,6 +133,7 @@ if [ "$want_gates" = 1 ]; then
     gate "GFM reader (corpus)"  $HARNESS diff-gfm        corpus/gfm --fail-under 100
     gate "GFM reader (spec)"    $HARNESS diff-gfm        $SPEC --fail-under 99.8
     gate "GFM writer"           $HARNESS diff-gfm-md     corpus/gfm $SPEC --fail-under 100
+    gate "pandoc-markdown"      $HARNESS diff-pandoc-md  corpus/pandoc-markdown --fail-under 100
     gate "DOCX reader"          $HARNESS diff-docx       corpus/docx --fail-under 96
     gate "DOCX reader (LO)"     $HARNESS diff-docx       corpus/docx-libreoffice --fail-under 87
     gate "DOCX writer"          $HARNESS diff-write      corpus --fail-under 90

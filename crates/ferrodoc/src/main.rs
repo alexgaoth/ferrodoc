@@ -62,6 +62,7 @@ FORMATS:
 const HELP_READABLE: &[(Format, &str)] = &[
     (Format::Markdown, "markdown (commonmark, md)"),
     (Format::Gfm, "gfm"),
+    (Format::PandocMarkdown, "pandoc_markdown"),
     (Format::Html, "html"),
     (Format::Docx, "docx"),
     (Format::Odt, "odt"),
@@ -128,11 +129,22 @@ fn formats_block() -> String {
         Some((last, [])) => (*last).to_owned(),
         Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     };
+    // One readable format is not writable, so "those" would be a lie.
+    let read_only: Vec<&str> = HELP_READABLE
+        .iter()
+        .filter(|(format, _)| format.compiled() && !format.writable())
+        .map(|(_, spelling)| *spelling)
+        .collect();
+    let those = if read_only.is_empty() {
+        "those".to_owned()
+    } else {
+        format!("those except {}", read_only.join(", "))
+    };
     let mut block = format!("    input:   {}\n", listed(HELP_READABLE).join(", "));
     if joined.is_empty() {
-        block.push_str("    output:  those\n");
+        let _ = writeln!(block, "    output:  {those}");
     } else {
-        let _ = writeln!(block, "    output:  those, plus {joined}");
+        let _ = writeln!(block, "    output:  {those}, plus {joined}");
     }
     block
 }
@@ -675,6 +687,20 @@ fn resolve<'a>(
 }
 
 fn format(name: &str) -> Result<Format, String> {
+    // `markdown+footnotes-tables` is pandoc's extension syntax, and this
+    // reads none of it. Refusing by name beats the alternative: a flag
+    // that looks accepted and changes nothing is the failure mode this
+    // project keeps finding in its own gates.
+    if let Some((base, _)) = name.split_once(['+', '-'])
+        && Format::parse(base).is_some()
+        && Format::parse(name).is_none()
+    {
+        return Err(format!(
+            "extension syntax is not supported: {name:?}. `markdown` is CommonMark, \
+             `gfm` adds tables, task lists and footnotes, and `pandoc_markdown` adds \
+             YAML metadata, header attributes, definition lists and super/subscript"
+        ));
+    }
     let known = || -> String {
         Format::NAMES
             .iter()
