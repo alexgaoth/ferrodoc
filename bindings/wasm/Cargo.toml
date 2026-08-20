@@ -14,7 +14,14 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-ferrodoc = { path = "../../crates/ferrodoc" }
+ferrodoc = { path = "../../crates/ferrodoc", default-features = false }
+
+[features]
+# The published package carries every format — trimming what a browser can
+# convert is the caller's choice, not this package's. The feature exists so
+# that choice is *available*: `build.sh --no-default-features --features
+# ferrodoc/markdown,ferrodoc/html` measures what a trimmed module costs.
+default = ["ferrodoc/all"]
 
 [profile.release]
 # Size is a published claim for this package: it is downloaded over a

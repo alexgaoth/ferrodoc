@@ -2,11 +2,12 @@
 
 use ferrodoc::Format;
 use ferrodoc::ast::{Block, Inline};
+use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "\
+const USAGE_HEAD: &str = "\
 ferrodoc — convert documents between markdown, HTML, DOCX and the pandoc AST
 
 USAGE:
@@ -36,10 +37,38 @@ OPTIONS:
     -V, --version           Print the version
 
 FORMATS:
-    input:   markdown (commonmark, md), gfm, html, docx, odt, epub, ipynb, json
-    output:  those, plus latex (tex), rst, asciidoc (adoc) and plain (text)
+";
 
-    `markdown` here is **CommonMark**, which is not what `pandoc -f markdown`
+/// Every readable format's help spelling, in help order.
+///
+/// The list is data rather than prose because a build can be trimmed with
+/// cargo features — `--no-default-features --features markdown,html` links
+/// two format crates instead of eleven — and a help text that named formats
+/// the binary cannot convert would be lying about itself. With the default
+/// features every entry is compiled and the two lines below come out
+/// exactly as they always did.
+const HELP_READABLE: &[(Format, &str)] = &[
+    (Format::Markdown, "markdown (commonmark, md)"),
+    (Format::Gfm, "gfm"),
+    (Format::Html, "html"),
+    (Format::Docx, "docx"),
+    (Format::Odt, "odt"),
+    (Format::Epub, "epub"),
+    (Format::Ipynb, "ipynb"),
+    (Format::Json, "json"),
+];
+
+/// The write-only formats, in help order.
+const HELP_WRITE_ONLY: &[(Format, &str)] = &[
+    (Format::Latex, "latex (tex)"),
+    (Format::Rst, "rst"),
+    (Format::Asciidoc, "asciidoc (adoc)"),
+    (Format::Plain, "plain (text)"),
+];
+
+// The `\<newline>` continuation used above would strip this line's indent,
+// so the first line sits on the assignment.
+const USAGE_TAIL: &str = "    `markdown` here is **CommonMark**, which is not what `pandoc -f markdown`
     means. Pandoc's own dialect adds YAML metadata blocks, header attributes
     (`# H {#id .class}`), definition lists and superscript/subscript, and
     none of those are read: they come through as the literal text they are
@@ -68,6 +97,36 @@ EXAMPLES:
     ferrodoc README.md -o readme.odt        # markdown in, LibreOffice out
     cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ";
+
+/// The `FORMATS:` block, listing what this build actually has code for.
+fn formats_block() -> String {
+    let listed = |table: &[(Format, &'static str)]| -> Vec<&'static str> {
+        table
+            .iter()
+            .filter(|(format, _)| format.compiled())
+            .map(|(_, spelling)| *spelling)
+            .collect()
+    };
+    let write_only = listed(HELP_WRITE_ONLY);
+    // "a, b and c" — an Oxford-less list is what the help has always read.
+    let joined = match write_only.split_last() {
+        None => String::new(),
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    };
+    let mut block = format!("    input:   {}\n", listed(HELP_READABLE).join(", "));
+    if joined.is_empty() {
+        block.push_str("    output:  those\n");
+    } else {
+        let _ = writeln!(block, "    output:  those, plus {joined}");
+    }
+    block
+}
+
+/// The whole `--help` text.
+fn usage() -> String {
+    format!("{USAGE_HEAD}{}\n{USAGE_TAIL}", formats_block())
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -128,7 +187,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         };
         match arg {
             "-h" | "--help" => {
-                print!("{USAGE}");
+                print!("{}", usage());
                 return Ok(None);
             }
             "-V" | "--version" => {
@@ -322,7 +381,12 @@ fn render_page(
         // Without this, `-s` on LaTeX would hand pdflatex a fragment with
         // no preamble — which is the exact mistake the flag prevents for
         // HTML.
+        #[cfg(feature = "latex")]
         return Ok(ferrodoc::render_latex_standalone(doc).into_bytes());
+        // Unreachable in any build that has the format at all: `format()`
+        // refuses the name before a document is read.
+        #[cfg(not(feature = "latex"))]
+        return Err(format!("{to} support was not compiled into this build"));
     }
     if to != Format::Html {
         return Err(format!("--standalone applies to html or latex output, not {to}"));
@@ -333,7 +397,10 @@ fn render_page(
                 .map_err(|e| format!("cannot read {}: {e}", path.display()))
         })
         .transpose()?;
-    Ok(ferrodoc::render_html_standalone(doc, css.as_deref()))
+    #[cfg(feature = "html")]
+    return Ok(ferrodoc::render_html_standalone(doc, css.as_deref()));
+    #[cfg(not(feature = "html"))]
+    return Err(format!("{to} support was not compiled into this build"));
 }
 
 /// Whether the document opens with what pandoc would read as a YAML
@@ -531,17 +598,56 @@ fn resolve<'a>(
 }
 
 fn format(name: &str) -> Result<Format, String> {
-    Format::parse(name).ok_or_else(|| {
-        format!(
-            "unknown format {name:?}; known formats: {}",
-            Format::NAMES.join(", ")
-        )
-    })
+    let known = || -> String {
+        Format::NAMES
+            .iter()
+            .copied()
+            .filter(|name| Format::parse(name).is_some_and(Format::compiled))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let format = Format::parse(name)
+        .ok_or_else(|| format!("unknown format {name:?}; known formats: {}", known()))?;
+    // Only a build trimmed with cargo features can reach this: the name is
+    // real, the code for it was not compiled in. Saying so beats "unknown
+    // format", which would send someone looking for a typo.
+    if !format.compiled() {
+        return Err(format!(
+            "{format} support was not compiled into this build; known formats: {}",
+            known()
+        ));
+    }
+    Ok(format)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The help text is what a trimmed build tells the truth with, and it
+    /// is generated rather than written for exactly that reason. Enabling
+    /// a format without listing it — or listing one this build cannot
+    /// convert — fails here.
+    #[test]
+    fn help_lists_exactly_the_formats_this_build_has() {
+        let help = usage();
+        let block = help
+            .split("FORMATS:\n")
+            .nth(1)
+            .expect("a FORMATS block")
+            .split("\n\n")
+            .next()
+            .expect("the list ends at a blank line");
+        for (format, spelling) in HELP_READABLE.iter().chain(HELP_WRITE_ONLY) {
+            assert_eq!(
+                block.contains(spelling),
+                format.compiled(),
+                "{format}: compiled = {}, listed in --help = {}\n{block}",
+                format.compiled(),
+                block.contains(spelling),
+            );
+        }
+    }
 
     /// Probed against pandoc 3.8.2.1: every `true` here is a document
     /// whose `meta` pandoc fills and ferrodoc leaves in the body, and

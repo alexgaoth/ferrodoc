@@ -20,19 +20,43 @@ path = "src/lib.rs"
 name = "ferrodoc"
 path = "src/main.rs"
 
+[features]
+# Every format, which is what a plain `cargo add ferrodoc` gets: nothing
+# below changes for a caller who does not ask for it.
+default = ["all"]
+all = ["markdown", "html", "text", "docx", "odt", "epub", "ipynb", "latex", "rst", "asciidoc"]
+
+markdown = ["dep:ferrodoc-markdown"]
+html = ["dep:ferrodoc-html"]
+text = ["dep:ferrodoc-text"]
+docx = ["dep:ferrodoc-docx"]
+# The three implications below cost nothing: each of these crates already
+# depends on the one it pulls in, so the code is linked either way and the
+# only thing the feature adds is the matching `Format` arm.
+odt = ["dep:ferrodoc-odt", "docx"]      # reads XML parts through `ferrodoc-docx::xml`
+epub = ["dep:ferrodoc-epub", "html", "docx"]  # content documents are XHTML in a zip
+ipynb = ["dep:ferrodoc-ipynb", "markdown"]    # a markdown cell is markdown
+latex = ["dep:ferrodoc-latex"]
+rst = ["dep:ferrodoc-rst"]
+asciidoc = ["dep:ferrodoc-asciidoc"]
+
 [dependencies]
+# `ferrodoc-ast` and `serde_json` are unconditional: they are the document
+# model and `Format::Json`, which is the one format that costs nothing
+# because the AST already serializes.
 ferrodoc-ast = { workspace = true }
-ferrodoc-markdown = { workspace = true }
-ferrodoc-html = { workspace = true }
-ferrodoc-text = { workspace = true }
-ferrodoc-docx = { workspace = true }
-ferrodoc-odt = { workspace = true }
-ferrodoc-epub = { workspace = true }
-ferrodoc-latex = { workspace = true }
-ferrodoc-rst = { workspace = true }
-ferrodoc-asciidoc = { workspace = true }
-ferrodoc-ipynb = { workspace = true }
 serde_json = { workspace = true }
+
+ferrodoc-markdown = { workspace = true, optional = true }
+ferrodoc-html = { workspace = true, optional = true }
+ferrodoc-text = { workspace = true, optional = true }
+ferrodoc-docx = { workspace = true, optional = true }
+ferrodoc-odt = { workspace = true, optional = true }
+ferrodoc-epub = { workspace = true, optional = true }
+ferrodoc-latex = { workspace = true, optional = true }
+ferrodoc-rst = { workspace = true, optional = true }
+ferrodoc-asciidoc = { workspace = true, optional = true }
+ferrodoc-ipynb = { workspace = true, optional = true }
 
 [lints]
 workspace = true

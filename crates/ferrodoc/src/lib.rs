@@ -110,6 +110,30 @@ impl Format {
     }
 
 
+    /// Whether this build has the code for this format at all.
+    ///
+    /// Every format is compiled in by default. A caller who trimmed the
+    /// feature list to pay for less gets `false` here — and a conversion
+    /// that asks for one anyway fails with [`Error::NotCompiled`] rather
+    /// than with a wrong answer. The CLI's `--help` lists exactly the
+    /// formats this returns `true` for.
+    pub fn compiled(self) -> bool {
+        match self {
+            Format::Markdown | Format::Gfm => cfg!(feature = "markdown"),
+            Format::Html => cfg!(feature = "html"),
+            Format::Docx => cfg!(feature = "docx"),
+            Format::Odt => cfg!(feature = "odt"),
+            Format::Epub => cfg!(feature = "epub"),
+            Format::Ipynb => cfg!(feature = "ipynb"),
+            Format::Latex => cfg!(feature = "latex"),
+            Format::Rst => cfg!(feature = "rst"),
+            Format::Asciidoc => cfg!(feature = "asciidoc"),
+            Format::Plain => cfg!(feature = "text"),
+            // The AST already serializes, so JSON costs nothing to keep.
+            Format::Json => true,
+        }
+    }
+
     /// Whether writing this format embeds image bytes.
     ///
     /// Reading a document's media costs memory proportional to it — a
@@ -158,6 +182,10 @@ impl fmt::Display for Format {
 pub enum Error {
     /// The input format cannot be read (only written).
     NotReadable(Format),
+    /// The format is supported, but this build was compiled without it.
+    /// Only a build that trimmed the default feature set can produce
+    /// this; see [`Format::compiled`].
+    NotCompiled(Format),
     /// The input was not valid for its format.
     Invalid {
         /// The format the input was supposed to be in.
@@ -172,6 +200,9 @@ impl fmt::Display for Error {
         match self {
             Error::NotReadable(format) => {
                 write!(f, "cannot read {format}: it is an output-only format")
+            }
+            Error::NotCompiled(format) => {
+                write!(f, "cannot handle {format}: this build was compiled without it")
             }
             Error::Invalid { format, detail } => write!(f, "invalid {format} input: {detail}"),
         }
@@ -196,18 +227,22 @@ pub type Media = std::collections::HashMap<String, Vec<u8>>;
 /// The same as [`parse`].
 pub fn parse_with_media(input: &[u8], from: Format) -> Result<(Pandoc, Media), Error> {
     match from {
+        #[cfg(feature = "docx")]
         Format::Docx => ferrodoc_docx::read_docx_with_media(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(feature = "odt")]
         Format::Odt => ferrodoc_odt::read_odt_with_media(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(feature = "epub")]
         Format::Epub => ferrodoc_epub::read_epub_with_media(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(feature = "ipynb")]
         Format::Ipynb => {
             let text = String::from_utf8(input.to_vec()).map_err(|e| Error::Invalid {
                 format: from,
@@ -231,38 +266,59 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
         })
     };
     match from {
+        #[cfg(feature = "markdown")]
         Format::Markdown => ferrodoc_markdown::read_commonmark(&text(input)?).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "markdown"))]
+        Format::Markdown => Err(Error::NotCompiled(from)),
+        #[cfg(feature = "markdown")]
         Format::Gfm => ferrodoc_markdown::read_gfm(&text(input)?).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "markdown"))]
+        Format::Gfm => Err(Error::NotCompiled(from)),
+        #[cfg(feature = "docx")]
         Format::Docx => ferrodoc_docx::read_docx(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "docx"))]
+        Format::Docx => Err(Error::NotCompiled(from)),
+        #[cfg(feature = "odt")]
         Format::Odt => ferrodoc_odt::read_odt(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "odt"))]
+        Format::Odt => Err(Error::NotCompiled(from)),
+        #[cfg(feature = "epub")]
         Format::Epub => ferrodoc_epub::read_epub(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "epub"))]
+        Format::Epub => Err(Error::NotCompiled(from)),
+        #[cfg(feature = "ipynb")]
         Format::Ipynb => ferrodoc_ipynb::read_ipynb(&text(input)?).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "ipynb"))]
+        Format::Ipynb => Err(Error::NotCompiled(from)),
         Format::Json => serde_json::from_slice(input).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(feature = "html")]
         Format::Html => ferrodoc_html::read_html(&text(input)?).map_err(|e| Error::Invalid {
             format: from,
             detail: e.to_string(),
         }),
+        #[cfg(not(feature = "html"))]
+        Format::Html => Err(Error::NotCompiled(from)),
         Format::Plain => Err(Error::NotReadable(Format::Plain)),
         Format::Latex => Err(Error::NotReadable(Format::Latex)),
         Format::Rst => Err(Error::NotReadable(Format::Rst)),
@@ -270,11 +326,15 @@ pub fn parse(input: &[u8], from: Format) -> Result<Pandoc, Error> {
     }
 }
 
+// The three helpers below decode a `data:` URL for the writers that embed
+// image bytes. No other format asks, so a build without one of those has no
+// use for them and would warn that they are dead.
 /// The bytes a `data:` URL carries, or `None` if it is not one.
 ///
 /// Both spellings, because both appear in real pages: base64, which is
 /// what this crate's own HTML reader writes for an inline `<svg>`, and
 /// percent-encoded, which is what a hand-written SVG data URL usually is.
+#[cfg(any(feature = "docx", feature = "odt", feature = "epub", feature = "ipynb"))]
 fn data_url(url: &str) -> Option<Vec<u8>> {
     let rest = url.strip_prefix("data:")?;
     let (media_type, data) = rest.split_once(',')?;
@@ -302,6 +362,7 @@ fn data_url(url: &str) -> Option<Vec<u8>> {
 /// image. A payload that simply stops early still yields what it held, as
 /// it does for pandoc — there is no way to tell a truncated picture from a
 /// short one.
+#[cfg(any(feature = "docx", feature = "odt", feature = "epub", feature = "ipynb"))]
 fn base64(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() / 4 * 3);
     let (mut bits, mut held) = (0u32, 0u32);
@@ -327,6 +388,7 @@ fn base64(text: &str) -> Option<Vec<u8>> {
 }
 
 /// Percent-decoding, for a `data:` URL that spells its payload out.
+#[cfg(any(feature = "docx", feature = "odt", feature = "epub", feature = "ipynb"))]
 fn percent_decode(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len());
     let mut bytes = text.bytes();
@@ -367,7 +429,9 @@ pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
 /// The same as [`render`].
 pub fn render_wrapped(doc: &Pandoc, to: Format, columns: usize) -> Result<Vec<u8>, Error> {
     match to {
+        #[cfg(feature = "markdown")]
         Format::Markdown => Ok(ferrodoc_markdown::write_markdown_wrapped(doc, columns).into_bytes()),
+        #[cfg(feature = "markdown")]
         Format::Gfm => Ok(ferrodoc_markdown::write_gfm_wrapped(doc, columns).into_bytes()),
         _ => render(doc, to),
     }
@@ -379,19 +443,42 @@ pub fn render_wrapped(doc: &Pandoc, to: Format, columns: usize) -> Result<Vec<u8
 /// Resolving a URL is the caller's job: it may name a file on disk, a
 /// cache, or nothing at all, and this crate has no business guessing. Only
 /// DOCX output embeds media today; other formats ignore the resolver.
+#[cfg_attr(not(any(feature = "docx", feature = "odt", feature = "epub", feature = "ipynb")), allow(unused_variables))]
 pub fn render_with_media(
     doc: &Pandoc,
     to: Format,
     media: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
     match to {
+        #[cfg(feature = "markdown")]
         Format::Markdown => Ok(ferrodoc_markdown::write_markdown(doc).into_bytes()),
+        #[cfg(not(feature = "markdown"))]
+        Format::Markdown => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "markdown")]
         Format::Gfm => Ok(ferrodoc_markdown::write_gfm(doc).into_bytes()),
+        #[cfg(not(feature = "markdown"))]
+        Format::Gfm => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "html")]
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
+        #[cfg(not(feature = "html"))]
+        Format::Html => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "text")]
         Format::Plain => Ok(ferrodoc_text::write_text(doc).into_bytes()),
+        #[cfg(not(feature = "text"))]
+        Format::Plain => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "latex")]
         Format::Latex => Ok(ferrodoc_latex::write_latex(doc).into_bytes()),
+        #[cfg(not(feature = "latex"))]
+        Format::Latex => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "rst")]
         Format::Rst => Ok(ferrodoc_rst::write_rst(doc).into_bytes()),
+        #[cfg(not(feature = "rst"))]
+        Format::Rst => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "asciidoc")]
         Format::Asciidoc => Ok(ferrodoc_asciidoc::write_asciidoc(doc).into_bytes()),
+        #[cfg(not(feature = "asciidoc"))]
+        Format::Asciidoc => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "docx")]
         Format::Docx => {
             // A `data:` URL carries its own bytes, so it is answered here
             // rather than passed to a resolver that would look for a file
@@ -404,6 +491,9 @@ pub fn render_with_media(
                 detail: e.to_string(),
             })
         }
+        #[cfg(not(feature = "docx"))]
+        Format::Docx => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "odt")]
         Format::Odt => {
             let resolve = |url: &str| data_url(url).or_else(|| media(url));
             ferrodoc_odt::write_odt_with_media(doc, &resolve).map_err(|e| Error::Invalid {
@@ -411,6 +501,9 @@ pub fn render_with_media(
                 detail: e.to_string(),
             })
         }
+        #[cfg(not(feature = "odt"))]
+        Format::Odt => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "epub")]
         Format::Epub => {
             let resolve = |url: &str| data_url(url).or_else(|| media(url));
             ferrodoc_epub::write_epub_with_media(doc, &resolve).map_err(|e| Error::Invalid {
@@ -418,6 +511,9 @@ pub fn render_with_media(
                 detail: e.to_string(),
             })
         }
+        #[cfg(not(feature = "epub"))]
+        Format::Epub => Err(Error::NotCompiled(to)),
+        #[cfg(feature = "ipynb")]
         Format::Ipynb => {
             let resolve = |url: &str| data_url(url).or_else(|| media(url));
             ferrodoc_ipynb::write_ipynb_with_media(doc, &resolve).map_err(|e| Error::Invalid {
@@ -425,6 +521,8 @@ pub fn render_with_media(
                 detail: e.to_string(),
             })
         }
+        #[cfg(not(feature = "ipynb"))]
+        Format::Ipynb => Err(Error::NotCompiled(to)),
         Format::Json => {
             let mut json = serde_json::to_vec(doc).map_err(|e| Error::Invalid {
                 format: to,
@@ -442,6 +540,7 @@ pub fn render_with_media(
 ///
 /// This is what `pdflatex` can compile on its own; [`render`] to
 /// [`Format::Latex`] gives the body alone, for someone else's template.
+#[cfg(feature = "latex")]
 pub fn render_latex_standalone(doc: &Pandoc) -> String {
     ferrodoc_latex::write_latex_standalone(doc)
 }
@@ -452,6 +551,7 @@ pub fn render_latex_standalone(doc: &Pandoc) -> String {
 /// template engine wants and what a browser does not. `css`, if given, is
 /// inlined into a `<style>` element; reading it from a file is the
 /// caller's job, because no crate below this one does IO.
+#[cfg(feature = "html")]
 pub fn render_html_standalone(doc: &Pandoc, css: Option<&str>) -> Vec<u8> {
     ferrodoc_html::write_html_standalone(doc, css).into_bytes()
 }
@@ -469,17 +569,22 @@ pub fn convert(input: &[u8], from: Format, to: Format) -> Result<Vec<u8>, Error>
     render_with_media(&doc, to, &|url| media.get(url).cloned())
 }
 
+// Each test below is gated on the formats it converts: a build trimmed with
+// cargo features still runs its own tests, and skips only what it does not
+// contain.
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    #[cfg(all(feature = "markdown", feature = "html"))]
     fn markdown_to_html() {
         let out = convert(b"*hi*\n", Format::Markdown, Format::Html).unwrap();
         assert_eq!(out, b"<p><em>hi</em></p>\n");
     }
 
     #[test]
+    #[cfg(all(feature = "markdown", feature = "docx", feature = "html"))]
     fn docx_round_trips_through_the_facade() {
         let docx = convert(b"# Title\n\nBody.\n", Format::Markdown, Format::Docx).unwrap();
         let html = convert(&docx, Format::Docx, Format::Html).unwrap();
@@ -516,6 +621,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "markdown", feature = "html"))]
     fn html_converts_to_markdown() {
         let out = convert(b"<h1>T</h1><ul><li>a</li></ul>", Format::Html, Format::Markdown)
             .expect("html is readable");
@@ -523,6 +629,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "markdown", feature = "docx"))]
     fn docx_converts_to_markdown() {
         let docx = convert(b"# Title\n\nBody *text*.\n", Format::Markdown, Format::Docx)
             .expect("writable");
@@ -533,6 +640,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "markdown", feature = "docx"))]
     fn a_table_survives_docx_to_gfm() {
         // The workflow the README sells. `markdown` has no table syntax,
         // so the same conversion loses the grid there and `gfm` keeps it.
@@ -546,6 +654,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "markdown", feature = "docx"))]
     fn images_survive_docx_to_docx() {
         // A `.docx` is the one input that carries its pictures inside
         // itself, so it is the one conversion that can keep them without
@@ -578,6 +687,7 @@ mod tests {
     /// fall back to alt text. It is the whole reason an inline `<svg>`
     /// reaches a `.docx` at all.
     #[test]
+    #[cfg(all(feature = "html", feature = "docx"))]
     fn a_data_url_carries_its_own_picture_into_a_package() {
         let html = concat!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9">"#,
@@ -591,6 +701,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "docx", feature = "odt", feature = "epub", feature = "ipynb"))]
     fn a_data_url_is_read_in_both_spellings() {
         assert_eq!(data_url("data:image/svg+xml;base64,Zm9vYmFy").as_deref(), Some(&b"foobar"[..]));
         assert_eq!(data_url("data:text/plain,a%20b%2Fc").as_deref(), Some(&b"a b/c"[..]));
@@ -614,6 +725,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(feature = "docx", feature = "html"))]
     fn malformed_input_is_reported_not_panicked() {
         assert!(convert(b"not a zip", Format::Docx, Format::Html).is_err());
         assert!(convert(b"{oops", Format::Json, Format::Html).is_err());
