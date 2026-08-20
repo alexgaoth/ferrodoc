@@ -585,6 +585,25 @@ box inside an `Emph`.
     printf -- '- [x] a\n- [ ] b\n' | ferrodoc -f gfm -t html
     printf -- '- [x] a\n- [ ] b\n' | pandoc -f gfm -t html --wrap=none
 
+**The gate hands pandoc two flags, and one of them is visible.**
+`diff-html` runs `pandoc -f commonmark -t html --syntax-highlighting=none
+--wrap=none`, so the `652/652` is measured against pandoc with its
+highlighter off. That is the right way to gate a writer — highlighting is a
+rendering choice this project has not made, and wrapping is typesetting
+rather than content — but it means the score does not cover a code block
+with a language, and a reader running plain `pandoc -t html` will see the
+difference immediately:
+
+    printf '```rust\nfn main() {}\n```\n' | pandoc -f gfm -t html
+    printf '```rust\nfn main() {}\n```\n' | pandoc -f gfm -t html --syntax-highlighting=none --wrap=none
+    printf '```rust\nfn main() {}\n```\n' | ferrodoc -f gfm -t html
+
+The first prints `<div class="sourceCode" id="cb1">` with a `kw`/`op` span
+per token; the second and third both print
+`<pre class="rust"><code>fn main() {}</code></pre>`, identical. The same
+flag is passed by `diff-epub-write`, because pandoc's EPUB writer runs the
+same highlighter. `README.md` states this beside the number as well.
+
 Pandoc's LaTeX writer makes something else of the same AST (`\item[$\boxtimes$]`,
 and it leaves ordered lists alone); that is a different writer and ferrodoc's
 LaTeX writer is gated on fidelity, not on matching it.

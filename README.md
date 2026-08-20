@@ -145,6 +145,38 @@ cargo run -p ferrodoc-harness -- diff-gfm-md corpus/gfm corpus/commonmark-spec-0
 cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96
 ```
 
+**What these comparisons hand pandoc, and why.** Three of them pass a flag,
+and it belongs here beside the numbers rather than only in
+`COMPATIBILITY.md`. `diff-html` runs `pandoc -f commonmark -t html
+--syntax-highlighting=none --wrap=none`; `diff-epub-write` passes the first
+of those; the LaTeX and RST round trips pass `--wrap=preserve`. Wrapping is
+typesetting rather than content, so comparing against it would measure who
+guessed the same column. Highlighting is a rendering choice this project
+does not make — and unlike wrapping it is **visible**, so a reader who
+checks the `652/652` with plain `pandoc -t html` sees a difference on the
+first code block:
+
+```console
+$ printf '```rust\nfn main() {}\n```\n' | pandoc -f gfm -t html
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> main() <span class="op">{}</span></span></code></pre></div>
+
+$ printf '```rust\nfn main() {}\n```\n' | ferrodoc -f gfm -t html
+<pre class="rust"><code>fn main() {}</code></pre>
+```
+
+Give pandoc the flag and the same block comes back byte for byte:
+
+```console
+$ printf '```rust\nfn main() {}\n```\n' | pandoc -f gfm -t html --syntax-highlighting=none --wrap=none
+<pre class="rust"><code>fn main() {}</code></pre>
+```
+
+So the difference is the highlighting and nothing else — structure,
+escaping and attributes match either way. Syntax highlighting is not
+implemented here, and `COMPATIBILITY.md` records it as a known loss rather
+than a footnote.
+
 `diff-write` and `diff-odt-write` are the office writers' oracle: both
 engines write the same AST to a `.docx` (or `.odt`), pandoc reads both back,
 and the two documents must match.
