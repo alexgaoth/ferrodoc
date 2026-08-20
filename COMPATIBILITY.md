@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-html-read` | HTML reader produces pandoc's AST | **634/660** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -842,6 +842,42 @@ Two things are **not** matched, stated rather than hidden:
   writes the TeX;
 - pandoc fills to `--columns`; this never wraps, which is the same
   `--wrap=preserve` default described above.
+
+### The HTML reader's edge cases — five fixed, and a sweep that found more
+
+Five divergences no gate could reach, each probed against 3.8.2.1 and now
+carried by `corpus/inline-edges.html`, which is identical to pandoc:
+
+| shape | was | now |
+|---|---|---|
+| `a<em>b </em>c` | the space **dropped** — read as `abc` | hoisted out of the element, as pandoc does |
+| `a <br />b` | `Space` kept before the break | dropped |
+| `<li id="x">a` | the identifier **lost** | a `Span` around the item's inlines |
+| `<li id="x"><p>a</p>` | the identifier **lost** | a `Div` around the blocks — one `<p>` is already this case |
+| `<span epub:type="a b">` | no classes | `a` and `b` as classes, attribute kept |
+| `<head>` | `meta` left empty | `title`, `lang` and every `<meta name>`; repeats make a `MetaList` |
+
+Three of those lost information rather than misplacing it. The `<head>` one
+is the other half of `write_html_standalone`: `-s` writes the title and
+authors into the head, and reading that page back dropped them.
+
+**`scripts/sweep-epub-xhtml.sh` is how the remainder is counted**, and it
+contradicts the census. It compares every XHTML file inside every corpus
+EPUB — the vocabulary pandoc's own writer emits, which is far wider than
+the eight `corpus/*.html` the gate walks — and reports **128 files, 77
+diverging**, where `docs/divergences.md` names six divergences. Two
+families it never mentioned dominate:
+
+- an **empty `<section epub:type="titlepage">`**: pandoc emits nothing,
+  this reader keeps an empty `Div`. 34 files. An empty `<section>` or
+  `<div id>` without that `epub:type` keeps its `Div` for pandoc too, so
+  the rule is narrower than "drop empty containers" and is not guessed at
+  here;
+- a **link with no text** in `nav.xhtml`: pandoc drops it, this reader
+  keeps an empty `Link`. 31 files.
+
+Both are recorded rather than fixed. Re-run the sweep before believing any
+count of what this reader diverges on.
 
 ### Footnotes in HTML — resolved, with two stated divergences
 

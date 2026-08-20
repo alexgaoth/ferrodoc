@@ -126,7 +126,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-asciidoc` writer | every corpus document is accepted by **`asciidoctor --failure-level=WARN`** |
 | `ferrodoc-markdown` writer | **652/652** spec examples survive a markdown round trip identically (pandoc: 593/652) |
 | `ferrodoc-markdown` GFM writer | **656/656** documents survive a GFM round trip identically (pandoc: 590/656) |
-| `ferrodoc-html` reader | **634/660** HTML documents produce identical ASTs |
+| `ferrodoc-html` reader | **635/661** HTML documents produce identical ASTs |
 
 ```sh
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
@@ -280,7 +280,8 @@ let without_headings = render(&doc, Format::Html)?;
   Pandoc embeds timestamps, so its output differs run to run.
 - **Portable, and shipped that way.** Every library crate compiles to
   `wasm32-unknown-unknown`, and the npm package is that build (not yet
-  published — see above): **0.6 MB gzipped**, converting in a browser tab
+  published — see above): **0.65 MB gzipped** (679,019 bytes, measured by
+  `./bindings/wasm/build.sh` today), converting in a browser tab
   with no document leaving the client. CI drives it in headless Chrome and asserts that the page
   makes no network request, because that claim is the reason it exists.
 

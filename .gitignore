@@ -13,6 +13,10 @@ __pycache__/
 # of `samples/`.
 samples-check.*
 
+# `scripts/sweep-epub-xhtml.sh` unpacks every corpus EPUB into a scratch
+# dir beside itself, for the same reason and with the same trap.
+sweep-epub.*
+
 # Working notes for the agents that build this, not for anyone reading the
 # repository: the roadmap with its unlanded items, the per-crate rules, and
 # the adoption research behind them. A bare name matches at every level, so

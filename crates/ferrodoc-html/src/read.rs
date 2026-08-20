@@ -13,8 +13,7 @@ use crate::Error;
 use ferrodoc_ast::{
     Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Inline, ListAttributes,
     ListNumberDelim, ListNumberStyle, Pandoc, QuoteType, Row, Table, TableBody, TableFoot,
-    TableHead, Target,
-};
+    TableHead, Target, Meta, MetaValue,};
 use html5ever::tendril::TendrilSink as _;
 use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 use std::collections::{HashMap, HashSet};
@@ -81,8 +80,9 @@ fn read(input: &str, generate_identifiers: bool) -> Result<Pandoc, Error> {
     let result = reader.blocks_in(&children(&root), promote);
     // An `Rc` tree is dropped recursively, so a document deep enough to
     // refuse is also deep enough to overflow on the way out.
+    let meta = head_metadata(&dom.document);
     flatten(dom.document);
-    Ok(Pandoc { blocks: result?, ..Pandoc::default() })
+    Ok(Pandoc { blocks: result?, meta, ..Pandoc::default() })
 }
 
 struct Reader {
@@ -268,7 +268,9 @@ impl Reader {
         let mut items = Vec::new();
         for node in nodes {
             if element_name(node).as_deref() == Some("li") {
-                items.push(self.item(&children(node))?);
+                let mut blocks = self.item(&children(node))?;
+                carry_item_identifier(node, &mut blocks);
+                items.push(blocks);
             }
         }
         Ok(items)
@@ -381,13 +383,22 @@ impl Reader {
     // --- inlines ---
 
     fn inlines(&mut self, nodes: &[Handle]) -> Result<Vec<Inline>, Error> {
+        let mut out = self.inlines_untrimmed(nodes)?;
+        trim(&mut out);
+        Ok(out)
+    }
+
+    /// As [`Reader::inlines`], but keeping the whitespace at either edge —
+    /// which an inline wrapper needs, because pandoc moves it outside the
+    /// element rather than dropping it.
+    fn inlines_untrimmed(&mut self, nodes: &[Handle]) -> Result<Vec<Inline>, Error> {
         let mut out = Vec::new();
         for node in nodes {
             self.inline(node, &mut out)?;
         }
-        trim(&mut out);
         merge_adjacent(&mut out);
         drop_breaks_after_breaks(&mut out);
+        drop_space_before_break(&mut out);
         Ok(out)
     }
 
@@ -432,7 +443,23 @@ impl Reader {
             _ => None,
         };
         if let Some(wrap) = wrap {
-            out.push(wrap(self.inlines(kids)?));
+            // Pandoc hoists whitespace at either edge *out* of the element:
+            // `a<em>b </em>c` is `Emph[b]`, `Space`, `Str "c"`. This reader
+            // used to drop it, so `a<em>b </em>c` lost the space entirely
+            // and read as `abc`. Probed on both edges, on all-space content
+            // (which leaves an empty element between two `Space`s), and
+            // through nesting, where it comes out of both wrappers.
+            let mut inner = self.inlines_untrimmed(kids)?;
+            let leading = matches!(inner.first(), Some(Inline::Space | Inline::SoftBreak));
+            let trailing = matches!(inner.last(), Some(Inline::Space | Inline::SoftBreak));
+            trim(&mut inner);
+            if leading {
+                out.push(Inline::Space);
+            }
+            out.push(wrap(inner));
+            if trailing {
+                out.push(Inline::Space);
+            }
             return Ok(());
         }
         // Elements that become a span carrying the tag as a class. Each of
@@ -879,6 +906,122 @@ fn strip_backlinks(mut blocks: Vec<Block>) -> Vec<Block> {
     blocks
 }
 
+/// Drop the space in front of a hard break: `a <br />b` is `Str "a"`,
+/// `LineBreak`, `Str "b"` for pandoc, and the space it would otherwise
+/// leave is trailing whitespace at the end of a line.
+fn drop_space_before_break(inlines: &mut Vec<Inline>) {
+    let mut index = 0;
+    while index + 1 < inlines.len() {
+        if matches!(inlines[index], Inline::Space)
+            && matches!(inlines[index + 1], Inline::LineBreak)
+        {
+            inlines.remove(index);
+        } else {
+            index += 1;
+        }
+    }
+}
+
+/// Keep a `<li id>`'s identifier, which is the only thing a link into the
+/// middle of a list has to aim at.
+///
+/// Pandoc wraps it in whichever container can hold the item's content: a
+/// `Span` inside the single `Plain` of an inline item, a `Div` around the
+/// blocks otherwise — **one `<p>` is already the `Div` case**. The
+/// attribute merely being present is the trigger; `id=""` still wraps,
+/// with an empty identifier. Both forms probed; the census printed only
+/// the `Span` half.
+fn carry_item_identifier(node: &Handle, blocks: &mut Vec<Block>) {
+    let Some(id) = attribute(node, "id") else { return };
+    let attr = Attr { identifier: id, ..Attr::default() };
+    if let [Block::Plain(inlines)] = blocks.as_mut_slice() {
+        let inner = std::mem::take(inlines);
+        *inlines = vec![Inline::Span(Box::new(attr), inner)];
+        return;
+    }
+    let inner = std::mem::take(blocks);
+    blocks.push(Block::Div(attr, inner));
+}
+
+/// What the document's `<head>` says about itself.
+///
+/// Pandoc fills `meta` from three places, probed against 3.8.2.1:
+/// `<title>`, every `<meta name=… content=…>` under its own name, and
+/// `lang` on `<html>`. A `<meta>` with no `name` — `charset` — contributes
+/// nothing. Repeating a name makes a `MetaList`, which is how a page with
+/// two authors says so. The values are tokenized like body text, so
+/// `content="a, b"` is `Str "a,"`, `Space`, `Str "b"`.
+///
+/// This is the other half of `write_html_standalone`: `-s` writes the
+/// title and authors into the head, and without this, reading that page
+/// back dropped them.
+fn head_metadata(document: &Handle) -> Meta {
+    let mut meta = Meta::new();
+    let mut stack = vec![document.clone()];
+    while let Some(node) = stack.pop() {
+        match element_name(&node).as_deref() {
+            Some("html") => {
+                if let Some(lang) = attribute(&node, "lang").filter(|l| !l.is_empty()) {
+                    add_meta(&mut meta, "lang", &lang);
+                }
+            }
+            Some("title") => {
+                let mut text = String::new();
+                collect_text(&node, &mut text);
+                if !text.trim().is_empty() {
+                    add_meta(&mut meta, "title", &text);
+                }
+                continue;
+            }
+            Some("meta") => {
+                if let (Some(name), Some(content)) =
+                    (attribute(&node, "name"), attribute(&node, "content"))
+                    && !name.is_empty()
+                {
+                    add_meta(&mut meta, &name, &content);
+                }
+                continue;
+            }
+            // The body is where the document is; only the head declares.
+            Some("body") => continue,
+            _ => {}
+        }
+        // Reversed, because the stack pops last-first and two `<meta
+        // name="author">` must stay in the order the page wrote them.
+        stack.extend(children(&node).into_iter().rev());
+    }
+    meta
+}
+
+/// Add one value, making a `MetaList` when the name repeats.
+fn add_meta(meta: &mut Meta, name: &str, value: &str) {
+    let mut inlines = Vec::new();
+    text_tokens(value, &mut inlines);
+    let entry = MetaValue::MetaInlines(inlines);
+    match meta.remove(name) {
+        None => {
+            meta.insert(name.to_owned(), entry);
+        }
+        Some(MetaValue::MetaList(mut list)) => {
+            list.push(entry);
+            meta.insert(name.to_owned(), MetaValue::MetaList(list));
+        }
+        Some(first) => {
+            meta.insert(name.to_owned(), MetaValue::MetaList(vec![first, entry]));
+        }
+    }
+}
+
+/// Every text node below `node`, concatenated.
+fn collect_text(node: &Handle, out: &mut String) {
+    if let NodeData::Text { contents } = &node.data {
+        out.push_str(&contents.borrow());
+    }
+    for child in children(node) {
+        collect_text(&child, out);
+    }
+}
+
 fn children(node: &Handle) -> Vec<Handle> {
     // A `<template>`'s content is parsed into a fragment of its own rather
     // than into its children, so a walk that reads children alone finds
@@ -972,6 +1115,22 @@ fn attribute(node: &Handle, name: &str) -> Option<String> {
 
 /// An element's identifier, classes and remaining attributes, in the shape
 /// the AST wants them.
+/// Add each whitespace-separated value of `epub:type` as a class, keeping
+/// the attribute. Pandoc does this, and an EPUB's structure is carried in
+/// nothing else — `epub:type="pagebreak"` is how a book says where a page
+/// ended.
+fn epub_type_classes(attr: &mut Attr) {
+    let Some((_, value)) = attr.attributes.iter().find(|(k, _)| k == "epub:type") else {
+        return;
+    };
+    let classes: Vec<String> = value.split_whitespace().map(str::to_owned).collect();
+    for class in classes {
+        if !attr.classes.contains(&class) {
+            attr.classes.push(class);
+        }
+    }
+}
+
 fn attributes(node: &Handle) -> Attr {
     let NodeData::Element { attrs, .. } = &node.data else {
         return Attr::default();
@@ -996,6 +1155,7 @@ fn attributes(node: &Handle) -> Attr {
             }
         }
     }
+    epub_type_classes(&mut attr);
     attr
 }
 
@@ -1630,6 +1790,112 @@ mod tests {
             blocks("<ul><li>x</li></ul>"),
             vec![Block::BulletList(vec![vec![Block::Plain(vec![Inline::Str("x".to_owned())])]])]
         );
+    }
+
+    #[test]
+    fn whitespace_at_an_inline_edge_moves_outside_it() {
+        // Pandoc hoists it out; this reader used to drop it, so
+        // `a<em>b </em>c` read as `abc` — a lost space, not a moved one.
+        assert_eq!(
+            blocks("<p>a<em>b </em>c</p>"),
+            vec![Block::Para(vec![
+                Inline::Str("a".to_owned()),
+                Inline::Emph(vec![Inline::Str("b".to_owned())]),
+                Inline::Space,
+                Inline::Str("c".to_owned()),
+            ])]
+        );
+        // All-space content leaves an empty element between two spaces.
+        assert_eq!(
+            blocks("<p>a<em> </em>c</p>"),
+            vec![Block::Para(vec![
+                Inline::Str("a".to_owned()),
+                Inline::Space,
+                Inline::Emph(Vec::new()),
+                Inline::Space,
+                Inline::Str("c".to_owned()),
+            ])]
+        );
+        // A space in front of a hard break is not content.
+        assert_eq!(
+            blocks("<p>a <br />b</p>"),
+            vec![Block::Para(vec![
+                Inline::Str("a".to_owned()),
+                Inline::LineBreak,
+                Inline::Str("b".to_owned()),
+            ])]
+        );
+    }
+
+    #[test]
+    fn a_list_item_keeps_its_identifier_in_whichever_container_fits() {
+        // Inline content takes a `Span`; anything block-shaped takes a
+        // `Div`, and **one `<p>` is already the `Div` case** — the census
+        // printed only the `Span` half.
+        let id = |s: &str| Attr { identifier: s.to_owned(), ..Attr::default() };
+        assert_eq!(
+            blocks(r#"<ul><li id="x">a</li></ul>"#),
+            vec![Block::BulletList(vec![vec![Block::Plain(vec![Inline::Span(
+                Box::new(id("x")),
+                vec![Inline::Str("a".to_owned())]
+            )])]])]
+        );
+        assert_eq!(
+            blocks(r#"<ul><li id="x"><p>a</p></li></ul>"#),
+            vec![Block::BulletList(vec![vec![Block::Div(
+                id("x"),
+                vec![Block::Para(vec![Inline::Str("a".to_owned())])]
+            )]])]
+        );
+        // Presence is the trigger, not a non-empty value.
+        assert_eq!(
+            blocks(r#"<ul><li id="">a</li></ul>"#),
+            vec![Block::BulletList(vec![vec![Block::Plain(vec![Inline::Span(
+                Box::default(),
+                vec![Inline::Str("a".to_owned())]
+            )])]])]
+        );
+    }
+
+    #[test]
+    fn epub_type_contributes_its_values_as_classes() {
+        // An EPUB carries its structure in nothing else.
+        let Block::Para(inlines) = &blocks(r#"<p><span epub:type="a b">x</span></p>"#)[0] else {
+            panic!("expected a paragraph")
+        };
+        let Inline::Span(attr, _) = &inlines[0] else { panic!("expected a span") };
+        assert_eq!(attr.classes, vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(attr.attributes, vec![("epub:type".to_owned(), "a b".to_owned())]);
+    }
+
+    #[test]
+    fn the_head_says_what_the_document_is() {
+        // The other half of `write_html_standalone`: `-s` writes the title
+        // and authors into the head, and reading that page back dropped
+        // them. Two `<meta name="author">` make a `MetaList`, in order.
+        let doc = read_html(concat!(
+            r#"<html lang="en"><head><title>T</title><meta charset="utf-8" />"#,
+            r#"<meta name="author" content="A" /><meta name="author" content="B" />"#,
+            r#"</head><body><p>x</p></body></html>"#,
+        ))
+        .expect("readable");
+        assert_eq!(
+            doc.meta.get("title"),
+            Some(&MetaValue::MetaInlines(vec![Inline::Str("T".to_owned())]))
+        );
+        assert_eq!(
+            doc.meta.get("lang"),
+            Some(&MetaValue::MetaInlines(vec![Inline::Str("en".to_owned())]))
+        );
+        assert_eq!(
+            doc.meta.get("author"),
+            Some(&MetaValue::MetaList(vec![
+                MetaValue::MetaInlines(vec![Inline::Str("A".to_owned())]),
+                MetaValue::MetaInlines(vec![Inline::Str("B".to_owned())]),
+            ]))
+        );
+        // `charset` has no name, so it says nothing about the document.
+        assert_eq!(doc.meta.len(), 3, "{:?}", doc.meta);
     }
 
     #[test]

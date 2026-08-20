@@ -1,5 +1,14 @@
 # Every failing document, and what it fails on
 
+> **Understated, and measured so on 2026-08-19.** This census counts the
+> documents the gates score. For the HTML reader that is eight
+> `corpus/*.html` files, and it named six divergences.
+> `scripts/sweep-epub-xhtml.sh` compares the **128** XHTML files inside the
+> corpus EPUBs — the vocabulary pandoc's own writer emits — and finds **77**
+> diverging, including two families named nowhere below: an empty
+> `<section epub:type="titlepage">` and a link with no text. Five of the six
+> are now fixed. Read the sweep before quoting a count from this page.
+
 A census, not a change: nothing here alters behaviour. It exists because
 two claims in the project's roadmap were carrying weight without a breakdown behind
 them — that the HTML reader's 26 divergences are what holds

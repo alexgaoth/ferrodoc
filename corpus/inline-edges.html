@@ -1,0 +1,25 @@
+<html lang="en">
+<head>
+<title>Inline edges</title>
+<meta charset="utf-8" />
+<meta name="author" content="First Author" />
+<meta name="author" content="Second Author" />
+<meta name="description" content="Shapes no other corpus file reaches." />
+</head>
+<body>
+<h2>Whitespace at the edge of an inline element</h2>
+<p>a<em>b </em>c and a<em> b</em>c and a<em> b </em>c and a<em> </em>c.</p>
+<p><strong><em>nested </em></strong>after, and <strong>bold </strong>then text.</p>
+<p>A hard break with a space before it: one <br />two.</p>
+<h2>Identifiers a list item carries</h2>
+<ul>
+<li id="inline-item">inline content takes a span</li>
+<li id="block-item"><p>block content</p><p>takes a div</p></li>
+<li id="one-para"><p>one paragraph is already the div case</p></li>
+<li id="">an empty id still wraps</li>
+<li>and no id at all does not</li>
+</ul>
+<h2>epub:type carries classes</h2>
+<p><span epub:type="pagebreak">1</span> and <span epub:type="noteref other">2</span>.</p>
+</body>
+</html>
