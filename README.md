@@ -348,9 +348,13 @@ cargo build --release -p ferrodoc --no-default-features --features markdown,html
 
 Every gate, every known loss and every deliberate divergence is listed one
 by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
-produces it. CI runs all nineteen against a pinned pandoc, and builds and tests on
-Linux, macOS and Windows, plus a wasm32 build and a 500,000-mutation fuzz
-campaign.
+produces it. CI runs **every one of them** against a pinned pandoc, and builds
+and tests on Linux, macOS and Windows, plus a wasm32 build and a
+500,000-mutation fuzz campaign.
+
+The forward plan — release reachability, service resource limits, fidelity,
+performance, bindings, and the criteria for adding a format — is in
+[`ROADMAP.md`](ROADMAP.md).
 
 ## Where pandoc is still ahead
 
