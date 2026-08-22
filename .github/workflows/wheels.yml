@@ -36,6 +36,24 @@ jobs:
         with:
           python-version: "3.9"
 
+      # This crate depends on `ferrodoc` from crates.io rather than by
+      # path, which is what makes maturin's sdist — only this directory —
+      # build for anyone. The cost is an ordering: until the registry has
+      # the version asked for, nothing here can be built, and maturin
+      # reports that as a resolution error thirty lines deep. Say it here
+      # instead. See docs/releasing.md.
+      - name: the version this asks for must already be on crates.io
+        shell: bash
+        run: |
+          want=$(sed -n 's/^ferrodoc = "\(.*\)"$/\1/p' bindings/python/Cargo.toml)
+          have=$(cargo search ferrodoc --limit 1 | sed -n 's/^ferrodoc = "\(.*\)".*/\1/p')
+          echo "Cargo.toml asks for ferrodoc $want; crates.io has $have"
+          case "$have" in
+            "$want"|"$want".*) ;;
+            *) echo "::error::publish ferrodoc $want to crates.io first — the wheel" \
+                    "cannot resolve until then, see docs/releasing.md"; exit 1 ;;
+          esac
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
