@@ -153,6 +153,20 @@ installing.
 
 **Not this version:** any new flag, format or converter behaviour.
 
+#### Cards
+
+| Card | Scope and deliverable | Verify and done | Not this card |
+|---|---|---|---|
+| **R3.1 — dress rehearsal** | Build every publishable artefact from a clean checkout and confirm each reports 0.2.0 and contains its entrypoint. Record the commands in a release checklist. | `cargo package` for all twelve crates, `maturin build`, `npm pack`, `./bindings/wasm/build.sh`; each artefact reports 0.2.0, the wheel imports, the tarball exposes `convert`, and the module is the 1.8 MB one rather than the 31 KB CLI stub. | Publishing anything. Registry credentials. |
+| **R3.2 — migration notes** | Write the 0.1 → 0.2 note: every changed public symbol in Rust, C, Python and TypeScript, with the before/after signature. | `git diff v0.1.0..HEAD` over the public surface names nothing the note omits. `write_html_standalone` and `render_html_standalone` both appear. | New API design. Deprecation shims. |
+| **R3.3 — gate the claim surface** | Give every number published in `README.md` and `COMPATIBILITY.md` a command, and make CI run them. Start with the ones that have already gone stale: gate counts, bundle size, the 72× figure. | A script re-derives each published figure and fails when one drifts; it is wired into `verify.sh` and CI. | Changing any figure. Adding new claims. |
+| **R3.4 — registry release** *(owner)* | Publish crates.io first, then the GitHub release, which triggers PyPI and npm. Record the immutable tag and release URL. | On a clean Linux, macOS and Windows machine, `pip install ferrodoc`, `npm install ferrodoc` and `cargo add ferrodoc` each resolve and convert one document. Building is not installing. | Any converter change made to enlarge the release. |
+
+> **R3.4 needs credentials and cannot be delegated.** Rotate the two tokens
+> that were pasted into a chat transcript before using them, add the PyPI
+> pending publisher (repo, `wheels.yml`, environment `pypi`), and set
+> `NPM_TOKEN`. The `pypi` environment already exists.
+
 ### 0.4 — Drop-in command line
 
 **Claim:** a pandoc command line either produces identical bytes or fails
@@ -185,6 +199,29 @@ publishes its number. Every miss is classified. No miss is "different
 output, no message".
 
 **Not this version:** templates, citations, highlighting.
+
+#### Cards
+
+**D4.1 comes first on purpose.** Every other card in this version is judged
+by the number it produces, and this repository's own rule is that an
+unchecked guarantee outranks a new feature. Building the flags first would
+mean shipping eight of them with no way to say whether they helped.
+
+| Card | Scope and deliverable | Verify and done | Not this card |
+|---|---|---|---|
+| **D4.1 — the drop-in corpus** | Collect **real** pandoc command lines — from Makefiles, CI jobs, README snippets, the pandoc manual's own examples — with the documents they run on. Commit them as data, not as a script. | At least 40 invocations, each recorded with its source, running under pandoc alone. A synthetic invocation nobody writes is not admitted. | Running ferrodoc against them. Any flag work. |
+| **D4.2 — `scripts/dropin.sh`** | Run each corpus command line through both binaries, comparing stdout, any output file, exit code and stderr byte for byte. Print `N/M command lines identical` and classify every miss as *fixable*, *deliberate* or *out of surface*. | Wired into `verify.sh`; publishes its number; mutation-tested by breaking one known-good flag and watching the number fall. | Fixing any miss it finds. |
+| **D4.3 — the `--wrap` decision** | Settle it as a compatibility question and write the reasoning: match pandoc's 72-column fill by default and keep `preserve` behind a flag, or keep `preserve` and count every wrapped output as a known difference. Implement whichever wins. | `dropin.sh` re-run: the wrap-related misses move to the chosen classification, and none is left unclassified. Existing gates hold. | The dialect question. Any other flag. |
+| **D4.4 — the `markdown` dialect decision** | Same treatment for `-f markdown`: CommonMark here, pandoc-markdown there, with `pandoc_markdown` now available. Decide whether `markdown` aliases it, and write why. | `dropin.sh` re-run; `diff-spec` and `diff-gfm` unmoved, proving `commonmark` is still `commonmark` whatever the alias does. | Extension syntax. |
+| **D4.5 — extension syntax** | Accept `+ext-ext` for the extensions the three dialects actually implement; refuse the rest **by name**, saying which dialect would have it. | A table test over every extension pandoc names: each is accepted, or refused with a message naming it. Silent acceptance fails the test. | Implementing a missing extension. |
+| **D4.6 — diagnostics** | `--quiet`, `--verbose`, `--log`, `--fail-if-warnings`, and unknown-flag behaviour: fail naming the flag and whether it is unimplemented or out of scope. | Every unknown flag produces a message naming it; `--fail-if-warnings` turns the metadata-block warning into a non-zero exit. **No silent acceptance anywhere.** | Rewriting existing warnings. |
+| **D4.7 — paths and defaults** | `--defaults`, `--resource-path`, `--data-dir`. These are what a Makefile actually carries. | A `--defaults` file setting from/to/wrap produces the same bytes as the equivalent flags; `--resource-path` resolves an image outside the document's directory. | Templates or `--reference-doc`, which are 0.5. |
+| **D4.8 — text shaping** | `--eol`, `--ascii`, `--strip-comments`, `--shift-heading-level-by`, `--id-prefix`. | One literal-output test each, compared against pandoc on the same input. `--eol=crlf` is checked on bytes, not on a rendered diff. | Highlighting. Anything in 0.5. |
+
+**Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
+decisions with code attached and should not be started until the number
+exists to judge them by. D4.5 through D4.8 are independent of each other and
+can be taken in any order, or in parallel by two people.
 
 ### 0.5 — Templates, variables and standalone parity
 
