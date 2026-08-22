@@ -818,7 +818,12 @@ mod tests {
 
         let json = serde_json::to_string(&doc).expect("serializable");
         assert!(!json.contains("\"media/p.png\""), "a picture was left unrepointed: {json}");
-        let expected = dir.join("media/p.png").to_string_lossy().into_owned();
+        // Serialized, not the raw path: on Windows the separator is a
+        // backslash and JSON doubles it, so matching the path as it comes
+        // off the filesystem found nothing and this test failed there for
+        // two days while passing everywhere else.
+        let written = dir.join("media/p.png").to_string_lossy().into_owned();
+        let expected = serde_json::to_string(&written).expect("serializable");
         assert_eq!(json.matches(&expected).count(), 7, "{json}");
         assert_eq!(std::fs::read(dir.join("media/p.png")).expect("written"), b"bytes");
         let _ = std::fs::remove_dir_all(&dir);

@@ -17,15 +17,16 @@
 //!
 //! Three rules that are not obvious:
 //!
-//! - **the ten special characters split into two groups.** Seven are
-//!   escaped with a backslash (`# $ % & _ { }`), and three cannot be:
-//!   `\`, `~` and `^` have no backslash form and need `\textbackslash{}`,
-//!   `\textasciitilde{}` and `\textasciicircum{}`. Escaping `\` as `\\`
-//!   emits a line break instead of a character;
-//! - **verbatim needs a delimiter the content does not contain.**
-//!   `\texttt` escapes its argument, which is wrong for code; `\verb`
-//!   takes any delimiter, so the writer picks one the text is missing
-//!   rather than assuming `|`;
+//! - **the special characters split into two groups.** Seven are escaped
+//!   with a backslash (`# $ % & _ { }`); the rest have no backslash form
+//!   and need a command or a group — `\textbackslash{}`, `\^{}`,
+//!   `\textless{}` and the others in [`escape_char`]. Escaping `\` as `\\`
+//!   emits a line break instead of a character, and a bare `<`, `>` or `|`
+//!   sets as `¡`, `¿` or `—`;
+//! - **inline code is `\texttt`, not `\verb`.** `\verb` needs no escaping
+//!   and is illegal inside a command argument, which is where a heading,
+//!   a caption and `alt=` put it; pandoc uses `\texttt` everywhere, so
+//!   this does too. See [`verbatim`];
 //! - a heading carries `\label` so its identifier survives, and pandoc's
 //!   reader takes the identifier from the heading text when there is no
 //!   label — so the two agree either way, and the label is what makes a
@@ -426,25 +427,122 @@ fn inline_to(inline: &Inline, out: &mut String) {
 
 /// Escape the characters LaTeX gives a meaning to.
 ///
-/// Ten of them, in two groups: seven take a backslash, and three have no
-/// backslash form at all. `\\` is a line break, not a backslash, and
-/// `\~`/`\^` are accents waiting for a letter — so those three need their
-/// `\text…` commands, each followed by `{}` so a following space survives.
+/// Seven take a backslash (`# $ % & _ { }`). The rest have no backslash
+/// form: `\\` is a line break rather than a backslash and `\^` is an accent
+/// waiting for a letter, so those need a `\text…` command or a group, each
+/// followed by `{}` so a following space survives. Every spelling here is
+/// pandoc's, probed rather than chosen:
+///
+/// ```sh
+/// printf 'X<Y' | pandoc -f commonmark -t latex   # X\textless Y
+/// ```
+///
+/// The one remaining difference is that pandoc ends a control word with a
+/// space where a letter follows (`\textless Y`) and with `{}` only at the
+/// end of a run; this always writes `{}`, which renders identically.
+/// `COMPATIBILITY.md` records it.
 fn escape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
+    let mut open_word = false;
     for ch in text.chars() {
-        match ch {
-            '#' | '$' | '%' | '&' | '_' | '{' | '}' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            '\\' => out.push_str("\\textbackslash{}"),
-            '~' => out.push_str("\\textasciitilde{}"),
-            '^' => out.push_str("\\textasciicircum{}"),
-            ch => out.push(ch),
+        if open_word {
+            out.push_str(terminator(ch));
         }
+        open_word = escape_char(ch, &mut out);
+    }
+    if open_word {
+        out.push_str("{}");
     }
     out
+}
+
+/// What has to follow a control word so the next character still means
+/// itself — pandoc's rule, probed character by character:
+///
+/// ```sh
+/// printf 'X<Y' | pandoc -f commonmark -t latex   # X\textless Y
+/// printf 'X< Y' | pandoc -f commonmark -t latex  # X\textless{} Y
+/// ```
+///
+/// A space is the cheapest terminator and LaTeX eats it, which is right
+/// before a letter and wrong before a real space — hence `{}` there, and
+/// nothing at all before a character that ends the word by itself.
+fn terminator(next: char) -> &'static str {
+    match next {
+        // A letter would be read as more of the word's name. Not
+        // `is_whitespace` below and `is_alphabetic` here by accident:
+        // a non-breaking space is alphabetic to neither and spells as
+        // `~`, which needs nothing.
+        ch if ch.is_alphabetic() => " ",
+        ' ' | '\t' | '\n' | '\r' => "{}",
+        _ => "",
+    }
+}
+
+/// One character, escaped. Returns whether what it wrote ends in a
+/// control word, which [`escape`] then terminates. Shared with
+/// [`verbatim`], which adds two rules of its own rather than keeping a
+/// second copy of these.
+fn escape_char(ch: char, out: &mut String) -> bool {
+    match ch {
+        '#' | '$' | '%' | '&' | '_' | '{' | '}' => {
+            out.push('\\');
+            out.push(ch);
+            false
+        }
+        '\\' => {
+            out.push_str("\\textbackslash");
+            true
+        }
+        '~' => {
+            out.push_str("\\textasciitilde");
+            true
+        }
+        // `\^` is a control *symbol*, not a word: nothing runs into it, so
+        // it takes the `{}` unconditionally — an accent with no letter
+        // under it is what the group is for.
+        '^' => {
+            out.push_str("\\^{}");
+            false
+        }
+        // Rendering bugs rather than byte differences: with the default
+        // font encoding a bare `<`, `>` and `|` set as `¡`, `¿` and `—`,
+        // so text saying `a < b` came out saying something else.
+        '<' => {
+            out.push_str("\\textless");
+            true
+        }
+        '>' => {
+            out.push_str("\\textgreater");
+            true
+        }
+        '|' => {
+            out.push_str("\\textbar");
+            true
+        }
+        '\'' => {
+            out.push_str("\\textquotesingle");
+            true
+        }
+        // Braced so the bracket cannot be read as the optional argument
+        // of whatever command precedes it.
+        '[' => {
+            out.push_str("{[}");
+            false
+        }
+        ']' => {
+            out.push_str("{]}");
+            false
+        }
+        '\u{a0}' => {
+            out.push('~');
+            false
+        }
+        ch => {
+            out.push(ch);
+            false
+        }
+    }
 }
 
 /// A URL inside `\href` or `\includegraphics`.
@@ -466,25 +564,43 @@ fn escape_url(url: &str) -> String {
     out
 }
 
-/// Inline code, as `\verb` with a delimiter the code does not contain.
+/// Inline code, written the way pandoc writes it: `\texttt` with an
+/// argument escaped so that it still reads back as the same characters.
 ///
-/// `\texttt` would escape its argument, which is the one thing code must
-/// not have done to it. `\verb` takes *any* non-letter delimiter, so the
-/// writer picks one that is absent rather than assuming `|` and emitting
-/// something that does not compile the moment a pipe appears.
+/// This was `\verb` with a delimiter chosen to avoid the content, which
+/// looks like the better answer and is illegal in exactly the place a
+/// document puts code: **`\verb` cannot appear inside a command
+/// argument.** A heading holding a code span produced
+/// `\subsubsection{… \verb|code| …}` and stopped `pdflatex` with
+/// "\verb illegal in argument" — `corpus/headings-deep.md` does it, and
+/// CI had been failing on it. Captions, `\href` text and `alt=` are the
+/// same. Pandoc uses `\texttt` in every position, so following it removes
+/// the failure and a divergence together.
+///
+/// Two characters are escaped here that plain text leaves alone, both
+/// probed with `pandoc -f json -t latex`: a space becomes `\ ` so runs of
+/// them survive, and a backtick becomes `\textasciigrave{}` so it cannot
+/// pair with another into a typographic quote.
 fn verbatim(code: &str) -> String {
-    // A newline cannot appear inside `\verb` at all; a code span holding
-    // one is written as escaped text instead, which typesets correctly
-    // even though it is no longer verbatim.
-    if code.contains('\n') {
-        return format!("\\texttt{{{}}}", escape(code));
-    }
-    for delimiter in ['|', '!', '+', '@', '^', '*', '?', '=', '~'] {
-        if !code.contains(delimiter) {
-            return format!("\\verb{delimiter}{code}{delimiter}");
+    let mut out = String::with_capacity(code.len() + 8);
+    out.push_str("\\texttt{");
+    for ch in code.chars() {
+        match ch {
+            ' ' => out.push_str("\\ "),
+            '`' => out.push_str("\\textasciigrave{}"),
+            // Always `{}` here, never the space [`escape`] would use: a
+            // space inside `\texttt` is a space in the output, so pandoc
+            // writes `\textless{}p` where running text has
+            // `\textless p`. Probed, not assumed.
+            ch => {
+                if escape_char(ch, &mut out) {
+                    out.push_str("{}");
+                }
+            }
         }
     }
-    format!("\\texttt{{{}}}", escape(code))
+    out.push('}');
+    out
 }
 
 /// A metadata value as plain text for the preamble.
@@ -584,15 +700,23 @@ mod tests {
         // is a line break, and `\~`/`\^` are accents waiting for a letter.
         // Escaping those three the obvious way produces LaTeX that either
         // fails to compile or typesets something else.
-        let text = r"# $ % & _ { } \ ~ ^";
+        let text = r"# $ % & _ { } \ ~ ^ < > | ' [ ]";
         let latex = write_latex(&doc(vec![Block::Para(vec![Inline::Str(text.into())])]));
         well_formed(&latex).expect("balanced");
         for forbidden in ["\\\\ ", "\\~ ", "\\^ "] {
             assert!(!latex.contains(forbidden), "{forbidden:?} in {latex}");
         }
-        assert!(latex.contains("\\textbackslash{}"), "{latex}");
-        assert!(latex.contains("\\textasciitilde{}"), "{latex}");
-        assert!(latex.contains("\\textasciicircum{}"), "{latex}");
+        // Every spelling here is what `pandoc -f json -t latex` writes for
+        // the same character; `<`, `>` and `|` are the three that set as a
+        // different glyph rather than merely differing in bytes.
+        for expected in [
+            "\\#", "\\$", "\\%", "\\&", "\\_", "\\{", "\\}",
+            "\\textbackslash{}", "\\textasciitilde{}", "\\^{}",
+            "\\textless{}", "\\textgreater{}", "\\textbar{}",
+            "\\textquotesingle{}", "{[}", "{]}",
+        ] {
+            assert!(latex.contains(expected), "{expected:?} missing from {latex}");
+        }
     }
 
     #[test]
@@ -623,22 +747,39 @@ mod tests {
     }
 
     #[test]
-    fn inline_code_picks_a_delimiter_the_code_does_not_contain() {
-        // `\verb|...|` is the usual spelling and it stops compiling the
-        // moment the code contains a pipe.
+    fn inline_code_is_texttt_and_legal_inside_an_argument() {
+        // No round trip can see this: pandoc's LaTeX reader gives back
+        // `Code` for `\verb` and for `\texttt` alike, so the gate that
+        // scores this writer is blind to the spelling — and the wrong one
+        // does not compile. Each expectation below is the literal output
+        // of `pandoc -f json -t latex` on the same `Code` inline.
         let code = |text: &str| {
             write_latex(&doc(vec![Block::Para(vec![Inline::Code(
                 Box::default(),
                 text.into(),
             )])]))
         };
-        assert!(code("a|b").contains("\\verb!a|b!"), "{}", code("a|b"));
-        assert!(code("a!b").contains("\\verb|a!b|"), "{}", code("a!b"));
-        // Code containing every candidate falls back to escaped text,
-        // which typesets rather than failing to compile.
-        let awkward = "|!+@^*?=~";
-        assert!(code(awkward).contains("\\texttt"), "{}", code(awkward));
-        well_formed(&code(awkward)).expect("balanced");
+        for (input, expected) in [
+            ("a|b", "\\texttt{a\\textbar{}b}"),
+            ("a  b", "\\texttt{a\\ \\ b}"),
+            ("x\\y", "\\texttt{x\\textbackslash{}y}"),
+            ("a_b", "\\texttt{a\\_b}"),
+            ("`t`", "\\texttt{\\textasciigrave{}t\\textasciigrave{}}"),
+            ("<p>", "\\texttt{\\textless{}p\\textgreater{}}"),
+        ] {
+            assert!(code(input).contains(expected), "{expected:?} for {input:?} in {}", code(input));
+            well_formed(&code(input)).expect("balanced");
+        }
+        // The failure this replaced: a code span inside a heading is
+        // inside a command argument, where `\verb` is illegal and
+        // `pdflatex` stops. `corpus/headings-deep.md` has one.
+        let heading = write_latex(&doc(vec![Block::Header(
+            3,
+            Attr::default(),
+            vec![Inline::Code(Box::default(), "code".into())],
+        )]));
+        assert!(!heading.contains("\\verb"), "{heading}");
+        assert!(heading.contains("\\subsubsection{\\texttt{code}}"), "{heading}");
     }
 
     #[test]

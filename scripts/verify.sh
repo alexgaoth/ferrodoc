@@ -109,6 +109,13 @@ fi
 if [ "$want_gates" = 1 ] || [ "$want_fuzz" = 1 ] || [ "$want_limits" = 1 ]; then
     cargo build --quiet --release -p ferrodoc-harness
 fi
+# `compare-toc.sh` drives the CLI rather than the harness, and refuses to
+# guess when it is missing. Locally the binary is always lying about from
+# other work, so the gate passed here and failed on every runner for two
+# days — build it rather than depend on a leftover.
+if [ "$want_gates" = 1 ]; then
+    cargo build --quiet --release -p ferrodoc
+fi
 
 if [ "$want_limits" = 1 ]; then
     echo "== resource limits"

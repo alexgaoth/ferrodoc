@@ -741,8 +741,23 @@ harness prints `pandoc round-trips 0/11` beside our score.
 An oracle that scores zero cannot set a floor for us, so there is none.
 What decides this writer instead: CI compiles every corpus document with
 `pdflatex -halt-on-error`, and each rule a round trip cannot observe has a
-literal-output test — `\tightlist`, the `\verb` delimiter search, and the
-`enumerate` styles.
+literal-output test — `\tightlist`, the escaping of text and of code, and
+the `enumerate` styles.
+
+**Escaping is byte-identical to pandoc's**, which is checkable directly
+because pandoc writes LaTeX from the same AST:
+
+```sh
+printf "A \`a  b\`, \`<p>\`, \`a|b\` and a < b with a 'quote'.\n" > /tmp/e.md
+diff <(pandoc /tmp/e.md -f commonmark -t latex --wrap=none) \
+     <(ferrodoc /tmp/e.md -f commonmark -t latex)   # no output
+```
+
+Two differences remain and both render identically: pandoc turns `—`,
+`–` and `…` into the TeX ligatures `---`, `--` and `\ldots`, and its
+`\href`/heading forms differ (`\texorpdfstring`, `\label`). Inline code
+was `\verb` until 2026-08-22, which is illegal inside a command argument
+and stopped `pdflatex` on any heading containing a code span.
 
 ### The write-only formats — judged by their toolchains, not by pandoc
 

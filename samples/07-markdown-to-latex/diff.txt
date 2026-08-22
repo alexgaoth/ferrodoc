@@ -1,5 +1,5 @@
---- samples/07-markdown-to-latex/pandoc.tex	2026-08-19 16:45:12.695554619 -0700
-+++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-19 16:45:12.439712519 -0700
+--- samples/07-markdown-to-latex/pandoc.tex	2026-08-22 16:11:04.615267613 -0700
++++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-22 16:11:04.372268179 -0700
 @@ -1,129 +1,17 @@
 -% Options for packages loaded elsewhere
 -\PassOptionsToPackage{unicode}{hyperref}
@@ -195,9 +195,9 @@
 +\tightlist
  \item
 -  Spot-check 1 \% of the output by hand.
-+\verb|.docx| and \verb|.odt| to markdown for the index
++\texttt{.docx} and \texttt{.odt} to markdown for the index
 +\item
-+markdown back to \verb|.docx| for anyone who needs to edit in Word
++markdown back to \texttt{.docx} for anyone who needs to edit in Word
 +\end{itemize}
 +\item
 +Spot-check 1 \% of the output by hand.
@@ -258,14 +258,13 @@
  \subsection{Awkward cases, on purpose}\label{awkward-cases-on-purpose}
  
 -Inline code with special characters: \texttt{a\ \textbar{}\ b}, \texttt{\textless{}div\textgreater{}}, \texttt{-\/-flag}, and a
--literal backtick: \texttt{\textasciigrave{}}.
-+Inline code with special characters: \verb!a | b!, \verb|<div>|, \verb|--flag|, and a
-+literal backtick: \verb|`|.
++Inline code with special characters: \texttt{a\ \textbar{}\ b}, \texttt{\textless{}div\textgreater{}}, \texttt{--flag}, and a
+ literal backtick: \texttt{\textasciigrave{}}.
  
 -Text with entities \& symbols --- an em dash, "curly quotes", an
 -ellipsis\ldots, a non-breaking~space, and unicode: café, naïve, Ω, 日本語.
 +Text with entities \& symbols — an em dash, "curly quotes", an
-+ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
++ellipsis…, a non-breaking~space, and unicode: café, naïve, Ω, 日本語.
  
 -\st{Struck-through text} and text with a footnote.\footnote{Footnote bodies can contain \textbf{formatting} and a
 -  \href{https://example.com}{link}.}
@@ -275,11 +274,10 @@
  Five inlines no writer test used to reach through this file: underlined
  text, small caps, a
  span carrying an id and a class, and
--H2O beside E=mc2. They are here because \texttt{docs/gates.md}
+ H2O beside E=mc2. They are here because \texttt{docs/gates.md}
 -claims \texttt{-\/-samples} keeps them found, and until this paragraph existed no
 -sample document contained one --- the claim was wider than the corpus behind
-+H2O beside E=mc2. They are here because \verb|docs/gates.md|
-+claims \verb|--samples| keeps them found, and until this paragraph existed no
++claims \texttt{--samples} keeps them found, and until this paragraph existed no
 +sample document contained one — the claim was wider than the corpus behind
  it, which is the defect this file is supposed to catch.
  
@@ -317,7 +315,7 @@
  \subsection{Sign-off}\label{sign-off}
  
 -Contact \href{mailto:ops@example.com}{\nolinkurl{ops@example.com}} with questions. See the \texttt{LICENSE} file for
-+Contact \href{mailto:ops@example.com}{ops@example.com} with questions. See the \verb|LICENSE| file for
++Contact \href{mailto:ops@example.com}{ops@example.com} with questions. See the \texttt{LICENSE} file for
  terms.
 -
  \end{document}
