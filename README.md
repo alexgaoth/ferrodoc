@@ -331,8 +331,9 @@ cargo build --release --target wasm32-unknown-unknown \
   `--no-default-features --features markdown,html` takes the wasm module to
   **60%** of its gzipped size and the CLI binary to 61% of its own. The
   ratio is the claim and the byte count illustrates it: the CLI is
-  reproducible to the byte in a given checkout, and the wasm module varies
-  by about 0.03% with the build path. Both are re-derived by
+  reproducible to the byte in one checkout with one toolchain but 0.7%
+  smaller on a CI runner, and the wasm module varies by about 0.03% with
+  the build path. Both are re-derived by
   `./scripts/claims.sh --sizes`, which fails when either ratio moves by a
   point or any artefact grows more than 5% — this paragraph had drifted
   1.4% before that existed. A trimmed build cannot quietly do less than it says: `--help` lists

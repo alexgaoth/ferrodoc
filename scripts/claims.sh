@@ -165,6 +165,25 @@ gzipped() { gzip -c "$1" | wc -c; }
 # would depend on the locale, and CI runs in C.
 commas() { printf '%s' "$1" | sed -e ':a' -e 's/\B[0-9]\{3\}\>/,&/;ta'; }
 
+# A percentage README publishes, against the one just derived. One point
+# of slack, which is the rounding, and no more.
+point() {
+    local what="$1" derived="$2" said="$3"
+    checked=$((checked + 1))
+    if [ -z "$said" ]; then
+        printf '  MISSING  %-29s README.md publishes no percentage\n' "$what"
+        failures=$((failures + 1))
+        return
+    fi
+    local off=$(( derived > said ? derived - said : said - derived ))
+    if [ "$off" -le 1 ]; then
+        printf '  %-38s %11s%%  (README says %s%%)\n' "$what" "$derived" "$said"
+    else
+        printf '  DRIFTED  %-29s %11s%%  (README says %s%%)\n' "$what" "$derived" "$said"
+        failures=$((failures + 1))
+    fi
+}
+
 within() {
     local what="$1" derived="$2" published_value="$3" percent="$4"
     checked=$((checked + 1))
@@ -211,20 +230,32 @@ check_sizes() {
     within "wasm, markdown + html"    "$trimmed_wasm"    1176179 5
     within "wasm gzipped, trimmed"    "$trimmed_wasm_gz"  407537 5
 
-    # The CLI is reproducible to the byte in a given checkout, so its two
-    # counts are held to the README text exactly. The wasm module is not —
-    # it moves ~0.03% with the build path — so those four are held to the
-    # bound above and appear in README as illustrations of the ratio.
-    published "$(commas "$cli")" README.md 'bytes, against'
-    published "$(commas "$trimmed_cli")" README.md 'bytes, against'
+    # No exact check on any byte count. The CLI is reproducible to the
+    # byte in one checkout with one toolchain and **not across machines**:
+    # this ran 0.68% smaller on a CI runner than on the machine the
+    # figures were taken on, which is a fact about linkers, not a drift.
+    # The counts in README illustrate; the bound above is what gates.
 
     # The ratios are what README claims; the byte counts illustrate them.
     local cli_ratio wasm_ratio
     cli_ratio=$(awk -v a="$trimmed_cli" -v b="$cli" 'BEGIN { printf "%.0f", a * 100 / b }')
     wasm_ratio=$(awk -v a="$trimmed_wasm_gz" -v b="$wasm_gz" 'BEGIN { printf "%.0f", a * 100 / b }')
-    local sentence='of its gzipped size and the CLI binary to'
-    published "**${wasm_ratio}%** of its gzipped size" README.md "$sentence"
-    published "to ${cli_ratio}% of its own" README.md "$sentence"
+    # The ratios are the claim, so they are compared as numbers rather
+    # than as text: matching the printed string would turn 59.7% into a
+    # failure or a pass depending on which side of a rounding boundary a
+    # runner landed.
+    local sentence='of its gzipped size and the CLI binary to' line
+    line=$(grep -F -- "$sentence" README.md || true)
+    if [ -z "$line" ]; then
+        printf '  MISSING  %-34s no line matching "%s"\n' README.md "$sentence"
+        failures=$((failures + 1)); checked=$((checked + 1))
+        return
+    fi
+    local said_wasm said_cli
+    said_wasm=$(printf '%s' "$line" | grep -oE '\*\*[0-9]+%\*\*' | tr -dc 0-9)
+    said_cli=$(printf '%s' "$line" | grep -oE 'to [0-9]+% of its own' | tr -dc 0-9)
+    point "wasm gzipped, trimmed / full" "$wasm_ratio" "$said_wasm"
+    point "CLI trimmed / full"           "$cli_ratio"  "$said_cli"
 }
 
 case "${1-}" in
