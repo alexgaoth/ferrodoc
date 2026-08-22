@@ -72,253 +72,262 @@ write the decision needed, and stop. The next card starts from that evidence.
 Cards below are the initial queue; a real user failure may pre-empt a lower
 priority card under the selection rules above.
 
-## The release sequence
+## What "indistinguishable from pandoc" can and cannot mean
 
-### Phase 0 — Make 0.2 reachable
+The target for 1.0 is a converter someone can put where pandoc is and not
+notice, except that it is faster, smaller and embeddable. That is worth
+stating precisely, because stated loosely it is a claim no version could
+ever satisfy.
 
-The code and packages are versioned at 0.2.0. The release is not complete
-until every advertised install command resolves from its public registry,
-rather than only from a CI artifact or a repository checkout.
+**It cannot mean every format.** Pandoc reads 48 formats and writes 69;
+ferrodoc reads 9 and writes 13. Closing that is neither achievable nor
+desirable — the arithmetic is in this repository's own notes, and the short
+version is that a converter's value here is that every format it does have
+is checked against pandoc document by document. Adding formats without
+oracles trades the only defensible property for a larger number.
 
-- Publish the workspace crates in dependency order and tag the release.
-- Publish the Python wheel through trusted publishing after the release is
-  approved.
-- Publish the npm WASM tarball with provenance after the release is approved.
-- Attach the static CLI archives and the *actual* WASM package to the GitHub
-  release; never ship the filesystem-less CLI wasm stub as the browser module.
-- Correct package metadata whenever formats change: crate, PyPI, npm, C
-  header, README, and `--version` must agree on the same release.
-- Test a fresh public install on Linux, macOS, and Windows, then run one
-  conversion through the installed artifact. Building an artifact is not an
-  installation test.
+**It cannot mean copying pandoc where pandoc is wrong.** Three current
+divergences are deliberate and stay: this writer will not emit an EPUB
+reference the book cannot satisfy (`epubcheck` rejects pandoc's book for
+exactly that), it will not reproduce a parse failure that `tagsoup` produces
+and `html5ever` does not, and it refuses a YAML metadata block it cannot read
+exactly rather than guessing at the title.
 
-#### Initial execution cards
+**So the 1.0 claim is scoped, and the scope is the point:**
 
-| Card | Scope and deliverable | Verify and done | Not this card |
-|---|---|---|---|
-| R0.1 — release inventory | Audit version/tag/package names and release workflow inputs; add a checked release checklist if one is missing. | `cargo package --allow-dirty` for every publishable crate, `npm pack`, and `maturin build`; all artifacts report 0.2.0 and contain their expected entrypoint. | Publishing anything. |
-| R0.2 — artifact smoke tests | Make release CI install the wheel and npm tarball from the release-built artifacts, not the source tree. | Fresh temporary Python and npm projects import the installed package and convert Markdown to HTML. | Registry publishing or API additions. |
-| R0.3 — registry release | Owner publishes the approved release and records the immutable tag/release URL. | A clean machine resolves the three install commands in the Phase 0 criteria. | Changing converter behavior to make a release feel larger. |
+> For the formats ferrodoc supports and the command lines its surface
+> covers, `ferrodoc` produces byte-identical output to `pandoc`, or fails
+> loudly saying what it cannot do. Every remaining difference is enumerated,
+> reproducible, and defended. Nothing differs silently.
 
-**Exit criteria**
+That is checkable, and 1.0 is not reachable until it is checked.
 
-```text
-pip install ferrodoc
-npm install ferrodoc
-cargo add ferrodoc@0.2
-```
+### The measurement that decides it: the drop-in corpus
 
-all resolve for the announced version; the installed Python and npm smoke
-tests pass; release assets contain the advertised binary/module; and the
-README no longer asks a user to build a package that it says is published.
+Today's gates score *ASTs and single conversions*. They cannot answer "would
+this user notice". `scripts/dropin.sh` (to be built in 0.4) does:
 
-### Phase 1 — Safe operation in services and browsers
+- a corpus of **real command lines** — the invocations that appear in
+  Makefiles, CI jobs and scripts, not synthetic ones;
+- each run through both binaries against the same documents;
+- output compared **byte for byte**, exit codes and stderr included;
+- one published number, `N/M command lines identical`, with every miss
+  classified as *fixable*, *deliberate*, or *out of surface*.
 
-The current architecture intentionally owns a Pandoc AST. That has a real
-memory floor: on generated prose, the published guard is 80× input size up to
-50 MB, and DOCX-to-markdown is the worst path. That is acceptable only when a
-caller can decide whether to admit a document.
+That number is the 1.0 release criterion. It replaces "feels compatible"
+with a percentage that can fall.
 
-Build a single resource-limits model shared by CLI, Rust, Python, C, and WASM:
+---
 
-- maximum source bytes before parsing;
-- maximum decompressed archive/part bytes and archive-entry count;
-- maximum media bytes retained when a conversion needs media;
-- maximum structural depth, blocks, inlines, tables, and output bytes;
-- a typed, format-aware `ResourceLimit` error that explains which budget was
-  crossed.
+## The version ladder
 
-Defaults must be conservative for a public service and configurable for a
-trusted batch job. They must reject before allocation wherever the format
-makes that possible. ZIP-bomb and giant-media fixtures belong in the corpus.
+Each version states the claim that becomes true, what has to be built, the
+test that decides it, and what it deliberately excludes. Cards from the
+protocol above are the unit of execution inside each.
 
-Then decide whether a second, conversion-only API is warranted. A streaming
-reader into a full AST reduces duplicated XML memory but cannot make a full
-document AST bounded. If users need large DOCX-to-text/HTML conversion in a
-256 MB worker, design an opt-in streaming output path; do not pretend
-`parse() -> Pandoc` can provide that guarantee.
+### 0.3 — Reachable
 
-#### Initial execution cards
+**Claim:** every install command in the README resolves from its public
+registry.
 
-| Card | Scope and deliverable | Verify and done | Not this card |
-|---|---|---|---|
-| S1.1 — budget inventory | Measure source, decompressed-part, media, AST, and output sizes for every archive reader on normal and hostile fixtures. Write the results beside the existing RSS command. | Reproducible harness command prints all five values for DOCX, ODT, EPUB, and ipynb. | Enforcing limits or changing a parser. |
-| S1.2 — facade limit contract | Design and add the smallest Rust `Limits`/`ResourceLimit` surface, initially enforcing source bytes before parsing. | Unit tests show over-limit input returns the typed error; existing facade tests and `scripts/verify.sh --quick` pass. | Archive accounting or binding plumbing. |
-| S1.3 — archive admission | Apply entry-count and decompressed-byte budgets to DOCX, ODT, and EPUB before their content is retained. Add a zip-bomb-shaped fixture. | Each reader rejects its fixture with `ResourceLimit`; fuzz and reader gates still pass. | A full streaming writer. |
-| S1.4 — surface parity | Carry the approved limits through CLI, Python, C, and WASM without changing their successful conversion behavior. | One limit-exceeded test per surface; binding checks (`--wasm`, `--c`, wheel tests) pass. | New binding APIs beyond limit configuration. |
-| S1.5 — streaming decision spike | Prototype or measure one large DOCX-to-text path without a full AST, then write a decision. | RSS and output-equivalence measurements answer whether a streaming API earns a design phase. | Shipping a partial streaming API. |
+The code is already at 0.2.0 and the dry run is clean; nothing here is a
+converter change. This version exists because an unpublished binding
+multiplies by zero, and because the repository currently advertises two
+commands that 404.
 
-**Exit criteria**
+- Publish crates.io **first** — `bindings/python` resolves `ferrodoc` from
+  there, so the release cannot precede it.
+- PyPI via trusted publishing; npm with `--provenance`; the *real* WASM
+  module attached, never the filesystem-less CLI stub.
+- **Migration notes for 0.1 → 0.2 ship with this release, not later.**
+  `write_html_standalone` and `render_html_standalone` both changed shape.
+  A break published without its note is a break twice.
+- Every published number gets a command, and CI runs them. This project's
+  most frequent defect is a claim wider than its evidence — seven such bugs
+  in one week — and nothing currently gates the claim surface.
 
-- Limits have the same semantics in every binding.
-- Exceeding one returns a recoverable error, never a panic, OOM kill, or
-  partially successful document.
-- `bench-rss` has a CI bound for each supported conversion family.
-- The documentation gives a supported size/memory envelope rather than only a
-  benchmark ratio.
+**Exit test:** on a clean Linux, macOS and Windows machine, `pip install
+ferrodoc`, `npm install ferrodoc` and `cargo add ferrodoc` each resolve, and
+one conversion runs through each installed artefact. Building is not
+installing.
 
-### Phase 2 — Trustworthy common-path fidelity
+**Not this version:** any new flag, format or converter behaviour.
 
-Ferrodoc should improve the supported paths it already has before adding a
-new one. The current differential scores in `COMPATIBILITY.md` are floors,
-not goals. Fixes are selected by impact and by whether they reproduce a
-well-formed, non-deliberate semantic rule.
+### 0.4 — Drop-in command line
 
-Priority order:
+**Claim:** a pandoc command line either produces identical bytes or fails
+loudly naming what it cannot do. It never produces *different* bytes
+silently.
 
-1. **Dialects that are named in the interface.** Keep CommonMark, GFM, and
-   `pandoc_markdown` explicit; never silently treat a `.md` file as a wider
-   dialect. Expand each dialect's corpus around metadata, attributes,
-   footnotes, definition lists, tables, task lists, and math.
-2. **EPUB's HTML mode.** EPUB content needs an explicit raw-HTML policy that
-   can match pandoc's EPUB reader without weakening the standalone HTML
-   reader. The existing divergence census identifies this as the largest
-   actionable family.
-3. **Office document semantics.** Address non-deliberate DOCX and ODT corpus
-   gaps, beginning with lists inside table cells and the remaining nested
-   writer case. Add files made by Word/LibreOffice as well as pandoc.
-4. **HTML well-formed input.** Fix whitespace, CDATA, processing-instruction,
-   and sectioning rules where pandoc has a stable rule. Preserve documented
-   deliberate differences for malformed tags unless a user case justifies a
-   policy change.
-5. **Output validity before byte parity.** EPUB stays valid under `epubcheck`,
-   LaTeX compiles, RST is accepted by Sphinx, AsciiDoc is accepted by
-   Asciidoctor, notebooks pass `nbformat`, and DOCX/ODT open in independent
-   office software. Do not raise a pandoc-parity score by emitting a document
-   its native consumer rejects.
+This is the version that makes the 1.0 claim measurable, and it is where the
+deliberate CLI divergences have to be settled rather than defended
+indefinitely:
 
-#### Initial execution cards
+- `--wrap` currently defaults to `preserve` where pandoc fills at 72. That
+  default was chosen so a migration diff is readable, which was right while
+  migrating. **Decide it as a compatibility question**: either match pandoc
+  and keep the readable-diff behaviour behind a flag, or keep it and treat
+  every wrapped output as a known, counted difference.
+- `-f markdown` means CommonMark here and pandoc-markdown there. The dialect
+  now exists as `pandoc_markdown`; decide whether `markdown` aliases it,
+  with the same reasoning.
+- `+ext-ext` syntax is refused by name today. Refusal is honest; **accepting
+  the extensions the three dialects actually implement** is the drop-in step.
+- The flags a real Makefile breaks on that are not yet present:
+  `--defaults`, `--resource-path`, `--data-dir`, `--eol`, `--ascii`,
+  `--strip-comments`, `--shift-heading-level-by`, `--id-prefix`,
+  `--fail-if-warnings`, `--quiet`/`--verbose`/`--log`.
+- Unknown flags fail with a message naming the flag and whether it is
+  unimplemented or out of scope. Silence is the failure mode being removed.
 
-| Card | Scope and deliverable | Verify and done | Not this card |
-|---|---|---|---|
-| F2.1 — EPUB raw-HTML contract | Probe pandoc's EPUB reader and define the smallest internal HTML-read mode needed for raw HTML. Add only fixtures and a design note. | The fixtures demonstrate the mode difference and `diff-epub` failures are classified one by one. | Changing standalone HTML behavior. |
-| F2.2 — EPUB raw-HTML implementation | Thread the approved mode through EPUB content parsing and preserve raw nodes only on that path. | `diff-epub` improves on the fixtures; `diff-html-read`, `epubcheck`, and samples do not regress. | Fixing unrelated malformed-HTML differences. |
-| F2.3 — one office mismatch | Fix exactly one non-deliberate DOCX or ODT mismatch, beginning with the table-cell list or nested writer case. | Its named corpus document matches pandoc or gains a deliberate-difference entry with evidence. | General office style preservation. |
-| F2.4 — dialect edge family | Add and fix one named Markdown/GFM/pandoc-markdown family (for example entity spaces or refdef-dash runs). | The corpus denominator grows and the relevant differential gate remains at its floor or rises. | Automatic dialect detection. |
-| F2.5 — divergence census refresh | Re-run the census and reconcile `COMPATIBILITY.md`, `docs/divergences.md`, gates, and fixtures. | Every sub-100 score has a current, reproducible classification. | Changing behavior solely to raise a percentage. |
+**Exit test:** `scripts/dropin.sh` exists, is wired into `verify.sh`, and
+publishes its number. Every miss is classified. No miss is "different
+output, no message".
 
-**Exit criteria**
+**Not this version:** templates, citations, highlighting.
 
-- Every remaining divergence is classified as fixed, deliberately different,
-  a format limitation, or blocked on a design decision.
-- Every classification has a repro and a test; the divergence census and
-  compatibility table agree.
-- A real document used to expose a bug becomes a minimized fixture without
-  losing the relevant shape.
+### 0.5 — Templates, variables and standalone parity
 
-### Phase 3 — Optimize the workloads that matter
+**Claim:** `-s` output is pandoc's, and a user's own template works.
 
-The benchmark story is already unusually strong. Preserve it by optimizing
-only after profiling a conversion path that users run, not a loop in
-isolation.
+Standalone output is where "indistinguishable" is most visible and where
+ferrodoc is currently furthest away: one fixed page shape against pandoc's
+template language. Without this a large class of documentation and
+publishing pipelines cannot move at all.
 
-The next investigation is **large DOCX read performance**. It is linear in
-document structure but grows superlinearly per byte because a large document
-creates many live AST allocations. Measure allocation count and retained
-memory before changing representation; the prior DOM-streaming work proved
-that removing a full tree can improve both time and memory.
+- `--template`, `-V`/`--variable`, `--include-in-header`,
+  `--include-before-body`, `--include-after-body`, `--title-prefix`.
+- The default templates for the standalone formats, matching pandoc's.
+- `--reference-doc` for DOCX and ODT, which is how organisations apply their
+  own styles and the single most common reason a team cannot switch.
 
-Possible outcomes, in preferred order:
+**Exit test:** pandoc's own default template, fed to both binaries with the
+same document and variables, produces identical bytes; a third-party
+template from the wild does too.
 
-1. eliminate an identified repeated allocation, copy, or traversal;
-2. retain fewer intermediate values when the requested output does not need
-   them;
-3. add an opt-in streaming conversion path for constrained services;
-4. leave the AST representation alone when a proposed change would weaken
-   standalone serialization, safety, or the public Rust API for a marginal
-   gain.
+**Not this version:** the full pandoc template language if it proves to need
+a general interpreter — in that case, state the subset and refuse the rest
+by name.
 
-Maintain workload benchmarks for tiny single documents, realistic office
-documents, multi-document batches, and 1/10/25/50 MB generated inputs. Track
-latency, throughput, peak RSS, binary/module size, and output validity. Keep
-the comparison honest: subprocess cost is a real advantage for Python/Node
-pipelines, but it is not a claim that the parser alone is 72× faster.
+### 0.6 — Fidelity closure on the supported square
 
-#### Initial execution cards
+**Claim:** every gate is at 100%, or its gap is enumerated, reproducible and
+defended. No unclassified difference remains.
 
-| Card | Scope and deliverable | Verify and done | Not this card |
-|---|---|---|---|
-| P3.1 — allocation profile | Profile 1/10/25/50 MB DOCX reads and attribute retained allocation count/bytes to concrete structures. Commit the command and findings. | A second run reaches the same diagnosis within normal timing variance. | Optimization. |
-| P3.2 — one measured allocation fix | Remove one identified repeated allocation/copy/traversal and add a regression case if it was algorithmic. | Interleaved baseline shows improvement at two sizes; `bench-rss` and all gates remain within bounds. | Reformatting code or speculative preallocation. |
-| P3.3 — output-only retention study | Measure the memory saved by not retaining media or AST data that a selected output cannot use. | Equivalence and RSS results decide whether an opt-in API is justified. | Altering `parse() -> Pandoc`. |
+The current floors are not goals; several are one bug away from 100 and
+several encode real pandoc limitations. This version ends the ambiguity
+between them.
 
-**Exit criteria**
+| gate | now | 0.6 |
+|---|---|---|
+| `diff-html-read` | 635/661 | every miss fixed or in the divergence table with a repro |
+| `diff-epub` | 10/12 | the raw-HTML mode decided, so the two are fixed or declared unreachable |
+| `diff-epub-write` | 8/11 | the three deliberate cases stated as the whole remainder |
+| `diff-docx` / `diff-odt` | 36/37, 32/34 | the non-deliberate misses fixed |
+| EPUB spec chunks | 8/22 | resolved by the raw-HTML decision, or the gate retired as measuring the wrong thing |
+| `scripts/sweep-epub-xhtml.sh` | 77 of 128 differ | **zero unrecorded**, which is the real number for the HTML reader |
 
-- Any performance change names the workload, baseline, architecture, and
-  measurement method.
-- No path crosses its published RSS bound.
-- A claimed large-document improvement is measured at more than one input
-  size and against an interleaved baseline.
+**Exit test:** the sweep reports no divergence outside the recorded set, and
+`docs/divergences.md` and `COMPATIBILITY.md` agree with the gates.
 
-### Phase 4 — Stable embedding surfaces
+**Not this version:** new formats, performance work.
 
-The Rust facade is the semantic source of truth. The bindings should remain
-thin adapters over it rather than forks with separate conversion behavior.
+### 0.7 — Syntax highlighting
 
-- **Rust:** preserve feature selection, explicit media handling, and typed
-  errors. Add options as new types/functions rather than turning every simple
-  conversion into a mandatory builder.
-- **Python:** keep `convert` simple; add a richer API only when users need
-  transformations that the JSON AST route cannot express. Keep GIL release,
-  exceptions that survive process boundaries, type stubs, and abi3 support.
-- **WASM/npm:** keep browser, Node, and edge tests separate. Enforce no
-  network/document upload as part of the browser test, free every handle on
-  both success and failure, and publish only the tested tarball.
-- **C ABI:** version the ABI independently, preserve allocation/free rules,
-  test malformed input and foreign-language ownership, and keep valgrind (or
-  an equivalent) in the release checks.
-- **CLI:** grow only high-value programmatic controls: explicit format and
-  dialect choice, resource limits, media extraction, wrapping, metadata, TOC,
-  and reproducible diagnostics. It is not a mandate to clone pandoc's hundred
-  flags.
+**Claim:** highlighted output matches pandoc's, or highlighting is off by an
+explicit flag on both sides.
 
-#### Initial execution cards
+Pandoc highlights code by default; ferrodoc does not, and `diff-html`'s
+652/652 is measured with `--syntax-highlighting=none` passed to pandoc. That
+is disclosed and honest, and it is also the most visible difference a user
+sees on their first conversion of a README.
 
-| Card | Scope and deliverable | Verify and done | Not this card |
-|---|---|---|---|
-| A4.1 — capability matrix | Generate or test the formats and feature-gated errors visible through Rust, CLI, Python, C, and WASM. | The same unavailable format produces a clear, format-specific error on every applicable surface. | Adding a new format. |
-| A4.2 — binding contract test | Add one cross-language conversion fixture that covers text, binary output, invalid input, and media where the surface exposes it. | Rust result is the expected reference; Python, C, and WASM results match it. | Rich AST classes or asynchronous APIs. |
-| A4.3 — semver release review | Inventory public Rust, C, Python, and TypeScript symbols before a release and write migration notes for any break. | A reviewer can identify every externally visible change from the release note alone. | Compatibility shims without an actual user need. |
+- The `skylighting` token model, or a defensible subset with the languages
+  named and the rest degrading to a plain code block.
+- `--highlight-style`, `--no-highlight`, `--syntax-highlighting`.
+- The size cost measured before it is accepted: a highlighter with 163
+  language definitions is exactly the kind of dependency the wasm bundle
+  cannot silently absorb. Feature-gate it.
 
-**Exit criteria**
+**Exit test:** `diff-html` runs **without** `--syntax-highlighting=none` and
+holds its floor.
 
-- Every public surface can perform the same supported conversions and reports
-  unavailable feature-gated formats clearly.
-- A release installs and smoke-tests every advertised binding from its public
-  package, not from the source tree.
-- API additions follow semver and include migration notes when a major change
-  is unavoidable.
+**Not this version:** `--listings`, KaTeX/MathJax/MathML output modes.
 
-### Phase 5 — User-led scope, not format accumulation
+### 0.8 — The resource contract
 
-No new format is automatically next. A candidate enters a design phase only
-when all of these are true:
+**Claim:** every surface enforces the same limits and reports the same typed
+error, and the published bound holds for every supported conversion.
 
-1. a target user has a workflow blocked by it;
-2. the Pandoc AST can represent the semantic result without inventing a
-   private shadow model;
-3. there is a differential oracle or native validator and a corpus from more
-   than one producer;
-4. its dependency, binary-size, WASM, memory, and security costs are stated;
-5. it can be feature-gated if it materially enlarges the default build.
+This work was drafted as the second thing to build, and is moved after the
+embedders who need it. Rule 3 of this file says a measured production limit
+outranks a speculative one; by 0.8 there are installed users to measure.
 
-Potential future work, explicitly **not commitments**:
+- Source bytes, decompressed archive bytes and entry count, retained media,
+  structural depth, output bytes.
+- A typed `ResourceLimit` naming the budget crossed, identical in Rust,
+  CLI, Python, C and WASM.
+- Zip-bomb and giant-media fixtures in the corpus; rejection before
+  allocation wherever the format permits it.
+- The streaming decision made and written down, either way.
 
-- an optional PDF-output crate or feature, only with a rendering oracle and
-  without making every converter pay for a typesetter;
-- deeper EPUB/office preservation requested by real migration workloads;
-- narrowly scoped writer improvements for a format that already has a reader.
+**Exit test:** every binding returns the same error for the same over-limit
+input; `bench-rss` has a CI bound per conversion family; the documentation
+states a size envelope, not only a ratio.
 
-PDF input/OCR, citations and bibliography processing, templates, Lua filters,
-presentations, macro-expanding LaTeX input, static-site generation, reviewer
-workflows, and pixel-perfect office layout remain outside this roadmap.
+**Not this version:** a partial streaming API shipped to meet a date.
 
-#### Initial execution cards
+### 0.9 — The scope decision, and the last gap
 
-| Card | Scope and deliverable | Verify and done | Not this card |
-|---|---|---|---|
-| N5.1 — candidate intake | Record one user-blocked workflow, two representative documents, its producer, and its desired output. | The documents reproduce locally and are classified as a bug, configuration gap, or missing capability. | Implementing the requested format immediately. |
-| N5.2 — format design gate | For one candidate capability, write its AST mapping, oracle/validator, corpus plan, feature/dependency cost, and resource risk. | All five Phase 5 entry conditions are answered; maintainers explicitly accept or reject it. | Starting implementation before the gate passes. |
+**Claim:** what 1.0 does not do is written down and defended, not left
+implied.
+
+One item decides how wide "indistinguishable" reaches, and it is a decision
+rather than a task:
+
+> **Citations.** CSL processing plus five bibliography readers is, by this
+> repository's own estimate, the size of everything built so far. Including
+> it makes ferrodoc a drop-in for the academic pipelines that are a large
+> share of pandoc's users. Excluding it makes 1.0 reachable and honest, with
+> citations the single named exception.
+>
+> **Recommendation: exclude, and say so in the 1.0 claim.** Ship it as 1.1
+> if the drop-in corpus shows real command lines failing on `--citeproc`.
+> The claim "indistinguishable for document conversion; citations are the
+> named exception" is one a user can act on. "Indistinguishable" with an
+> unstated hole is the kind of claim this project spends its time deleting.
+
+Lua filters are excluded by the same reasoning, with the JSON AST as the
+supported escape hatch — `-t json | your-filter | -f json` works today and
+covers what most filters do.
+
+**Exit test:** the exclusion list is in the README, each entry with the
+workaround if one exists.
+
+### 1.0 — Indistinguishable, on a scope that is written down
+
+**Claim:** the sentence at the top of this section, with a number behind it.
+
+**Exit test — all of these, or it is not 1.0:**
+
+- the drop-in corpus is **≥ 95% byte-identical**, and every miss is
+  classified *deliberate* or *out of surface* — none is *fixable*;
+- every differential gate is at its stated floor or above, and every gap
+  below 100% appears in `COMPATIBILITY.md` with a reproducing command;
+- the sweep reports zero unrecorded divergences;
+- `pip install`, `npm install`, `cargo add` resolve, and each installed
+  artefact converts a real document on Linux, macOS and Windows;
+- the published resource bound holds for every supported conversion at every
+  measured size, with the envelope stated;
+- the efficiency claims are re-measured on the release build and still hold:
+  faster per document than a pandoc subprocess, smaller on disk, less peak
+  memory, deterministic bytes, and running where pandoc cannot run at all;
+- the exclusion list is published.
+
+**What 1.0 is not:** all 48 input formats, citations, Lua filters,
+templates beyond the stated subset, PDF input, or a promise about pandoc
+releases after the pinned 3.8.2.1.
+
 
 ## Continuous obligations
 
@@ -335,9 +344,25 @@ These are not milestones; they apply to every release.
 
 ## What success looks like
 
-At the end of this roadmap, ferrodoc is not "Rust pandoc." It is the
-default embedded converter for the document families it supports: a service
-or browser application can install it, select only the formats it needs,
-enforce a resource policy, convert a real document deterministically, and
-understand any remaining loss before it ships. New format work then follows
-evidence from users rather than the size of pandoc's format list.
+At 1.0 ferrodoc is not "Rust pandoc", and the difference is the point.
+Pandoc is forty-eight readers, a filter runtime, a template language and a
+citation processor. Ferrodoc is a smaller thing done exactly: for the
+document families it supports, a user replaces `pandoc` with `ferrodoc` and
+gets the same bytes — or a clear message saying what it will not do — while
+paying a fraction of the time, size and memory, and reaching places pandoc
+cannot go at all.
+
+Two properties carry that, and both are checkable rather than felt:
+
+- **nothing differs silently.** Every difference is either byte-identical,
+  or a loud failure, or a row in `COMPATIBILITY.md` with a command that
+  reproduces it. The drop-in number is what keeps that true, and it can
+  fall;
+- **every claim has a command.** The efficiency figures, the fidelity
+  scores, the resource envelope and the install lines are each backed by
+  something CI runs. This project's most expensive bugs were not wrong code
+  but claims wider than their evidence — seven in a single week — and 1.0 is
+  the version where that class is gated rather than caught.
+
+After 1.0, format work follows users. A candidate enters through the five
+conditions above, not through the length of pandoc's `--list-input-formats`.

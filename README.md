@@ -352,9 +352,10 @@ produces it. CI runs **every one of them** against a pinned pandoc, and builds
 and tests on Linux, macOS and Windows, plus a wasm32 build and a
 500,000-mutation fuzz campaign.
 
-The forward plan — release reachability, service resource limits, fidelity,
-performance, bindings, and the criteria for adding a format — is in
-[`ROADMAP.md`](ROADMAP.md).
+The forward plan is in [`ROADMAP.md`](ROADMAP.md): a version ladder to 1.0,
+where the claim is that for the formats this supports, it produces
+byte-identical output to pandoc or fails loudly saying what it will not do —
+with a drop-in corpus of real command lines as the number that decides it.
 
 ## Where pandoc is still ahead
 
