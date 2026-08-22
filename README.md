@@ -314,7 +314,7 @@ let without_headings = render(&doc, Format::Html)?;
   Pandoc embeds timestamps, so its output differs run to run.
 - **Portable, and shipped that way.** Every library crate compiles to
   `wasm32-unknown-unknown`, and the npm package is that build (not yet
-  published — see above): **0.65 MB gzipped** (679,019 bytes, measured by
+  published — see above): **0.65 MB gzipped** (683,175 bytes, measured by
   `./bindings/wasm/build.sh` today), converting in a browser tab
   with no document leaving the client. CI drives it in headless Chrome and asserts that the page
   makes no network request, because that claim is the reason it exists.
@@ -329,21 +329,22 @@ cargo build --release --target wasm32-unknown-unknown \
   `default = ["all"]`, so nothing changes for anyone who does not ask. A
   caller who converts markdown and HTML can leave the other nine out:
   `--no-default-features --features markdown,html` takes the wasm module to
-  **59%** of its gzipped size and the CLI binary to **60%** of its own. Both
-  ratios were measured twice, independently, in two different checkouts.
-  The exact byte counts below are from one of them: the CLI is reproducible
-  to the byte, and the wasm module varies by about 0.03% with the build
-  path, so the ratio is the claim and the byte count is an illustration of
-  it. A trimmed build cannot quietly do less than it says: `--help` lists
+  **60%** of its gzipped size and the CLI binary to 61% of its own. The
+  ratio is the claim and the byte count illustrates it: the CLI is
+  reproducible to the byte in a given checkout, and the wasm module varies
+  by about 0.03% with the build path. Both are re-derived by
+  `./scripts/claims.sh --sizes`, which fails when either ratio moves by a
+  point or any artefact grows more than 5% — this paragraph had drifted
+  1.4% before that existed. A trimmed build cannot quietly do less than it says: `--help` lists
   exactly the formats it contains, and asking for one it does not have is
   an error naming the reason, not a wrong answer.
 
 ```sh
-./bindings/wasm/build.sh                       # every format: 1,846,226 bytes, 679,019 gzipped
+./bindings/wasm/build.sh                       # every format: 1,855,728 bytes, 683,175 gzipped
 ./bindings/wasm/build.sh --no-default-features --features ferrodoc/markdown,ferrodoc/html
-                                               # markdown + HTML: 1,162,137 bytes, 402,019 gzipped
+                                               # markdown + HTML: 1,176,179 bytes, 407,537 gzipped
 cargo build --release -p ferrodoc --no-default-features --features markdown,html
-                                               # 3,871,424 bytes, against 6,408,248
+                                               # 3,964,400 bytes, against 6,499,664
 ```
 
 Every gate, every known loss and every deliberate divergence is listed one
@@ -351,6 +352,10 @@ by one in [`COMPATIBILITY.md`](COMPATIBILITY.md), with the command that
 produces it. CI runs **every one of them** against a pinned pandoc, and builds
 and tests on Linux, macOS and Windows, plus a wasm32 build and a
 500,000-mutation fuzz campaign.
+
+What changed between releases, and what a 0.1 caller has to do about it,
+is in [`CHANGELOG.md`](CHANGELOG.md); how a release is cut is in
+[`docs/releasing.md`](docs/releasing.md).
 
 The forward plan is in [`ROADMAP.md`](ROADMAP.md): a version ladder to 1.0,
 where the claim is that for the formats this supports, it produces

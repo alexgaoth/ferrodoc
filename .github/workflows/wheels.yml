@@ -18,6 +18,10 @@ jobs:
   wheels:
     name: ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.runner }}
+    # A job with no bound waits for a runner until GitHub stops it: the
+    # macos-13 leg of this matrix once sat for 24 hours while three other
+    # legs had already failed, and the run reported nothing until then.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +66,7 @@ jobs:
 
   sdist:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Build the source distribution

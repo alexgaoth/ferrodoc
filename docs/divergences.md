@@ -12,12 +12,12 @@
 A census, not a change: nothing here alters behaviour. It exists because
 two claims in the project's roadmap were carrying weight without a breakdown behind
 them — that the HTML reader's 26 divergences are what holds
-`corpus/epub-spec` at 8/22, and that closing them "costs three ways".
+`corpus/epub-spec` at 10/22, and that closing them "costs three ways".
 One of those is refuted below.
 
 **Scope.** Every gate in `scripts/verify.sh` scoring under 100%, except
-the two *fidelity* runs (`diff-latex` 0/11, `diff-rst` 2/11), which are
-excluded on purpose: pandoc itself scores 0/11 and 3/11 on the same
+the two *fidelity* runs (`diff-latex` 1/13, `diff-rst` 3/13), which are
+excluded on purpose: pandoc itself scores 1/13 and 4/13 on the same
 corpus, so their failures measure the format, not this project, and 20
 more rows of "the format cannot hold it" would drown the signal.
 
@@ -26,14 +26,14 @@ That leaves **51 documents** across nine gates:
 | gate | score | failing documents |
 |---|---|---|
 | HTML reader (`diff-html-read`) | 633/659 | 26 |
-| EPUB reader, spec chunks (`diff-epub`) | 8/22 | 14 |
-| EPUB writer (`diff-epub-write`) | 8/11 | 3 |
+| EPUB reader, spec chunks (`diff-epub`) | 10/22 | 12 |
+| EPUB writer (`diff-epub-write`) | 10/13 | 3 |
 | EPUB reader (`diff-epub`) | 10/12 | 2 |
 | ODT reader (`diff-odt`) | 32/34 | 2 |
 | GFM reader, spec (`diff-gfm`) | 651/652 | 1 |
 | DOCX reader (`diff-docx`) | 36/37 | 1 |
 | DOCX reader, LibreOffice (`diff-docx`) | 7/8 | 1 |
-| DOCX writer (`diff-write`) | 10/11 | 1 |
+| DOCX writer (`diff-write`) | 12/13 | 1 |
 
 Every path below is the harness's own `MISMATCH … at <path>` line. Repro
 for the whole set:
@@ -103,7 +103,7 @@ than a fix: a second divergence is measurably behind it (table below).
 
 ---
 
-## Is `epub-spec` 8/22 really the HTML reader? No — not as stated
+## Is `epub-spec` 10/22 really the HTML reader? No — not as stated
 
 `corpus/epub-spec/generate.sh` and `COMPATIBILITY.md` both say each chunk
 fails because it contains "one of the HTML reader's 26 known

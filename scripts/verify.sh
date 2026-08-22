@@ -72,20 +72,34 @@ step() {
 # Everything else is a `gate`.
 measure() {
     local name="$1"; shift
+    output=$("$@" 2>&1)
     printf '%-46s ' "$name"
-    printf '%s\n' "$("$@" 2>&1 | tail -n1)"
+    printf '%s\n' "$(printf '%s' "$output" | tail -n1)"
+    record "$name" "$output"
 }
 
 gate() {
     local name="$1"; shift
-    printf '%-46s ' "$name"
     if output=$("$@" 2>&1); then
+        printf '%-46s ' "$name"
         printf '%s\n' "$(printf '%s' "$output" | tail -n1)"
+        record "$name" "$output"
     else
+        printf '%-46s ' "$name"
         printf 'FAILED  %s\n' "$(printf '%s' "$output" | tail -n1)"
         printf '%s\n' "$output" | grep -m5 '^MISMATCH' | sed 's/^/    /' || true
         failures=$((failures + 1))
     fi
+}
+
+# Keep every score this run produced, so that `claims.sh` can hold the
+# published figures to them without paying for a second run. Nothing else
+# reads the file and it is deleted on exit.
+SCORES=$(mktemp)
+trap 'rm -f "$SCORES"' EXIT
+record() {
+    printf '%s\n' "$2" | grep -E 'identical|round-trips' |
+        sed "s/^/$1\t/" >> "$SCORES" || true
 }
 
 if [ "$want_checks" = 1 ]; then
@@ -208,6 +222,15 @@ if [ "$want_gates" = 1 ]; then
     # `diff-asciidoc` — pandoc writes AsciiDoc and cannot read it, so
     # there is no oracle; `asciidoctor` judges that one in CI.
     gate "RST writer (fidelity)"       $HARNESS diff-rst corpus --fail-under 18
+fi
+
+if [ "$want_gates" = 1 ]; then
+    echo "== published figures"
+    # Every score above is published somewhere a reader will believe it.
+    # This holds the two together, at no cost: the run has already
+    # happened and `$SCORES` is what it printed.
+    step "README and COMPATIBILITY still derive" ok \
+        ./scripts/claims.sh --gates "$SCORES"
 fi
 
 if [ "$want_samples" = 1 ]; then

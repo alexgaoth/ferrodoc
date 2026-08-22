@@ -46,7 +46,7 @@ The gates, and what each one proves:
 | `diff-ipynb` | the notebook reader produces pandoc's AST, over a hand-authored corpus in the shape Jupyter and Colab write — not the shape pandoc's own writer emits |
 | `diff-ipynb-write` | the notebook writer survives a round trip, from the AST **pandoc** read out of the corpus so the reader cannot flatter the writer; `nbformat.validate` is the judge that is not pandoc |
 | `diff-rst` | the RST writer round-trips the document, with pandoc's score on the same corpus printed beside it |
-| `diff-latex` | **printed, and cannot fail the run.** Pandoc round-trips 0/11 of this corpus, so any floor would be a number chosen after seeing the score. The LaTeX writer is decided by `pdflatex` in CI and by literal-output tests |
+| `diff-latex` | **printed, and cannot fail the run.** Pandoc round-trips 1/13 of this corpus — our number exactly — so any floor would be a number chosen after seeing the score. The LaTeX writer is decided by `pdflatex` in CI and by literal-output tests |
 | `bench-rss` | no conversion path exceeds its published multiple of the input |
 
 Some checks are not differential because there is no oracle, and those

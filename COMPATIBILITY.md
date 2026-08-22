@@ -58,21 +58,21 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | gate | what it proves | result |
 |---|---|---|
 | `diff-spec` | markdown reader produces pandoc's AST | **652/652** |
-| `diff-ast` | any pandoc JSON round-trips to an equal value | **11/11** |
+| `diff-ast` | any pandoc JSON round-trips to an equal value | **13/13** |
 | `diff-html` | HTML writer produces pandoc's HTML | **652/652** |
 | `diff-docx` | DOCX reader produces pandoc's AST | **36/37** |
 | `diff-docx` (LibreOffice) | ...on documents *another* writer produced | **7/8** |
-| `diff-write` | DOCX writer survives a round trip through pandoc | **10/11** |
+| `diff-write` | DOCX writer survives a round trip through pandoc | **12/13** |
 | `diff-odt` | ODT reader produces pandoc's AST | **32/34** |
 | `diff-odt` (LibreOffice) | ...on documents *another* writer produced | **8/8** |
-| `diff-odt-write` | ODT writer survives a round trip through pandoc | **11/11** |
+| `diff-odt-write` | ODT writer survives a round trip through pandoc | **13/13** |
 | `diff-epub` | EPUB reader produces pandoc's AST | **10/12** |
 | `diff-epub` (hand-authored) | ...on books in shapes pandoc's writer never emits | **3/3** |
-| `diff-epub-write` | EPUB writer survives a round trip through pandoc | **8/11** |
+| `diff-epub-write` | EPUB writer survives a round trip through pandoc | **10/13** |
 | `diff-ipynb` | notebook reader produces pandoc's AST | **8/8** |
 | `diff-ipynb-write` | notebook writer survives a round trip through pandoc | **8/8** |
-| `diff-latex` | LaTeX writer round-trips the document | **0/11** (pandoc: 0/11) — **reported, not gated**; see below |
-| `diff-rst` | RST writer round-trips the document | **2/11** (pandoc: 3/11) |
+| `diff-latex` | LaTeX writer round-trips the document | **1/13** (pandoc: 1/13) — **reported, not gated**; see below |
+| `diff-rst` | RST writer round-trips the document | **3/13** (pandoc: 4/13) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
@@ -247,7 +247,7 @@ ferrodoc drops one thing pandoc keeps: `text:bibliography-mark` becomes a
 `diff-odt-write` compares this writer's output *read back by pandoc*
 against pandoc's own output read back the same way, which is what isolates
 the writer from the format: a loss both writers share does not count
-against either. On that measure it is **11/11 on the corpus**, and
+against either. On that measure it is **13/13 on the corpus**, and
 **640/652** over the spec examples
 (`diff-odt-write corpus/commonmark-spec-0.31.2.json`).
 
@@ -275,7 +275,7 @@ Three corpora, because they measure three different things:
 |---|---|---|
 | `corpus/epub` | pandoc's own output, 12 documents | **10/12** |
 | `corpus/epub-handmade` | books in shapes pandoc's writer never emits | **3/3** |
-| `corpus/epub-spec` | 22 files of 30 spec examples each | 8/22 |
+| `corpus/epub-spec` | 22 files of 30 spec examples each | 10/22 |
 
 The last is not a fidelity claim and is not averaged into the others. Each
 of its files bundles 30 spec examples, so **one** of the HTML reader's 26
@@ -310,7 +310,7 @@ What pandoc's EPUB reader does that is worth knowing:
 
 ### EPUB writer — 3 corpus documents, all one deliberate rule
 
-`diff-epub-write` scores **8/11**, and the three that differ differ for the
+`diff-epub-write` scores **10/13**, and the three that differ differ for the
 same reason: **this writer does not emit a reference the book cannot
 satisfy.**
 
@@ -720,7 +720,7 @@ no notion of scripting at all). Both were silently returning nothing.
 ### LaTeX fidelity — reported, and deliberately not a gate
 
 `diff-latex` prints a number and cannot fail `verify.sh`. It ran at a 9%
-floor while exactly one of eleven corpus documents round-tripped;
+floor while exactly one corpus document round-tripped;
 `corpus/docx/src/anchors-and-notes.md` was that one, and it stopped
 passing when its footnotes started being read, because **a footnote
 containing a list does not survive pandoc's LaTeX reader**:
@@ -736,10 +736,11 @@ tightness identically. Adding `\tightlist`, removing it, and putting the
 items on one line all give the same result. The remaining divergences —
 `DefaultStyle` where the document said `Decimal`, a dropped code-block
 language — fail pandoc's own output the same way, which is why the
-harness prints `pandoc round-trips 0/11` beside our score.
+harness prints `pandoc round-trips 1/13` beside our score.
 
-An oracle that scores zero cannot set a floor for us, so there is none.
-What decides this writer instead: CI compiles every corpus document with
+An oracle that scores what we score cannot set a floor for us, so there
+is none: pandoc round-trips **1 of the same 13 documents**, which is our
+number exactly. What decides this writer instead: CI compiles every corpus document with
 `pdflatex -halt-on-error`, and each rule a round trip cannot observe has a
 literal-output test — `\tightlist`, the escaping of text and of code, and
 the `enumerate` styles.
@@ -770,9 +771,9 @@ That changes how they are gated, and the numbers above need reading with
 care:
 
 - **a LaTeX round trip is lossy for everybody.** Pandoc's own scores
-  **0/11** on this corpus — its reader turns a code block with a language
+  **1/13** on this corpus — its reader turns a code block with a language
   into two empty divs, drops link titles, and invents a heading identifier
-  where the document had none. The 1/11 is a measure of the *format*
+  where the document had none. That number is a measure of the *format*
   through pandoc's reader, not of the writer. What is checked instead is
   that **every corpus document compiles**, in CI, which is what anyone
   actually does with LaTeX. One caveat, and it is the engine's rather than

@@ -73,6 +73,11 @@ jobs:
       # the committed artefacts stop being what this tree produces.
       - name: samples/ is still what this tree produces
         run: ./scripts/verify.sh --samples
+      # `--gates` above already checks every figure it derived. These two
+      # are the ones it cannot: both office writers are published against
+      # the spec and gated against `corpus/`, 44 s a run.
+      - name: the published figures no gate produces
+        run: ./scripts/claims.sh --slow
       # An EPUB has a second judge that knows nothing of our intentions.
       - name: epubcheck accepts the hand-authored corpus
         run: |
@@ -121,6 +126,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: peak RSS per conversion path
         run: ./scripts/verify.sh --limits
+
+  # Every size README publishes, re-derived. The bundle sizes and the
+  # 60%/61% trimmed ratios had drifted 1.4% before this existed, because
+  # nothing re-measured them after the code that made them true changed.
+  sizes:
+    name: the published sizes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: byte counts and trimmed ratios
+        run: ./scripts/claims.sh --sizes
 
   # The npm package. It lives outside the workspace, so nothing above
   # reaches it — and its whole claim (a document that never leaves the
