@@ -786,7 +786,20 @@ care:
   strikeout, so a document using any of them cannot return unchanged.
   `sphinx-build -W` — warnings as errors — is the real check, because a
   short title underline or a misaligned grid table is a warning and both
-  mean the document is wrong;
+  mean the document is wrong. **One document it refuses, and no writer
+  can help it:** `corpus/headings-deep.md` goes from a second-level
+  heading straight to a fourth, and RST has no heading levels — the
+  underline character acquires one from where it first appears, so a skip
+  is "Inconsistent title style: skip from level 1 to 3". Pandoc's RST for
+  that document is byte-identical to this writer's, which is what settles
+  it as the format's limit rather than ours, and CI makes exactly that
+  comparison before accepting the refusal:
+
+  ```sh
+  diff <(pandoc corpus/headings-deep.md -f commonmark -t rst --wrap=preserve) \
+       <(ferrodoc corpus/headings-deep.md -t rst)   # no output
+  ```
+
 - **AsciiDoc has no gate at all, and cannot have one.** Pandoc writes
   AsciiDoc and does not read it, so there is no oracle to compare against.
   `asciidoctor --failure-level=WARN` accepts every corpus document in CI,

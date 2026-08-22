@@ -252,6 +252,14 @@ jobs:
       - run: |
           python3 -m pip install --quiet sphinx
           sudo apt-get update && sudo apt-get install -y --no-install-recommends asciidoctor
+      # For the one case sphinx refuses: the question is then whether this
+      # writer produced it or the format cannot express the document, and
+      # only pandoc's answer settles that.
+      - name: Install pandoc ${{ env.PANDOC_VERSION }}
+        run: |
+          curl -fsSL -o pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i pandoc.deb
       - name: build the writers
         run: cargo build --release -p ferrodoc
       - name: sphinx-build reads every corpus document
@@ -282,8 +290,22 @@ jobs:
             # is wrong rather than merely untidy.
             if sphinx-build -q -W -b html . out; then
               echo "sphinx accepted $name"
+              continue
+            fi
+            # `headings-deep.md` goes from a second-level heading straight
+            # to a fourth, and RST has no heading levels — the underline
+            # character defines one by where it first appears, so a skip
+            # is "Inconsistent title style" and no writer can avoid it.
+            # Pandoc's output for that document is **byte-identical** to
+            # this one, which is what proves the document is the limit
+            # rather than the writer. Anything else is a failure.
+            pandoc "$doc" -f commonmark -t rst --wrap=preserve > pandoc.rst
+            if diff -q "$name.rst" pandoc.rst >/dev/null; then
+              echo "sphinx refused $name; pandoc writes the same bytes, so this is the format"
             else
-              echo "sphinx REJECTED $name"; fail=1
+              echo "sphinx REJECTED $name, and pandoc's output differs"
+              diff pandoc.rst "$name.rst" | head -20
+              fail=1
             fi
           done
           exit $fail
