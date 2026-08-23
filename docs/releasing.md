@@ -184,9 +184,20 @@ The exit test for a release is a **clean machine**, one per platform:
 
 ```sh
 cargo install ferrodoc && ferrodoc --version
-pip install ferrodoc && python -c "import ferrodoc; print(ferrodoc.convert('# a', 'gfm', 'html'))"
-npm install ferrodoc && node -e "import('ferrodoc').then(m => m.default()).then(f => console.log(f.convert('# a', 'gfm', 'html')))"
+
+python3 -m venv /tmp/v && /tmp/v/bin/pip install ferrodoc
+/tmp/v/bin/python -c "import ferrodoc; print(ferrodoc.convert('# a', 'gfm', 'html'))"
+
+mkdir /tmp/n && cd /tmp/n && npm init -y && npm install ferrodoc
+node --input-type=module -e "
+import { convert } from 'ferrodoc';
+console.log(await convert('# a', 'gfm', 'html'));"
 ```
+
+Run these as printed. The npm line here used to be
+`import('ferrodoc').then(m => m.default())`, which throws
+`TypeError: m.default is not a function` — the package exports a **named,
+async** `convert`, and nothing had ever pasted the line to find out.
 
 Every wheel is built, installed and tested on four platforms in CI
 already. That is not the same as the package resolving from PyPI, and the
@@ -228,7 +239,26 @@ awk '/^## 0\.2\.0/{f=1;next} /^## /{f=0} f' CHANGELOG.md > /tmp/notes.md
 gh release create v0.2.0 --title 'ferrodoc 0.2.0' --notes-file /tmp/notes.md
 ```
 
-## Known state, 2026-08-23 03:45 GMT
+## Known state, 2026-08-23 04:20 GMT — **0.2.0 is out on all three**
+
+- **crates.io** — twelve crates at 0.2.0.
+- **npm** — `ferrodoc@0.2.0`, with provenance.
+- **PyPI** — 0.2.0: four wheels and an sdist, published by trusted
+  publishing on the re-cut release.
+
+Each was checked by **installing it**, not by reading a workflow log:
+
+```console
+$ /tmp/v/bin/python -c "import ferrodoc; print(ferrodoc.__version__)"
+0.2.0
+$ node --input-type=module -e "import {convert} from 'ferrodoc'; console.log(await convert('# a','gfm','html'))"
+<h1 id="a">a</h1>
+```
+
+That is also how the smoke-test line in this file was found to be wrong —
+it said `import('ferrodoc').then(m => m.default())`, which throws.
+
+## Superseded state, 2026-08-23 03:45 GMT
 
 - **crates.io: all twelve at 0.2.0.** The facade's verification build
   compiled against the *published* copies of its eleven dependencies,

@@ -8,18 +8,12 @@ document by document.
 ```sh
 cargo add ferrodoc            # Rust
 cargo install ferrodoc        # or the CLI
+pip install ferrodoc          # Python 3.9+, four platforms
 npm install ferrodoc          # browser, Node and edge
 ```
 
 Any other language with an FFI links the C ABI in
 [`bindings/c`](bindings/c) — one header, one function.
-
-> **`pip install ferrodoc` does not resolve yet.** The wheels build,
-> install and pass their tests on Linux, Windows and Apple silicon in
-> [`wheels.yml`](.github/workflows/wheels.yml); the publish is waiting on
-> a re-cut release. Until then, build it from this repository:
-> `maturin build --release -m bindings/python/Cargo.toml`, then
-> `pip install` the wheel it writes to `bindings/python/target/wheels/`.
 
 ## Why you would switch
 
@@ -81,9 +75,7 @@ The 72× figure is the one worth reproducing yourself, because it is the one
 that decides anything:
 
 ```sh
-# Needs the wheel; until the package is on PyPI, build and install it with
-#   maturin build --release -m bindings/python/Cargo.toml
-#   pip install bindings/python/target/wheels/ferrodoc-*.whl
+# pip install ferrodoc
 python3 - <<'EOF'
 import ferrodoc, subprocess, time, pathlib
 docs = [p.read_bytes() for p in pathlib.Path("corpus/docx-libreoffice").glob("*.docx")]
@@ -197,12 +189,8 @@ The remaining gaps are limits of CommonMark itself and are listed in
 
 ### Python
 
-Not on PyPI yet — see the note at the top. Built from this repository:
-
 ```sh
-pip install maturin
-maturin build --release -m bindings/python/Cargo.toml
-pip install bindings/python/target/wheels/ferrodoc-*.whl
+pip install ferrodoc
 ```
 
 ```python
@@ -219,7 +207,14 @@ format and `bytes` for DOCX. The pandoc AST is the `json` format, so
 `json.loads(ferrodoc.convert(doc, "docx", "json"))` gives you the tree
 without a second API. The GIL is released around the conversion, so a
 thread pool converts in parallel. Wheels are `abi3` for Python 3.9 and up,
-on Linux, macOS (both architectures) and Windows.
+on Linux, macOS (both architectures) and Windows. `read_formats()` and
+`write_formats()` say which way each format goes — they are not the same
+list, and asking `formats()` for one direction is what shipped a binding
+that could not write an ODT.
+
+Three of the four wheels are built, installed and tested on the platform
+they target, on every push. The Intel macOS one is **cross-compiled and
+not run**, because GitHub no longer has a machine to run it on.
 
 ### Rust and the command line
 
