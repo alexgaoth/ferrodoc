@@ -192,10 +192,59 @@ Every wheel is built, installed and tested on four platforms in CI
 already. That is not the same as the package resolving from PyPI, and the
 README made the stronger claim while `pip install ferrodoc` 404'd.
 
-## Known state, 2026-08-23 01:50 GMT
+## What the first real release taught, 2026-08-23
 
-The first real run of step 2 happened, and stopped where this file now
-says it would:
+Everything below happened on the way to 0.2.0 and is now either fixed in
+the workflows or written into the steps above.
+
+- **crates.io refuses the sixth brand-new crate.** Burst of five, then
+  one per ten minutes. Resuming is two named publishes, not a re-run.
+- **The wheel could not be built until the facade was on crates.io** —
+  and building it for the first time is what found two bugs that had been
+  unreachable for two versions: `is_text` was still "everything but
+  `docx`", so the Python binding **could not produce an ODT or an EPUB at
+  all**, and `formats()` was the union of two directions while the test
+  iterated it in one. Both shipped nowhere only because the wheel had
+  never built.
+- **There is no Intel macOS runner left.** `macos-13` queues forever, and
+  because the PyPI publish `needs` every leg, one unschedulable job holds
+  the release. That wheel is cross-compiled now, and it is the one wheel
+  built without being installed and tested — stated in the workflow
+  rather than hidden.
+- **`npm publish` is skipped when the version is already there**, so
+  re-cutting a release because a *different* artefact failed does not
+  fail on "you cannot publish over the previously published versions".
+
+**Re-cutting the same version** is what you do when one artefact failed
+and the others are already out. It is safe exactly when the commits since
+the tag do not touch what has already been published — check, do not
+assume:
+
+```sh
+git diff --stat <tag>..HEAD -- crates bindings/wasm bindings/c   # must be empty
+gh release delete v0.2.0 --yes
+git tag -f v0.2.0 -m 'ferrodoc 0.2.0' && git push --force origin v0.2.0
+awk '/^## 0\.2\.0/{f=1;next} /^## /{f=0} f' CHANGELOG.md > /tmp/notes.md
+gh release create v0.2.0 --title 'ferrodoc 0.2.0' --notes-file /tmp/notes.md
+```
+
+## Known state, 2026-08-23 03:45 GMT
+
+- **crates.io: all twelve at 0.2.0.** The facade's verification build
+  compiled against the *published* copies of its eleven dependencies,
+  which is what makes the set self-consistent.
+- **npm: `ferrodoc@0.2.0` published**, with provenance.
+- **PyPI: nothing.** The wheels now build, install and test on Linux,
+  Windows and Apple silicon and cross-build for Intel macOS — the whole
+  matrix in under three minutes — but they reached that state *after* the
+  tag, so the release has to be re-cut for them to publish.
+- The tokens pasted into a chat transcript on 2026-08-20 must be
+  **rotated**. They are in that transcript.
+
+## Superseded state, 2026-08-23 01:50 GMT
+
+The first run of step 2 stopped where this file now says it would; kept
+because it is the evidence behind the rate-limit note above:
 
 - **crates.io: 10 of 12 at 0.2.0.** `ferrodoc-ast`, `-markdown`, `-html`,
   `-text`, `-docx`, `-odt`, `-latex`, `-rst`, `-asciidoc`, `-ipynb`.
