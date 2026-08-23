@@ -238,7 +238,7 @@ mean shipping eight of them with no way to say whether they helped.
 | **D4.4 — the `markdown` dialect decision** *(decided)* | **No alias, and here is the number.** See below. | `diff-pandoc-md corpus` gates the reader at its measured 30%; `diff-spec` and `diff-gfm` unmoved. | Extension syntax. |
 | **D4.5 — extension syntax** | Accept `+ext-ext` for the extensions the three dialects actually implement; refuse the rest **by name**, saying which dialect would have it. | A table test over every extension pandoc names: each is accepted, or refused with a message naming it. Silent acceptance fails the test. | Implementing a missing extension. |
 | **D4.6 — diagnostics** | `--quiet`, `--verbose`, `--log`, `--fail-if-warnings`, and unknown-flag behaviour: fail naming the flag and whether it is unimplemented or out of scope. | Every unknown flag produces a message naming it; `--fail-if-warnings` turns the metadata-block warning into a non-zero exit. **No silent acceptance anywhere.** | Rewriting existing warnings. |
-| **D4.7 — paths and defaults** | `--defaults`, `--resource-path`, `--data-dir`. These are what a Makefile actually carries. | A `--defaults` file setting from/to/wrap produces the same bytes as the equivalent flags; `--resource-path` resolves an image outside the document's directory. | Templates or `--reference-doc`, which are 0.5. |
+| **D4.7 — paths and defaults** *(`--defaults` done)* | `--defaults` reads a flat `key: value` file and splices it in **where the flag appeared**, which is pandoc's precedence rule, measured both ways round. A key with no flag behind it is refused by name. `--resource-path` and `--data-dir` remain. | Done: the seven `--defaults` rows in `dropin/` now run, taking *out of surface* from 15 to 7. | Templates or `--reference-doc`, which are 0.5. |
 | **D4.8 — text shaping** | `--eol`, `--ascii`, `--strip-comments`, `--shift-heading-level-by`, `--id-prefix`. | One literal-output test each, compared against pandoc on the same input. `--eol=crlf` is checked on bytes, not on a rendered diff. | Highlighting. Anything in 0.5. |
 
 #### D4.3 — decided: match pandoc, and the default cannot flip yet
@@ -281,6 +281,20 @@ the layout it already had.
 one worth doing first because it is most of the drop-in corpus. Until
 then every wrapped output is counted as *fixable* by `dropin.sh`, which
 is the honest classification: it is going to be fixed.
+
+#### What the drop-in number is waiting on now
+
+`--defaults` and the `-c` alias took *out of surface* from **15 rows to
+7**, and the headline is still `0/48`. That is the useful result: the
+seven rows that were refused now run, and every one of them differs on
+the **standalone page shape**, which is 0.5's template work rather than
+0.4's flags. The remaining seven refusals are `--template`, `-V`,
+`--reference-doc` (all 0.5), `--include-in-header`/`-H`/`-B`/`-A`, and
+`--toc-depth` twice.
+
+So the order that follows from the measurement is: `--toc-depth` and the
+three include flags, which are 0.4 and small, then **0.5's templates**,
+which is what most of the corpus is actually blocked on.
 
 #### D4.4 — decided: `markdown` does not alias `pandoc_markdown`, yet
 

@@ -21,7 +21,7 @@ OPTIONS:
     -t, --to <FORMAT>       Output format  [inferred from --output's extension]
     -o, --output <FILE>     Write to FILE instead of standard output
     -s, --standalone        Wrap HTML in a page, or LaTeX in a whole document
-        --css <FILE>        Inline a stylesheet into that page
+    -c, --css <FILE>        Inline a stylesheet into that page
         --wrap <MODE>       auto | none | preserve, as pandoc means them:
                             `auto` fills to --columns (pandoc's default),
                             `none` puts each block on one line, `preserve`
@@ -31,6 +31,11 @@ OPTIONS:
                             all three, html and plain are `none`, latex,
                             rst and asciidoc are `preserve`.
         --columns <N>       Fill width for --wrap=auto [72]
+    -d, --defaults <FILE>   Read flags from a defaults file. Applied where
+                            the flag appears, so a later option overrides
+                            it and an earlier one does not, which is what
+                            pandoc does. A key this build has no flag for
+                            is an error naming the key.
         --toc               Put a table of contents at the top of the page.
                             HTML output with --standalone; accepted and
                             ignored otherwise, which is what pandoc does.
@@ -215,7 +220,129 @@ fn metadata_pair(raw: String) -> (String, Option<String>) {
 
 /// Parse the command line. `Ok(None)` means `--help` or `--version`
 /// already printed what was asked for and there is nothing left to do.
+/// Replace every `--defaults FILE` with the flags that file stands for,
+/// where it stood.
+///
+/// **Position is the precedence, and that is pandoc's rule rather than a
+/// choice made here.** `pandoc -t plain --defaults d.yaml` takes `to`
+/// from the file and `pandoc --defaults d.yaml -t plain` takes it from
+/// the flag — measured both ways round. Splicing the expansion in at the
+/// point the flag appeared gets that for free, where applying the file
+/// before or after the command line would get it wrong half the time.
+fn expand_defaults(args: &[String], depth: usize) -> Result<Vec<String>, String> {
+    // A defaults file may name another. Bounded like every other
+    // recursion here, and low: a chain this long is a mistake, not a
+    // configuration.
+    if depth > 8 {
+        return Err("--defaults files are nested more than 8 deep".to_owned());
+    }
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        let (name, attached) = match args[i].split_once('=') {
+            Some((name, value)) if name.starts_with("--") => (name, Some(value.to_owned())),
+            _ => (args[i].as_str(), None),
+        };
+        if name != "-d" && name != "--defaults" {
+            out.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+        let path = if let Some(value) = attached {
+            value
+        } else {
+            i += 1;
+            args.get(i)
+                .cloned()
+                .ok_or_else(|| "--defaults needs a value".to_owned())?
+        };
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("cannot read --defaults {path}: {e}"))?;
+        out.extend(expand_defaults(&defaults_to_args(&text, &path)?, depth + 1)?);
+        i += 1;
+    }
+    Ok(out)
+}
+
+/// The keys of a defaults file, as the flags they stand for.
+///
+/// The YAML read here is the same subset the pandoc-markdown metadata
+/// reader accepts — `key: value`, `key:` with `- item` lines, `#`
+/// comments — and **a key it does not know is an error naming that key**,
+/// never a line skipped. A defaults file whose `filters:` were silently
+/// dropped would convert the document and quietly leave out what the file
+/// was written to do.
+fn defaults_to_args(text: &str, path: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" {
+            continue;
+        }
+        if line.starts_with([' ', '\t']) || trimmed.starts_with('-') {
+            return Err(format!("{path}: cannot read {trimmed:?}: this reads a flat `key: value` file"));
+        }
+        let (key, raw) = trimmed
+            .split_once(':')
+            .ok_or_else(|| format!("{path}: cannot read {trimmed:?}: expected `key: value`"))?;
+        let value = raw.trim().trim_matches(['"', '\'']).to_owned();
+        // A key whose value is a list or a map: gather the `- item`
+        // lines that follow so the message can name what was found.
+        let mut items = Vec::new();
+        while lines.peek().is_some_and(|l| l.starts_with([' ', '\t'])) {
+            let item = lines.next().unwrap_or_default();
+            items.push(item.trim().trim_start_matches("- ").to_owned());
+        }
+        let flags = defaults_key(key, &value, &items)
+            .ok_or_else(|| format!("{path}: `{key}` is not a defaults key ferrodoc reads"))?;
+        out.extend(flags);
+    }
+    Ok(out)
+}
+
+/// One defaults key, as flags. `None` means this build has no flag for
+/// it — which is refused by name rather than ignored.
+fn defaults_key(key: &str, value: &str, items: &[String]) -> Option<Vec<String>> {
+    // `false` is the absence of a switch, not an unknown value.
+    let switch = |flag: &str| match value {
+        "true" | "yes" => Some(vec![flag.to_owned()]),
+        "false" | "no" => Some(Vec::new()),
+        _ => None,
+    };
+    match key {
+        "from" | "reader" => Some(vec!["--from".to_owned(), value.to_owned()]),
+        "to" | "writer" => Some(vec!["--to".to_owned(), value.to_owned()]),
+        "output-file" => Some(vec!["--output".to_owned(), value.to_owned()]),
+        "input-file" => Some(vec![value.to_owned()]),
+        "standalone" => switch("--standalone"),
+        "table-of-contents" | "toc" => switch("--toc"),
+        "number-sections" => switch("--number-sections"),
+        "wrap" => Some(vec!["--wrap".to_owned(), value.to_owned()]),
+        "columns" => Some(vec!["--columns".to_owned(), value.to_owned()]),
+        "css" => {
+            // Pandoc takes a list here; this build inlines one
+            // stylesheet, so more than one is refused rather than
+            // silently reduced to the first.
+            match (value.is_empty(), items) {
+                (true, [only]) => Some(vec!["--css".to_owned(), only.clone()]),
+                (false, []) => Some(vec!["--css".to_owned(), value.to_owned()]),
+                _ => None,
+            }
+        }
+        "extract-media" => Some(vec!["--extract-media".to_owned(), value.to_owned()]),
+        "metadata" => Some(
+            items
+                .iter()
+                .flat_map(|item| ["--metadata".to_owned(), item.replace(": ", "=")])
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
+    let args = &expand_defaults(args, 0)?;
     let mut from: Option<Format> = None;
     let mut to: Option<Format> = None;
     let mut output: Option<PathBuf> = None;
@@ -269,7 +396,9 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             }
             "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
             "-s" | "--standalone" => standalone = true,
-            "--css" => css = Some(PathBuf::from(value("--css")?)),
+            // `-c` is pandoc's short form and appears in real Makefiles
+            // more often than the long one.
+            "-c" | "--css" => css = Some(PathBuf::from(value("--css")?)),
             "--toc" | "--table-of-contents" => toc = true,
             "-N" | "--number-sections" => number_sections = true,
             "-M" | "--metadata" => metadata.push(metadata_pair(value("--metadata")?)),
@@ -814,6 +943,45 @@ mod tests {
 
     /// Every container, because a walk that misses one leaves a picture
     /// pointing at a file that is not there — and nothing fails loudly.
+    #[test]
+    fn a_defaults_file_is_the_flags_it_stands_for() {
+        let flags = |yaml: &str| defaults_to_args(yaml, "d.yaml");
+
+        assert_eq!(
+            flags("from: gfm\nto: html\nstandalone: true\n").expect("read"),
+            ["--from", "gfm", "--to", "html", "--standalone"]
+        );
+        // `false` is the absence of a switch, not an unknown value.
+        assert_eq!(flags("standalone: false\n").expect("read"), Vec::<String>::new());
+        // Comments, the document marker and blank lines are not keys.
+        assert_eq!(flags("---\n# a comment\n\nto: rst\n").expect("read"), ["--to", "rst"]);
+
+        // A key with no flag behind it is refused **by name**: a
+        // `filters:` quietly dropped would convert the document and leave
+        // out what the file was written to do.
+        let refused = flags("to: html\nfilters:\n  - x.lua\n").expect_err("filters");
+        assert!(refused.contains("filters"), "{refused}");
+
+        // Position is the precedence, which is pandoc's rule: measured
+        // both ways round with `pandoc -t plain --defaults d.yaml` and
+        // the same two the other way.
+        let dir = std::env::temp_dir().join("ferrodoc-defaults-order");
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        let file = dir.join("d.yaml");
+        std::fs::write(&file, "to: html\n").expect("written");
+        let path = file.display().to_string();
+        let expand = |args: &[&str]| {
+            expand_defaults(
+                &args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>(),
+                0,
+            )
+            .expect("expanded")
+        };
+        assert_eq!(expand(&["-t", "plain", "--defaults", &path]), ["-t", "plain", "--to", "html"]);
+        assert_eq!(expand(&["--defaults", &path, "-t", "plain"]), ["--to", "html", "-t", "plain"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn extraction_repoints_a_picture_wherever_it_sits() {
         let dir = std::env::temp_dir().join("ferrodoc-extract-walk");

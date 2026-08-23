@@ -54,6 +54,18 @@ The widened run also fixed the gate: a document the reader *refuses* now
 counts as a failure instead of aborting the run, so one `abstract: |` no
 longer stops the other nineteen being measured.
 
+### `--defaults`, and `-c` for `--css` (card D4.7)
+
+`--defaults FILE` reads a flat `key: value` file and applies it **where
+the flag appeared**: `-t plain --defaults d.yaml` takes `to` from the
+file and `--defaults d.yaml -t plain` takes it from the flag, which is
+pandoc's rule, measured both ways round. A key this build has no flag for
+is an error naming the key — a `filters:` silently dropped would convert
+the document and leave out what the file was written to do.
+
+Seven of the 48 command lines in `dropin/` were refused for this flag
+alone; with `-c` that count is 15 down to 7.
+
 ### Other
 
 - `-t html5` and `-f html5` are accepted. Pandoc has spelled it that way

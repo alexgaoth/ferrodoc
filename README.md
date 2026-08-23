@@ -249,6 +249,7 @@ ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table 
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
 ferrodoc report.docx -t gfm --extract-media out   # ...and keep the pictures
 ferrodoc minutes.odt -t gfm              # LibreOffice in, GitHub markdown out
+ferrodoc README.md --defaults build.yaml    # the flags a Makefile keeps in a file
 cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
