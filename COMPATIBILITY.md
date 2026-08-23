@@ -738,6 +738,28 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+**There is a second oracle, and it had never been used.** Pandoc *writes*
+LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared
+directly without asking its reader to survive anything.
+`./scripts/writers.sh` does that for every text writer, in a second, and
+`verify.sh` prints it:
+
+| writer | byte-identical to pandoc, `corpus/*.md` |
+|---|---|
+| `html` | **8/8** |
+| `plain` | 5/8 |
+| `gfm` | 3/8 |
+| `rst` | 2/8 |
+| `asciidoc` | 2/8 |
+| `markdown` | 1/8 |
+| `latex` | 0/8 |
+
+Reported and not gated, for the reason a floor chosen after seeing a
+score is not a floor. It says what the round trip cannot: the HTML writer
+is *exactly* pandoc's on this corpus, and the LaTeX writer — whose
+escaping is now byte-identical — is still furthest away, on
+`\texorpdfstring`, `\label`, `\pandocbounded` and the `---` ligatures.
+
 An oracle that scores what we score cannot set a floor for us, so there
 is none: pandoc round-trips **1 of the same 13 documents**, which is our
 number exactly. What decides this writer instead: CI compiles every corpus document with

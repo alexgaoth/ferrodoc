@@ -234,6 +234,16 @@ if [ "$want_gates" = 1 ]; then
     # is not zero.** See dropin/README.md.
     measure "real command lines" ./scripts/dropin.sh
 
+    # Each text writer against pandoc's own writer, on the same AST.
+    # The gates for these are *fidelity* runs — write it, read it back —
+    # which says nothing where pandoc cannot read the format back at all
+    # (AsciiDoc) or reads it as badly as we do (LaTeX, 1/13 each). Pandoc
+    # writes all of them, so the bytes are an oracle after all, and this
+    # is the first number they have ever had. Reported, not gated: no
+    # floor has been chosen and one chosen after seeing a score is not a
+    # floor. 1 s.
+    measure "text writers vs pandoc's" ./scripts/writers.sh
+
     echo "== published figures"
     # Every score above is published somewhere a reader will believe it.
     # This holds the two together, at no cost: the run has already
