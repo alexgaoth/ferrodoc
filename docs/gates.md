@@ -54,8 +54,23 @@ are the ones a *toolchain* judges: `pdflatex` compiles the LaTeX,
 `sphinx-build -W` reads the RST, `asciidoctor` reads the AsciiDoc,
 `epubcheck` validates the EPUB fixtures **and every book the writer
 produces**, a headless browser runs the npm package, and valgrind runs the
-C example. Pandoc cannot read AsciiDoc at
-all, so for that writer the toolchain is the *only* judge.
+C example.
+
+## Three comparisons that are not gates over a corpus
+
+The gates above score *conversions*. These score the things a gate cannot
+see, and `verify.sh` runs all three:
+
+| script | what it asks | how it is held |
+|---|---|---|
+| `scripts/flags.sh` | every CLI flag, against pandoc, over every document in `corpus/` | **gated at 100** — a flag's whole job is to produce particular bytes |
+| `scripts/dropin.sh` | 48 real pandoc command lines from public Makefiles and CI files, byte for byte, with every miss classified | gated at a **count** of rows, not a percentage |
+| `scripts/writers.sh` | each text writer against **pandoc's own writer** on the same AST | reported; no floor has been chosen |
+
+`writers.sh` is why "pandoc cannot read AsciiDoc, so it has no oracle" is
+no longer the whole story: pandoc *writes* every text format this writes,
+so the bytes are an oracle for all of them — and it is the only judge
+AsciiDoc has ever had.
 
 ## `samples/`, which is where the gates are blind
 
