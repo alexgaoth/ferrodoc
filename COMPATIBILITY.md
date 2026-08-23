@@ -739,6 +739,39 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### Standalone pages — pandoc's own template, byte for byte
+
+`-s` output used to be one fixed page shape against pandoc's template
+language, and it was where "indistinguishable" was furthest away: **176
+lines differed** on a document whose fragment matched exactly. 174 of
+them were pandoc's default template and its default stylesheet.
+
+Both are now vendored in `crates/ferrodoc-html/templates/`, under the
+**BSD-3 option** pandoc's `COPYRIGHT` offers for everything in
+`data/templates`, and rendered through a subset of pandoc's template
+language: `$var$`, `$if$`/`$else$`/`$endif$`, `$for$`/`$sep$`/`$endfor$`
+and `$partial()$`. Anything outside it — pipes, nested fields — is
+**refused by name** rather than left as a hole in the page.
+
+`./scripts/standalone.sh` runs every document in `corpus/` through ten
+combinations of the flags that shape a page and requires all of them:
+
+```console
+$ ./scripts/standalone.sh
+80/80 standalone command lines byte-identical
+```
+
+That covers `-s`, `--toc`, `--toc-depth`, `--css`, `-V`, `--title-prefix`,
+`-H`, `-B`, `-A` and a third-party `--template`. Two rules in it were
+measured rather than assumed: **`--css` turns pandoc's default stylesheet
+off** (145 lines of every `-s -c` comparison), and **`--toc` on a document
+with no heading writes nothing at all**, not an empty `<nav>`.
+
+What `-s` still differs on is **syntax highlighting**: a document with a
+labelled code block makes pandoc add 65 lines of highlighting CSS, which
+is the 0.7 item. `samples/15-markdown-to-html-page` is exactly that
+difference and nothing else.
+
 **There is a second oracle, and it had never been used.** Pandoc *writes*
 LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared
 directly without asking its reader to survive anything.

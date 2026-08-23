@@ -268,10 +268,11 @@ Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`,
 > and not by `markdown` — which is how pandoc has it too. The one case
 > where the output is *wrong* rather than narrower is a YAML metadata
 > block, because the title and author land in the body, so ferrodoc prints
-> a line to stderr when a document opens with one. `-s`/`--standalone` wraps HTML
-output in a complete page — doctype, charset, `lang`, and the title and
-authors the document carries — and `--css FILE` inlines a stylesheet into
-it.
+> a line to stderr when a document opens with one. `-s`/`--standalone` writes a complete page
+**through pandoc's own default template**, which is vendored here under
+the BSD-3 licence pandoc offers for it: byte-identical output across
+`--toc`, `--toc-depth`, `--css`, `-V`, `-H`, `-B`, `-A` and a
+third-party `--template`, checked by `./scripts/standalone.sh`.
 
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
 no table syntax, so a table degrades to one paragraph per cell there.

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>handbook</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#field-handbook" id="toc-field-handbook">Field Handbook</a>
+<ul>
+<li><a href="#why-this-exists" id="toc-why-this-exists">Why this exists</a></li>
+<li><a href="#rollout-schedule" id="toc-rollout-schedule">Rollout schedule</a></li>
+<li><a href="#what-each-team-has-to-do" id="toc-what-each-team-has-to-do">What each team has to do</a>
+<ul>
+<li><a href="#checklist" id="toc-checklist">Checklist</a></li>
+</ul></li>
+<li><a href="#running-a-conversion" id="toc-running-a-conversion">Running a conversion</a></li>
+<li><a href="#awkward-cases-on-purpose" id="toc-awkward-cases-on-purpose">Awkward cases, on purpose</a></li>
+<li><a href="#sign-off" id="toc-sign-off">Sign-off</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="field-handbook">Field Handbook</h1>
+<p>A realistic document, written the way people actually write them — and deliberately including the awkward parts, because a sample that only shows easy cases tells you nothing.</p>
+<h2 id="why-this-exists">Why this exists</h2>
+<p>Teams hold documents in <strong>Word</strong>, <em>LibreOffice</em>, EPUB and markdown at the same time. Getting between those formats is supposed to be boring. When it is not boring, it is usually because something was silently dropped.</p>
+<blockquote>
+<p>A conversion you cannot inspect is a conversion you cannot trust.</p>
+<p>— every migration post-mortem, eventually</p>
+</blockquote>
+<h2 id="rollout-schedule">Rollout schedule</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Owner</th>
+<th style="text-align: right;">Starts</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inventory</td>
+<td>Priya</td>
+<td style="text-align: right;">2026-01-06</td>
+<td>done</td>
+</tr>
+<tr>
+<td>Pilot</td>
+<td>Sam</td>
+<td style="text-align: right;">2026-02-17</td>
+<td>in progress</td>
+</tr>
+<tr>
+<td>Migration</td>
+<td>Ops</td>
+<td style="text-align: right;">2026-04-01</td>
+<td>not started</td>
+</tr>
+<tr>
+<td>Decommission</td>
+<td>Ops</td>
+<td style="text-align: right;">2026-09-15</td>
+<td>not started</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-each-team-has-to-do">What each team has to do</h2>
+<ol type="1">
+<li>Export everything from the old system.</li>
+<li>Convert it:
+<ul>
+<li><code>.docx</code> and <code>.odt</code> to markdown for the index</li>
+<li>markdown back to <code>.docx</code> for anyone who needs to edit in Word</li>
+</ul></li>
+<li>Spot-check 1 % of the output by hand.</li>
+</ol>
+<h3 id="checklist">Checklist</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Inventory complete</label></li>
+<li><label><input type="checkbox" />Pilot signed off</label></li>
+<li><label><input type="checkbox" />Rollback plan written</label></li>
+</ul>
+<h2 id="running-a-conversion">Running a conversion</h2>
+<p>Convert a directory in one pass:</p>
+<pre class="bash"><code>find . -name &#39;*.docx&#39; -print0 |
+  xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md</code></pre>
+<p>The Python equivalent, for a pipeline that already has one:</p>
+<pre class="python"><code>import ferrodoc
+with open(&quot;report.docx&quot;, &quot;rb&quot;) as f:
+    text = ferrodoc.convert(f.read(), &quot;docx&quot;, &quot;gfm&quot;)</code></pre>
+<p>An indented code block, which is a different construct:</p>
+<pre><code>ferrodoc -f markdown -t html handbook.md</code></pre>
+<h2 id="awkward-cases-on-purpose">Awkward cases, on purpose</h2>
+<p>Inline code with special characters: <code>a | b</code>, <code>&lt;div&gt;</code>, <code>--flag</code>, and a literal backtick: <code>`</code>.</p>
+<p>Text with entities &amp; symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.</p>
+<p><del>Struck-through text</del> and text with a footnote.</p>
+<p>Five inlines no writer test used to reach through this file: <u>underlined text</u>, <span class="smallcaps">small caps</span>, a <span id="marked" class="note">span carrying an id and a class</span>, and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because <code>docs/gates.md</code> claims <code>--samples</code> keeps them found, and until this paragraph existed no sample document contained one — the claim was wider than the corpus behind it, which is the defect this file is supposed to catch.</p>
+<p>A link with a title: <a href="https://example.com/spec" title="Format spec">the spec</a>. A bare autolink: <a href="https://example.com/status">https://example.com/status</a>. An email: <a href="mailto:ops@example.com">ops@example.com</a>.</p>
+<p>An image: <img src="logo.png" title="Project logo" alt="the logo" /></p>
+<div class="callout">
+
+<p>Raw HTML block, which not every target format can hold.</p>
+</div>
+
+<p>Nested quoting:</p>
+<blockquote>
+<p>Outer quote.</p>
+<blockquote>
+<p>Inner quote, with a list:</p>
+<ul>
+<li>one</li>
+<li>two</li>
+</ul>
+</blockquote>
+</blockquote>
+<h2 id="sign-off">Sign-off</h2>
+<p>Contact <a href="mailto:ops@example.com">ops@example.com</a> with questions. See the <code>LICENSE</code> file for terms.</p>
+</body>
+</html>

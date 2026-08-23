@@ -8,6 +8,43 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
+## Unreleased
+
+### Standalone HTML is pandoc's page, byte for byte (0.5)
+
+`-s` output was one fixed page shape against pandoc's template language,
+and 176 lines away from it. Pandoc's default template and default
+stylesheet are now vendored in `crates/ferrodoc-html/templates/` under
+the **BSD-3 option** its `COPYRIGHT` offers for `data/templates`, and
+rendered through a subset of its template language — `$var$`, `$if$`,
+`$for$`, `$sep$`, `$partial()$` — with everything outside that subset
+refused **by name** rather than left as a hole in the page.
+
+```console
+$ ./scripts/standalone.sh
+80/80 standalone command lines byte-identical
+```
+
+New flags, all of which the page needed: `--toc-depth`, `-V`/`--variable`,
+`--template`, `-H`/`--include-in-header`, `-B`/`--include-before-body`,
+`-A`/`--include-after-body`.
+
+**Three behaviour changes** a 0.2 caller will notice:
+
+- **`--css` links a stylesheet, it does not inline one.** Pandoc's flag
+  takes a URL and emits `<link>`; inlining the file was this project's
+  invention and made every `-s -c` command line differ.
+- **`-V` is `--variable` and `-v` is `--version`**, which is pandoc's
+  assignment. `ferrodoc -s -V lang=fr` used to print a version string and
+  convert nothing.
+- `write_html_standalone` and `render_html_standalone` are replaced by
+  `write_page(doc, &Page)` and `render_page`, which carry the flags above.
+  The hand-rolled page writer is gone rather than left beside the new one.
+
+Two rules in it were measured, not assumed: `--css` turns pandoc's
+default stylesheet **off**, and `--toc` on a document with no heading
+writes **nothing** rather than an empty `<nav>`.
+
 ## 0.2.0
 
 The ten library crates went to crates.io on 2026-08-23; `ferrodoc-epub`

@@ -146,6 +146,12 @@ case_ 14-html-to-html      attributes.html html   html     html
 
 echo "== into the formats people need"
 case_ 06-markdown-to-html     handbook.md gfm html html
+# The whole page, not the fragment. `diff-html` scores the fragment and
+# says nothing about the `<head>`, the default stylesheet or the contents
+# — which is where `-s` output was 176 lines away from pandoc's until it
+# went through pandoc's own template. This is the sample that would say
+# so again.
+case_ 15-markdown-to-html-page handbook.md gfm html html -s --toc
 case_ 07-markdown-to-latex    handbook.md gfm latex tex -s
 case_ 08-markdown-to-rst      handbook.md gfm rst rst
 case_ 09-markdown-to-asciidoc handbook.md gfm asciidoc adoc

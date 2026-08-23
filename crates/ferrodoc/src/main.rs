@@ -54,7 +54,14 @@ OPTIONS:
                             `docx -> markdown` conversion names pictures it
                             never writes, so they cannot be recovered.
     -h, --help              Print this help
-    -V, --version           Print the version
+    -v, --version           Print the version
+    -V, --variable KEY=VAL  A template variable, which wins over the
+                            document's own metadata
+        --template FILE     Use this template instead of pandoc's default
+        --toc-depth N       How deep the contents go [3]
+    -H, --include-in-header FILE    Verbatim into <head>
+    -B, --include-before-body FILE  Verbatim after <body>
+    -A, --include-after-body FILE   Verbatim before </body>
 
 FORMATS:
 ";
@@ -179,7 +186,8 @@ struct Options {
     output: Option<PathBuf>,
     input: Option<PathBuf>,
     standalone: bool,
-    css: Option<PathBuf>,
+    /// Everything that only shapes a standalone page.
+    page: PageFlags,
     extract_media: Option<PathBuf>,
     /// The layout asked for, or `None` for the writer's own — which is
     /// not the same for all of them; see `Format::wrapping`.
@@ -349,7 +357,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     let mut input: Option<PathBuf> = None;
     let mut stdin_requested = false;
     let mut standalone = false;
-    let mut css: Option<PathBuf> = None;
+    let mut page = PageFlags::default();
     let mut extract_media: Option<PathBuf> = None;
     // `preserve` is the default and `none` is the same thing for this
     // writer, which never inserted a break of its own: both leave every
@@ -382,7 +390,11 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
                 print!("{}", usage());
                 return Ok(None);
             }
-            "-V" | "--version" => {
+            // `-v` is the version and `-V` is a variable, which is
+            // pandoc's assignment and the opposite of what this had:
+            // `ferrodoc -s -V lang=fr` printed a version string and
+            // converted nothing.
+            "-v" | "--version" => {
                 println!("ferrodoc {}", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
             }
@@ -398,7 +410,13 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             "-s" | "--standalone" => standalone = true,
             // `-c` is pandoc's short form and appears in real Makefiles
             // more often than the long one.
-            "-c" | "--css" => css = Some(PathBuf::from(value("--css")?)),
+            // Everything that only shapes a standalone page, in one
+            // place: seven arms here took `parse_args` past its line
+            // budget and none of them says anything the others do not.
+            name if page_flag(name) => {
+                let given = value(name)?;
+                page_option(name, given, &mut page)?;
+            }
             "--toc" | "--table-of-contents" => toc = true,
             "-N" | "--number-sections" => number_sections = true,
             "-M" | "--metadata" => metadata.push(metadata_pair(value("--metadata")?)),
@@ -447,14 +465,9 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         output,
         input,
         standalone,
-        css,
+        page,
         extract_media,
-        // `--columns` is only read when `--wrap=auto` asked for it, and
-        // may have been given before or after it.
-        wrap: wrap.map(|wrap| match wrap {
-            Wrap::Auto(_) => Wrap::Auto(columns),
-            other => other,
-        }),
+        wrap: wrap.map(|wrap| widened(wrap, columns)),
         toc,
         number_sections,
         metadata,
@@ -469,7 +482,7 @@ fn run() -> Result<(), String> {
         output,
         input,
         standalone,
-        css,
+        page,
         extract_media,
         wrap,
         toc,
@@ -480,19 +493,8 @@ fn run() -> Result<(), String> {
         return Ok(());
     };
 
-    // Formats not given explicitly come from the file extensions.
-    let Some(from) = from.or_else(|| input.as_deref().and_then(Format::from_path)) else {
-        return Err(
-            "cannot tell the input format: pass --from, or name a file with a known extension"
-                .to_owned(),
-        );
-    };
-    let Some(to) = to.or_else(|| output.as_deref().and_then(Format::from_path)) else {
-        return Err(
-            "cannot tell the output format: pass --to, or name an output file with a known extension"
-                .to_owned(),
-        );
-    };
+    let from = inferred(from, input.as_deref(), "input", "--from", "a file")?;
+    let to = inferred(to, output.as_deref(), "output", "--to", "an output file")?;
 
     let bytes = read_input(input.as_deref())?;
     if matches!(from, Format::Markdown | Format::Gfm) && opens_with_metadata_block(&bytes) {
@@ -550,10 +552,28 @@ a heading in the body"
     if toc && to != Format::Html {
         eprintln!("ferrodoc: --toc is HTML-only here; the {to} output has no contents");
     }
+    // Pandoc puts the **input file's name** in `<title>` when the
+    // document has no title of its own; only the caller knows it.
+    let stem = input
+        .as_deref()
+        .and_then(|path| path.file_stem())
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let page = ferrodoc::Page {
+        css: page.css,
+        toc,
+        toc_depth: page.toc_depth,
+        header_includes: page.header_includes,
+        include_before: page.include_before,
+        include_after: page.include_after,
+        variables: page.variables,
+        template: page.template.as_deref(),
+        pagetitle: Some(&stem),
+    };
     let converted = if wants_page(standalone, to, &doc)? {
-        render_page(&doc, to, css.as_deref(), toc)?
+        render_page(&doc, to, &page)?
     } else {
-        if css.is_some() {
+        if !page.css.is_empty() {
             return Err("--css needs --standalone: a fragment has no <head>".to_owned());
         }
         match wrap {
@@ -627,14 +647,13 @@ fn wants_page(standalone: bool, to: Format, doc: &ferrodoc::Pandoc) -> Result<bo
 fn render_page(
     doc: &ferrodoc::Pandoc,
     to: Format,
-    css: Option<&std::path::Path>,
-    toc: bool,
+    page: &ferrodoc::Page<'_>,
 ) -> Result<Vec<u8>, String> {
     if to == Format::Latex {
-        if css.is_some() {
+        if !page.css.is_empty() {
             return Err("--css applies to html output, not latex".to_owned());
         }
-        if toc {
+        if page.toc {
             eprintln!("ferrodoc: --toc is HTML-only here; the latex output has no contents");
         }
         // Without this, `-s` on LaTeX would hand pdflatex a fragment with
@@ -654,16 +673,131 @@ fn render_page(
         // a fragment out of this function.
         return Err(format!("--standalone applies to html or latex output, not {to}"));
     }
-    let css = css
-        .map(|path| {
-            std::fs::read_to_string(path)
-                .map_err(|e| format!("cannot read {}: {e}", path.display()))
-        })
-        .transpose()?;
     #[cfg(feature = "html")]
-    return Ok(ferrodoc::render_html_standalone(doc, css.as_deref(), toc));
+    return ferrodoc::render_page(doc, page);
     #[cfg(not(feature = "html"))]
     return Err(format!("{to} support was not compiled into this build"));
+}
+
+/// A format not given explicitly comes from a file extension — and when
+/// there is no file either, saying which flag would have answered it is
+/// the whole of the message.
+fn inferred(
+    given: Option<Format>,
+    path: Option<&std::path::Path>,
+    role: &str,
+    flag: &str,
+    what: &str,
+) -> Result<Format, String> {
+    given.or_else(|| path.and_then(Format::from_path)).ok_or_else(|| {
+        format!("cannot tell the {role} format: pass {flag}, or name {what} with a known extension")
+    })
+}
+
+/// `--columns` is only read when `--wrap=auto` asked for it, and may
+/// have been given either side of it — so the width is applied once both
+/// are known rather than as `--wrap` is parsed.
+fn widened(wrap: Wrap, columns: usize) -> Wrap {
+    match wrap {
+        Wrap::Auto(_) => Wrap::Auto(columns),
+        other => other,
+    }
+}
+
+/// The flags that only shape a standalone page, gathered so
+/// `parse_args` does not carry seven near-identical arms.
+struct PageFlags {
+    /// `--css`/`-c`, as **URLs to link**, which is what pandoc's flag
+    /// means. This inlined the file's contents until 0.3.
+    css: Vec<String>,
+    /// `--toc-depth`, pandoc's default of 3 when not given.
+    toc_depth: i64,
+    /// `-H`, `-B`, `-A` — read at parse time so a missing file fails
+    /// before the document is converted rather than after.
+    header_includes: Vec<String>,
+    include_before: Vec<String>,
+    include_after: Vec<String>,
+    /// `-V key=value`, which wins over the document's own metadata.
+    variables: Vec<(String, String)>,
+    /// `--template`, already read.
+    template: Option<String>,
+}
+
+impl Default for PageFlags {
+    fn default() -> Self {
+        PageFlags {
+            css: Vec::new(),
+            // Pandoc's default, and the only field whose zero value would
+            // be wrong.
+            toc_depth: 3,
+            header_includes: Vec::new(),
+            include_before: Vec::new(),
+            include_after: Vec::new(),
+            variables: Vec::new(),
+            template: None,
+        }
+    }
+}
+
+/// Whether this flag is one of the page flags, all of which take a value.
+fn page_flag(name: &str) -> bool {
+    matches!(
+        name,
+        "-c" | "--css"
+            | "--toc-depth"
+            | "-H"
+            | "--include-in-header"
+            | "-B"
+            | "--include-before-body"
+            | "-A"
+            | "--include-after-body"
+            | "-V"
+            | "--variable"
+            | "--template"
+    )
+}
+
+fn page_option(name: &str, given: String, page: &mut PageFlags) -> Result<(), String> {
+    match name {
+        "-c" | "--css" => page.css.push(given),
+        "--toc-depth" => {
+            page.toc_depth = given
+                .parse()
+                .map_err(|_| format!("--toc-depth wants a number, not {given:?}"))?;
+        }
+        "-H" | "--include-in-header" => page.header_includes.push(slurp_value(&given)?),
+        "-B" | "--include-before-body" => page.include_before.push(slurp_value(&given)?),
+        "-A" | "--include-after-body" => page.include_after.push(slurp_value(&given)?),
+        "-V" | "--variable" => {
+            let (key, value) = metadata_pair(given);
+            // `-V draft` with no value is `true`, as `-M draft` is.
+            page.variables.push((key, value.unwrap_or_else(|| "true".to_owned())));
+        }
+        // Verbatim: a template's trailing newline is its own, and
+        // trimming it the way an include is trimmed costs the page its
+        // last line.
+        "--template" => page.template = Some(slurp(&given)?),
+        // `page_flag` is the list; the two cannot disagree without this
+        // arm being reached.
+        other => return Err(format!("{other} is not a page flag")),
+    }
+    Ok(())
+}
+
+/// A file the command line named, read now rather than at conversion
+/// time: `-H missing.html` should fail before the document is converted,
+/// not after.
+fn slurp(path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))
+}
+
+/// An `-H`/`-B`/`-A` include, which is a template *value* rather than a
+/// template: its trailing newline goes, because the template supplies the
+/// one that ends the line it is interpolated on. Keeping the file's own
+/// put a blank line after every include — and trimming a `--template`
+/// the same way cost its last newline, so the two cannot share a reader.
+fn slurp_value(path: &str) -> Result<String, String> {
+    slurp(path).map(|text| text.trim_end_matches('\n').to_owned())
 }
 
 /// Whether the document opens with what pandoc would read as a YAML

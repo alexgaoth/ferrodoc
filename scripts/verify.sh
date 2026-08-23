@@ -242,6 +242,13 @@ if [ "$want_gates" = 1 ]; then
     # See dropin/README.md.
     gate "real command lines" ./scripts/dropin.sh --fail-under 1
 
+    # `-s` output against pandoc's, over ten combinations of the flags
+    # that shape a page. A **gate at 100**, not a floor: the page comes
+    # from pandoc's own template now, and reproducing a template is not
+    # something one gets 90% right. `diff-html` cannot see any of this —
+    # it scores fragments.
+    gate "standalone pages"     ./scripts/standalone.sh
+
     # Each text writer against pandoc's own writer, on the same AST.
     # The gates for these are *fidelity* runs — write it, read it back —
     # which says nothing where pandoc cannot read the format back at all

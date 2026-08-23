@@ -14,8 +14,11 @@
 //! `Note` and non-HTML raw content are dropped, like pandoc's HTML writer
 //! does for raw content it cannot place.
 
+mod page;
 mod read;
+mod template;
 
+pub use page::{Page, write_page};
 pub use read::{MAX_NESTING, read_html, read_html_without_generated_identifiers};
 
 /// What can go wrong reading HTML.
@@ -53,58 +56,6 @@ pub fn write_html(doc: &Pandoc) -> String {
     if out.ends_with("\n\n") {
         out.pop();
     }
-    out
-}
-
-/// Render a document as a complete HTML page rather than a fragment.
-///
-/// [`write_html`] emits the body only, which is what a template engine or
-/// a CMS wants. A file meant to be opened in a browser needs a doctype, a
-/// charset and a title around it, and writing those by hand is the tax
-/// that made "convert this for the web" a two-step job.
-///
-/// `css` is inlined into a `<style>` element. It is a string, not a path,
-/// because this crate does no IO — which is what keeps it building for
-/// `wasm32`. The caller reads the file.
-///
-/// The head carries what the document actually knows: `title` and
-/// `author` from its metadata, and `lang` on the root element. Nothing is
-/// invented, and a document with no metadata still produces a valid page.
-pub fn write_html_standalone(doc: &Pandoc, css: Option<&str>, toc: bool) -> String {
-    let mut out = String::from("<!DOCTYPE html>\n<html");
-    if let Some(lang) = meta_text(doc, "lang") {
-        out.push_str(" lang=\"");
-        escape_attribute(&mut out, &lang);
-        out.push('"');
-    }
-    out.push_str(">\n<head>\n<meta charset=\"utf-8\" />\n");
-    out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n");
-    for author in meta_texts(doc, "author") {
-        out.push_str("<meta name=\"author\" content=\"");
-        escape_attribute(&mut out, &author);
-        out.push_str("\" />\n");
-    }
-    // Always present: a page without a title shows its file name, and
-    // the element is required.
-    out.push_str("<title>");
-    escape_text(&mut out, meta_text(doc, "title").as_deref().unwrap_or(""));
-    out.push_str("</title>\n");
-    if let Some(css) = css {
-        // Inlined verbatim: it is a stylesheet the caller chose, and
-        // escaping it would break every `>` selector in it. `</style`
-        // is the one sequence that could end the element early.
-        out.push_str("<style>\n");
-        out.push_str(&css.replace("</style", "<\\/style"));
-        out.push_str("\n</style>\n");
-    }
-    out.push_str("</head>\n<body>\n");
-    // Pandoc puts the contents immediately after `<body>`, before the first
-    // block — probed, `pandoc -f gfm -t html -s --toc --wrap=none`.
-    if toc {
-        out.push_str(&write_toc(doc));
-    }
-    out.push_str(&write_html(doc));
-    out.push_str("</body>\n</html>\n");
     out
 }
 
@@ -208,8 +159,13 @@ fn number_blocks(blocks: &mut [Block], counters: &mut [usize; 6], base: usize) {
 /// item bare, which is what `-f commonmark` produces, where headings carry
 /// no identifiers at all.
 pub fn write_toc(doc: &Pandoc) -> String {
+    write_toc_to_depth(doc, TOC_DEPTH)
+}
+
+/// The same, to a chosen depth — pandoc's `--toc-depth`.
+pub fn write_toc_to_depth(doc: &Pandoc, depth: i64) -> String {
     let mut entries = Vec::new();
-    collect_toc(&doc.blocks, &mut entries);
+    collect_toc(&doc.blocks, depth, &mut entries);
     if entries.is_empty() {
         return String::new();
     }
@@ -229,6 +185,17 @@ pub fn write_toc(doc: &Pandoc) -> String {
         path.push((level, siblings.len() - 1));
     }
     format!("<nav id=\"TOC\" role=\"doc-toc\">\n{}\n</nav>\n", write_toc_list(&roots))
+}
+
+/// The contents **without** its `<nav>`, which is what the page template
+/// wraps for itself. Emitting the wrapper here as well is how `-s --toc`
+/// produced two of them.
+pub fn toc_list_to_depth(doc: &Pandoc, depth: i64) -> String {
+    let nav = write_toc_to_depth(doc, depth);
+    nav.strip_prefix("<nav id=\"TOC\" role=\"doc-toc\">\n")
+        .and_then(|rest| rest.strip_suffix("\n</nav>\n"))
+        .map(str::to_owned)
+        .unwrap_or(nav)
 }
 
 struct TocNode {
@@ -254,11 +221,11 @@ fn write_toc_list(nodes: &[TocNode]) -> String {
 }
 
 /// Every heading within [`TOC_DEPTH`], as `(level, rendered entry)`.
-fn collect_toc(blocks: &[Block], out: &mut Vec<(i64, String)>) {
+fn collect_toc(blocks: &[Block], depth: i64, out: &mut Vec<(i64, String)>) {
     for block in blocks {
         match block {
             Block::Header(level, attr, inlines) => {
-                if *level > TOC_DEPTH {
+                if *level > depth {
                     continue;
                 }
                 let mut html = String::new();
@@ -290,7 +257,7 @@ fn collect_toc(blocks: &[Block], out: &mut Vec<(i64, String)>) {
                 }
                 out.push((*level, html));
             }
-            Block::Div(_, blocks) => collect_toc(blocks, out),
+            Block::Div(_, blocks) => collect_toc(blocks, depth, out),
             _ => {}
         }
     }
@@ -892,6 +859,12 @@ fn escape_attribute(out: &mut String, text: &str) {
 
 #[cfg(test)]
 mod tests {
+    /// A page with pandoc's defaults, which is what most of these
+    /// tests want.
+    fn page_of(doc: &Pandoc) -> String {
+        write_page(doc, &Page::new()).expect("rendered")
+    }
+
     use super::*;
 
     /// No differential gate reaches this: `diff-html` is markdown → HTML
@@ -1030,10 +1003,10 @@ mod tests {
             "lang".to_owned(),
             ferrodoc_ast::MetaValue::MetaString("fr".to_owned()),
         );
-        let page = write_html_standalone(&document, None, false);
+        let page = page_of(&document);
         assert!(page.contains("<title>A Title</title>"), "{page}");
         assert!(page.contains(r#"<meta name="author" content="An Author" />"#), "{page}");
-        assert!(page.contains(r#"<html lang="fr">"#), "{page}");
+        assert!(page.contains(r#"lang="fr""#), "{page}");
         // Metadata the head has no place for stays out of it rather than
         // being invented as a `<meta name="…">`, which the reader would
         // then read back as a field the document never had.
@@ -1041,7 +1014,7 @@ mod tests {
             "custom".to_owned(),
             ferrodoc_ast::MetaValue::MetaString("value".to_owned()),
         );
-        let page = write_html_standalone(&document, None, false);
+        let page = page_of(&document);
         assert!(!page.contains("custom"), "{page}");
 
         let back = read_html(&page).expect("the page this crate wrote is readable");
@@ -1121,45 +1094,37 @@ mod tests {
                 MetaValue::MetaInlines(vec![Inline::Str("Grace".to_owned())]),
             ]),
         );
-        let page = write_html_standalone(&doc, Some("body { color: red }"), false);
+        let mut options = Page::new();
+        options.css = vec!["theme.css".to_owned()];
+        let page = write_page(&doc, &options).expect("rendered");
 
         // The body is the fragment, unchanged: one writer, two framings.
-        assert!(page.contains(&format!("<body>\n{}</body>", write_html(&doc))), "{page}");
-        assert!(page.starts_with("<!DOCTYPE html>\n<html lang=\"fr\">\n"), "{page}");
+        assert!(page.contains(write_html(&doc).trim_end_matches('\n')), "{page}");
+        assert!(page.starts_with("<!DOCTYPE html>\n"), "{page}");
+        assert!(page.contains(r#"lang="fr""#), "{page}");
         assert!(page.contains("<meta charset=\"utf-8\" />"), "{page}");
         // Metadata is text, and text in a document can contain markup.
         assert!(page.contains("<title>My &lt;Doc&gt;</title>"), "{page}");
         // A field may be one value or a list, however it was spelled.
         assert!(page.contains("content=\"Ada\""), "{page}");
         assert!(page.contains("content=\"Grace\""), "{page}");
-        assert!(page.contains("body { color: red }"), "{page}");
+        // `--css` links a stylesheet; it does not inline the file, which
+        // is what pandoc means by the flag.
+        assert!(page.contains(r#"<link rel="stylesheet" href="theme.css" />"#), "{page}");
     }
 
     #[test]
     fn a_page_without_metadata_is_still_a_page() {
         let doc = ferrodoc_markdown::read_commonmark("text\n").expect("convertible");
-        let page = write_html_standalone(&doc, None, false);
-        // No `lang`, no `<style>`, but the required title element is
-        // there: leaving it out makes the browser show the file name.
-        assert!(page.starts_with("<!DOCTYPE html>\n<html>\n"), "{page}");
+        let page = page_of(&doc);
+        // `lang` is empty rather than absent, which is pandoc's — and
+        // the title element is required, so a page with no title still
+        // has an empty one.
+        assert!(page.starts_with("<!DOCTYPE html>\n"), "{page}");
+        assert!(page.contains(r#"lang="""#), "{page}");
         assert!(page.contains("<title></title>"), "{page}");
-        assert!(!page.contains("<style>"), "{page}");
-        assert!(!page.contains("author"), "{page}");
+        assert!(!page.contains("<meta name=\"author\""), "{page}");
     }
-
-    #[test]
-    fn a_stylesheet_cannot_close_its_own_element() {
-        // CSS is inlined verbatim — escaping it would break every `>`
-        // selector — so the one sequence that could end the element early
-        // is the one thing neutralized.
-        let doc = ferrodoc_markdown::read_commonmark("t\n").expect("convertible");
-        let page = write_html_standalone(&doc, Some("a{}</style><script>evil()</script>"), false);
-        // Exactly one `</style>`: the writer's own. The injected text is
-        // still there and still inside the element, which is inert.
-        assert_eq!(page.matches("</style>").count(), 1, "{page}");
-        assert!(page.contains("a{}<\\/style>"), "{page}");
-    }
-
     #[test]
     fn paragraph_and_emphasis() {
         assert_eq!(html("a *b* **c**\n"), "<p>a <em>b</em> <strong>c</strong></p>\n");

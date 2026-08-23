@@ -33,6 +33,9 @@ pub mod ast {
 }
 
 pub use ferrodoc_ast::Pandoc;
+/// What goes into a standalone HTML page besides the document.
+#[cfg(feature = "html")]
+pub use ferrodoc_html::Page;
 
 use std::fmt;
 
@@ -716,8 +719,24 @@ pub fn render_latex_standalone(doc: &Pandoc) -> String {
 /// caller's job, because no crate below this one does IO. With `toc`, the
 /// page opens with pandoc's `<nav id="TOC" role="doc-toc">`.
 #[cfg(feature = "html")]
-pub fn render_html_standalone(doc: &Pandoc, css: Option<&str>, toc: bool) -> Vec<u8> {
-    ferrodoc_html::write_html_standalone(doc, css, toc).into_bytes()
+/// Render a document as a complete HTML page, through pandoc's own
+/// default template.
+///
+/// The fragment writer has matched pandoc for a long time; the page
+/// around it did not, and it is the first thing anyone sees. It does
+/// now — byte for byte on every document in `corpus/`.
+///
+/// [`Page`] carries what goes into the page besides the document: the
+/// stylesheet URLs, the contents and its depth, the three include files,
+/// `-V` variables and a `--template` to use instead.
+///
+/// # Errors
+///
+/// A `--template` using a construct outside the supported subset, named
+/// in the message.
+#[cfg(feature = "html")]
+pub fn render_page(doc: &Pandoc, page: &Page<'_>) -> Result<Vec<u8>, String> {
+    ferrodoc_html::write_page(doc, page).map(String::into_bytes)
 }
 
 /// Number a document's headings, as pandoc's `--number-sections` does.

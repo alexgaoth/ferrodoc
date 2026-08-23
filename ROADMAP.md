@@ -416,6 +416,33 @@ publishing pipelines cannot move at all.
 same document and variables, produces identical bytes; a third-party
 template from the wild does too.
 
+#### Where this stands, 2026-08-23 — **the exit test passes**
+
+```console
+$ ./scripts/standalone.sh
+80/80 standalone command lines byte-identical
+```
+
+Ten flag combinations over every document in `corpus/`: `-s`, `--toc`,
+`--toc-depth`, `--css`, `-V`, `--title-prefix`, `-H`, `-B`, `-A`, and a
+third-party `--template` — gated at 100 in `verify.sh`, because
+reproducing a template is not something one gets 90% right.
+
+**The licence question is settled and it is what made this reachable.**
+Pandoc's `COPYRIGHT` dual-licenses everything in `data/templates` as GPL
+**or BSD-3-clause**; the template and `styles.html` are vendored in
+`crates/ferrodoc-html/templates/` under the BSD option, with the notice.
+Writing a page of one's own instead would have meant `-s` could never
+match, and 1.0 naming standalone HTML as an exception.
+
+The template language is a **stated subset** — `$var$`, `$if$`, `$for$`,
+`$sep$`, `$partial()$` — and anything outside it is refused by name, which
+is what "Not this version" above asked for.
+
+**Still 0.5:** `--reference-doc` for DOCX and ODT, and the default
+templates for the other standalone formats. What `-s` HTML still differs
+on is **syntax highlighting**, which is 0.7.
+
 **Not this version:** the full pandoc template language if it proves to need
 a general interpreter — in that case, state the subset and refuse the rest
 by name.
