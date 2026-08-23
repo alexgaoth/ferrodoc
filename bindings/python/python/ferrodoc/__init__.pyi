@@ -20,10 +20,22 @@ def convert(
 ) -> Union[str, bytes]:
     """Convert a document from one format to another.
 
-    Returns `str` for a text format and `bytes` for `docx`. Input formats:
-    `markdown` (`commonmark`, `md`), `gfm` (`markdown_github`), `html`
-    (`htm`), `docx`, `json`. Those plus `plain` (`text`, `txt`) as output.
+    Returns `str` for a text format and `bytes` for the packaged ones —
+    `docx`, `odt`, `epub` and `ipynb`. Ask `read_formats()` and
+    `write_formats()` rather than reading a list here that goes stale:
+    this one said `docx, json` for two versions after `odt`, `epub`,
+    `ipynb`, `latex`, `rst` and `asciidoc` existed.
     """
 
 def formats() -> list[str]:
-    """Every format name `convert` accepts."""
+    """Every format name `convert` knows, in either direction.
+
+    Not all of them both ways: `pandoc_markdown` is read-only and
+    `plain`, `latex`, `rst` and `asciidoc` are write-only.
+    """
+
+def read_formats() -> list[str]:
+    """The formats a document can be converted from."""
+
+def write_formats() -> list[str]:
+    """The formats a document can be converted to."""

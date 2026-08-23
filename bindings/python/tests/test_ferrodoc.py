@@ -90,9 +90,30 @@ def test_empty_input_is_an_empty_document_not_an_error():
     assert ferrodoc.convert("", "markdown", "html") == "\n"
 
 
-def test_formats_are_the_ones_convert_accepts():
-    for name in ferrodoc.formats():
-        ferrodoc.convert("x", "markdown", name)
+def test_every_named_format_converts_in_the_direction_it_claims():
+    # `formats()` is the union, and iterating it in one direction fails on
+    # the first format that only goes the other way. That is exactly what
+    # happened: `pandoc_markdown` is read-only, and this test could not
+    # run at all for two versions because the wheel would not build, so
+    # nothing said so.
+    readable = ferrodoc.read_formats()
+    writable = ferrodoc.write_formats()
+    assert set(readable) | set(writable) == set(ferrodoc.formats())
+    assert "pandoc_markdown" in readable and "pandoc_markdown" not in writable
+    assert "plain" in writable and "plain" not in readable
+
+    # Every writable format, in the type it should come back as. The
+    # three zip formats are bytes and everything else is str — including
+    # `ipynb`, which is JSON.
+    for name in writable:
+        out = ferrodoc.convert("x", "markdown", name)
+        want = bytes if name in ("docx", "odt", "epub") else str
+        assert isinstance(out, want), f"{name} came back as {type(out).__name__}"
+    for name in readable:
+        ferrodoc.convert(ferrodoc.convert("x", "markdown", "json"), "json", "markdown")
+        if name in ("markdown", "commonmark", "md", "gfm", "markdown_github",
+                    "pandoc_markdown", "html", "htm"):
+            ferrodoc.convert("x", name, "markdown")
 
 
 def test_the_error_survives_a_process_boundary():

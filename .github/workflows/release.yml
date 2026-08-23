@@ -126,6 +126,18 @@ jobs:
       # `--provenance` ties the tarball to this workflow run, which is
       # what makes "the package is built from this source" checkable by
       # someone who does not trust us.
-      - run: cd bindings/wasm && npm publish --provenance --access public
+      # Skipped when this version is already on npm, so that re-cutting a
+      # release — which is what you do when one of the *other* artefacts
+      # failed — does not fail here on "you cannot publish over the
+      # previously published versions". A release workflow that cannot be
+      # re-run forces a version bump for somebody else's failure.
+      - name: publish, unless this version is already there
+        run: |
+          version=$(node -p "require('./bindings/wasm/package.json').version")
+          if npm view "ferrodoc@$version" version >/dev/null 2>&1; then
+            echo "ferrodoc@$version is already on npm; nothing to publish"
+            exit 0
+          fi
+          cd bindings/wasm && npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

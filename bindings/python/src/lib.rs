@@ -27,7 +27,21 @@ pyo3::create_exception!(
 
 /// Whether a format's bytes are text a caller would rather have as `str`.
 fn is_text(format: ferrodoc::Format) -> bool {
-    !matches!(format, ferrodoc::Format::Docx)
+    // The three zip formats, and only those. This said "everything but
+    // `docx`" from the version where `docx` was the only one, so
+    // `convert(doc, "gfm", "odt")` raised "invalid utf-8 sequence" and
+    // the binding could not produce an ODT or an EPUB **at all** — the
+    // wheel could not be built while `ferrodoc 0.2` was unpublished, so
+    // no test could reach it.
+    //
+    // `ipynb` is *not* here on purpose: a notebook is JSON, so it comes
+    // back as `str` like every other text format. `Format::embeds_media`
+    // is the wrong predicate to reuse — it counts `ipynb` because a
+    // notebook carries base64 pictures, which is a different question.
+    !matches!(
+        format,
+        ferrodoc::Format::Docx | ferrodoc::Format::Odt | ferrodoc::Format::Epub
+    )
 }
 
 fn format(name: &str, role: &str) -> PyResult<ferrodoc::Format> {
@@ -91,11 +105,37 @@ fn convert<'py>(
     Ok(PyBytes::new(python, &converted).into_any())
 }
 
-/// Every format name `convert` accepts.
+/// Every format name `convert` knows, in either direction.
+///
+/// **Not every one of these can be both read and written**, which is why
+/// [`read_formats`] and [`write_formats`] exist beside it: `pandoc_markdown`
+/// is read-only and `plain`, `latex`, `rst` and `asciidoc` are write-only.
+/// Saying "every format `convert` accepts" and meaning the union is what
+/// made the test that iterated this fail the moment a read-only format
+/// existed.
 #[pyfunction]
 fn formats() -> Vec<String> {
+    named(|_| true)
+}
+
+/// The formats a document can be converted **from**.
+#[pyfunction]
+fn read_formats() -> Vec<String> {
+    named(ferrodoc::Format::readable)
+}
+
+/// The formats a document can be converted **to**.
+#[pyfunction]
+fn write_formats() -> Vec<String> {
+    named(ferrodoc::Format::writable)
+}
+
+fn named(keep: impl Fn(ferrodoc::Format) -> bool) -> Vec<String> {
     ferrodoc::Format::NAMES
         .iter()
+        .filter(|name| {
+            ferrodoc::Format::parse(name).is_some_and(|format| format.compiled() && keep(format))
+        })
         .map(|name| (*name).to_owned())
         .collect()
 }
@@ -104,6 +144,8 @@ fn formats() -> Vec<String> {
 fn _ferrodoc(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(convert, module)?)?;
     module.add_function(wrap_pyfunction!(formats, module)?)?;
+    module.add_function(wrap_pyfunction!(read_formats, module)?)?;
+    module.add_function(wrap_pyfunction!(write_formats, module)?)?;
     module.add("ConversionError", module.py().get_type::<ConversionError>())?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
