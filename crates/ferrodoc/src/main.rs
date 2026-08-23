@@ -675,6 +675,13 @@ a heading in the body",
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let page = page.as_page(toc, &stem);
+    if reference.is_some() && !matches!(to, Format::Docx | Format::Odt) {
+        // The library answers this with `NotWritable`, which reads as "it
+        // is an input-only format" — true of nothing here and wrong about
+        // latex, which is output-only. The flag's own message belongs
+        // where the flag is.
+        return Err(format!("--reference-doc applies to docx and odt output, not {to}"));
+    }
     let converted = if let Some(reference) = &reference {
         // `--reference-doc` replaces the whole render: the package it
         // produces is the reference's, with this document in it.
@@ -684,7 +691,10 @@ a heading in the body",
             reference,
             &resolve(&embedded, &base, &resource_path),
         )
-        .map_err(|e| e.to_string())?
+        // The library says "invalid odt input", because to it the
+        // reference *is* an input. Here the input is the document, and
+        // blaming it would send someone to the wrong file.
+        .map_err(|e| format!("--reference-doc: {e}"))?
     } else if wants_page(standalone, to, &doc)? {
         render_page(&doc, to, &page)?
     } else {

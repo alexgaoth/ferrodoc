@@ -80,7 +80,7 @@
 mod style;
 mod write;
 
-pub use write::{write_odt, write_odt_with_media};
+pub use write::{write_odt, write_odt_with_media, write_odt_with_reference};
 
 use ferrodoc_ast::{
     Alignment, Attr, Block, Caption, Cell, ColSpec, ColWidth, Inline, ListAttributes,

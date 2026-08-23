@@ -744,8 +744,9 @@ harness prints `pandoc round-trips 1/13` beside our score.
 The single most common reason a team cannot switch converters: the house
 styles live in a `.docx` somebody made in Word.
 
-**Two parts come across and no others**: `word/styles.xml`, which is what
-a style *is*, and `word/numbering.xml`, which is what a list style is.
+**For ODT it is `styles.xml`, the one part that is what a style is
+there**; for DOCX it is two, `word/styles.xml` and `word/numbering.xml`,
+which is what a list style is.
 Copying the rest of the reference package — theme, fonts, settings —
 would mean either declaring those parts in a `[Content_Types].xml` this
 writer did not build, or shipping parts nothing declares, and both are

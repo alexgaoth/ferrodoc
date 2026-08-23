@@ -10,7 +10,7 @@ break published without its note is a break twice.
 
 ## Unreleased
 
-### `--reference-doc` for DOCX, and no refusals left in the corpus
+### `--reference-doc` for DOCX and ODT, and no refusals left in the corpus
 
 The house styles live in a `.docx` somebody made in Word, and this is the
 flag that reaches them. `word/styles.xml` and `word/numbering.xml` come

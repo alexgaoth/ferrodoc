@@ -873,8 +873,8 @@ fn shift_blocks(blocks: &mut [Block], by: i64) {
     }
 }
 
-/// Render a document to DOCX, taking its **styles** from a reference
-/// `.docx` — pandoc's `--reference-doc`.
+/// Render to DOCX or ODT, taking the **styles** from a reference
+/// document — pandoc's `--reference-doc`.
 ///
 /// The single most common reason a team cannot switch converters: the
 /// house styles live in a `.docx` somebody made in Word. Two parts are
@@ -890,8 +890,18 @@ pub fn render_with_reference(
     reference: &[u8],
     media: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
-    if to != Format::Docx {
+    if !matches!(to, Format::Docx | Format::Odt) {
         return Err(Error::NotWritable(to));
+    }
+    #[cfg(feature = "odt")]
+    if to == Format::Odt {
+        let resolve = |url: &str| data_url(url).or_else(|| media(url));
+        return ferrodoc_odt::write_odt_with_reference(doc, &resolve, Some(reference))
+            .map_err(|e| Error::Invalid { format: to, detail: e.to_string() });
+    }
+    #[cfg(not(feature = "odt"))]
+    if to == Format::Odt {
+        return Err(Error::NotCompiled(to));
     }
     // Present in every build, like every other entry point here: a build
     // trimmed with `--no-default-features` says which format it was

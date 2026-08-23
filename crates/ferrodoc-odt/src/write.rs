@@ -65,6 +65,51 @@ pub fn write_odt_with_media(
     doc: &Pandoc,
     media: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
+    write_odt_with_reference(doc, media, None)
+}
+
+/// The same, taking the document's **styles** from a reference `.odt`.
+///
+/// Pandoc's `--reference-doc`, for the other office format. `styles.xml`
+/// is what a style is in `OpenDocument`, and it is the one part taken —
+/// `content.xml` is this document and `META-INF/manifest.xml` has to
+/// list the parts this package actually holds.
+///
+/// # Errors
+///
+/// A reference that is not a zip, or has no `styles.xml` — named rather
+/// than silently falling back, because a team whose branding vanished
+/// would find out downstream.
+pub fn write_odt_with_reference(
+    doc: &Pandoc,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+    reference: Option<&[u8]>,
+) -> Result<Vec<u8>, Error> {
+    let styles = match reference {
+        None => STYLES.to_owned(),
+        Some(bytes) => reference_styles(bytes)?,
+    };
+    write_package(doc, media, &styles)
+}
+
+/// `styles.xml` out of a reference package.
+fn reference_styles(bytes: &[u8]) -> Result<String, Error> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| Error::Zip(format!("the reference document is not an .odt: {e}")))?;
+    let mut part = archive
+        .by_name("styles.xml")
+        .map_err(|_| Error::Zip("the reference document has no styles.xml".to_owned()))?;
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut part, &mut text)
+        .map_err(|e| Error::Zip(e.to_string()))?;
+    Ok(text)
+}
+
+fn write_package(
+    doc: &Pandoc,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+    styles: &str,
+) -> Result<Vec<u8>, Error> {
     let mut w = Writer { media, ..Writer::default() };
     // Metadata goes out as the leading styled paragraphs pandoc's own
     // writer emits for it. `meta.xml` is not written, because pandoc's ODT
@@ -107,7 +152,7 @@ pub fn write_odt_with_media(
     };
     part("META-INF/manifest.xml", &w.manifest())?;
     part("content.xml", &content)?;
-    part("styles.xml", STYLES)?;
+    part("styles.xml", styles)?;
     // `part` borrows the zip; the pictures are written directly.
     #[expect(dropping_references, reason = "releases the borrow on `zip`")]
     drop(&part);

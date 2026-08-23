@@ -439,15 +439,14 @@ The template language is a **stated subset** — `$var$`, `$if$`, `$for$`,
 `$sep$`, `$partial()$` — and anything outside it is refused by name, which
 is what "Not this version" above asked for.
 
-**`--reference-doc` is done for DOCX**: `word/styles.xml` and
-`word/numbering.xml` come from the reference and nothing else does, which
-is what the flag is for and all a self-consistent package can take. With
-it, **every one of the 48 command lines in `dropin/` runs** — the corpus
-has no refusals left.
+**`--reference-doc` is done, for DOCX and ODT**: the styles parts come
+from the reference and nothing else does, which is what the flag is for
+and all a self-consistent package can take. With it, **every one of the
+48 command lines in `dropin/` runs** — the corpus has no refusals left.
 
-**Still 0.5:** `--reference-doc` for ODT, and the default templates for
-the standalone formats other than HTML. What `-s` HTML still differs on
-is **syntax highlighting**, which is 0.7.
+**Still 0.5:** the default templates for the standalone formats other
+than HTML. What `-s` HTML still differs on is **syntax highlighting**,
+which is 0.7.
 
 **Not this version:** the full pandoc template language if it proves to need
 a general interpreter — in that case, state the subset and refuse the rest
