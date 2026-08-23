@@ -18,9 +18,10 @@ jobs:
   wheels:
     name: ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.runner }}
-    # A job with no bound waits for a runner until GitHub stops it: the
-    # macos-13 leg of this matrix once sat for 24 hours while three other
-    # legs had already failed, and the run reported nothing until then.
+    # Bounds how long a job may *run*, not how long it may wait for a
+    # runner — the 24-hour wait that prompted this was queue time, which
+    # only removing the unavailable runner label fixed. Kept anyway: a
+    # wheel build that hangs is worth stopping too.
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -28,7 +29,18 @@ jobs:
         platform:
           - { name: linux-x86_64, runner: ubuntu-latest, target: x86_64 }
           - { name: macos-arm64, runner: macos-latest, target: aarch64 }
-          - { name: macos-x86_64, runner: macos-13, target: x86_64 }
+          # Cross-compiled from the arm64 runner, because **there is no
+          # Intel macOS runner left to schedule it on**: this leg sat
+          # queued for 24 hours once and for 27 minutes again while every
+          # other leg finished inside three. `timeout-minutes` does not
+          # help — it bounds a job's *execution*, and a job that is never
+          # scheduled never starts executing.
+          #
+          # The cost is stated rather than hidden: this is the one wheel
+          # that is built and **not** installed and tested, because the
+          # runner that could run it is what is missing. Every other
+          # platform this ships to is exercised on itself below.
+          - { name: macos-x86_64, runner: macos-latest, target: x86_64, cross: true }
           - { name: windows-x86_64, runner: windows-latest, target: x64 }
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +77,7 @@ jobs:
           manylinux: auto
 
       - name: Install it and run the tests against the installed wheel
+        if: '!matrix.platform.cross'
         working-directory: bindings/python
         shell: bash
         run: |
@@ -76,6 +89,20 @@ jobs:
           cd "$(mktemp -d)"
           python -c "import ferrodoc; print(ferrodoc.__version__, ferrodoc.formats())"
           python -m pytest "$GITHUB_WORKSPACE/bindings/python/tests" -q
+
+      # The one leg that cannot run its wheel still has to prove it built
+      # the right *kind* of wheel: a cross-build that silently produced
+      # another arm64 file would upload a package that installs nowhere.
+      - name: at least check the wheel is tagged for the platform it claims
+        if: matrix.platform.cross
+        working-directory: bindings/python
+        shell: bash
+        run: |
+          ls dist/
+          ls dist/ | grep -q 'macosx.*x86_64' || {
+            echo "::error::no x86_64 macOS wheel in dist/; the cross build produced something else"
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v4
         with:

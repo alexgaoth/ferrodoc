@@ -8,21 +8,18 @@ document by document.
 ```sh
 cargo add ferrodoc            # Rust
 cargo install ferrodoc        # or the CLI
+npm install ferrodoc          # browser, Node and edge
 ```
 
 Any other language with an FFI links the C ABI in
 [`bindings/c`](bindings/c) — one header, one function.
 
-> **The Python and JavaScript packages are built but not yet published.**
-> `pip install ferrodoc` and `npm install ferrodoc` do not resolve today.
-> Both are built, installed and tested on every platform claimed on every
-> push — four wheels in [`wheels.yml`](.github/workflows/wheels.yml), and
-> the npm tarball installed into an empty project and driven in headless
-> Chrome in [`ci.yml`](.github/workflows/ci.yml) — and both publish on the
-> next release. Until then, build them from this repository:
-> `maturin build --release -m bindings/python/Cargo.toml` (then
-> `pip install` the wheel it writes to `bindings/python/target/wheels/`),
-> and `./bindings/wasm/build.sh && cd bindings/wasm && npm pack`.
+> **`pip install ferrodoc` does not resolve yet.** The wheels build,
+> install and pass their tests on Linux, Windows and Apple silicon in
+> [`wheels.yml`](.github/workflows/wheels.yml); the publish is waiting on
+> a re-cut release. Until then, build it from this repository:
+> `maturin build --release -m bindings/python/Cargo.toml`, then
+> `pip install` the wheel it writes to `bindings/python/target/wheels/`.
 
 ## Why you would switch
 
@@ -343,8 +340,8 @@ let without_headings = render(&doc, Format::Html)?;
   bytes, which makes content-addressed caching and "did this change?" work.
   Pandoc embeds timestamps, so its output differs run to run.
 - **Portable, and shipped that way.** Every library crate compiles to
-  `wasm32-unknown-unknown`, and the npm package is that build (not yet
-  published — see above): **0.65 MB gzipped** (683,175 bytes, measured by
+  `wasm32-unknown-unknown`, and the npm package is that build
+  (`npm install ferrodoc`): **0.65 MB gzipped** (683,175 bytes, measured by
   `./bindings/wasm/build.sh` today), converting in a browser tab
   with no document leaving the client. CI drives it in headless Chrome and asserts that the page
   makes no network request, because that claim is the reason it exists.
