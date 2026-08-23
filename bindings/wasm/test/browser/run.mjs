@@ -39,16 +39,28 @@ const fail = async (message) => {
   process.exit(1);
 };
 
-// The debugging port takes a moment to listen.
+// The debugging port takes a moment to listen. **Thirty seconds, not
+// ten**: this timed out twice on CI runners while the assertion below —
+// the one this file exists for — never ran. A browser that is slow to
+// start is not a package that makes a network request, and failing the
+// build for it taught nobody anything.
+//
+// Note what is *not* retried: everything after this point. Once the page
+// is open, a failure is the claim being false.
 let target = null;
-for (let i = 0; i < 100 && !target; i++) {
+for (let i = 0; i < 300 && !target; i++) {
   await new Promise((r) => setTimeout(r, 100));
   try {
     const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     target = list.find((t) => t.type === "page" && t.url.startsWith("file://"));
   } catch { /* not listening yet */ }
 }
-if (!target) await fail("headless Chrome never opened the page");
+if (!target) {
+  await fail(
+    "headless Chrome never opened the page in 30 s — the browser did not " +
+      "start, which is not the same as the page making a request",
+  );
+}
 
 // Node only exposes `WebSocket` globally from 22 on, and CI ran 20: the
 // driver died on a bare `ReferenceError` that said nothing about which
