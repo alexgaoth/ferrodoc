@@ -82,6 +82,34 @@ cargo publish --workspace
 failure, so one error becomes six half-published crates and a version
 number that can never be reused.
 
+**Expect to run this twice, and budget an hour.** crates.io allows a
+burst of **5 brand-new crates** per account and then one per ten
+minutes; new *versions* of crates that already exist get a burst of 30
+and one per minute. 0.2.0 introduced six new crates, so the sixth is
+refused with `429 Too Many Requests` naming the time to retry, and
+`cargo publish --workspace` stops there rather than continuing. That is
+the right behaviour and it is not a failed release: everything before it
+is published and stays published.
+
+Resuming is by name, and it is not the loop the rule above forbids —
+each is a deliberate publish of one crate that is known to be missing:
+
+```sh
+cargo publish -p ferrodoc-epub     # the one the limit refused
+cargo publish -p ferrodoc          # the facade, last, once its deps are up
+```
+
+Check what is actually on the registry rather than what the log said:
+
+```sh
+for c in ferrodoc ferrodoc-ast ferrodoc-markdown ferrodoc-html ferrodoc-text \
+         ferrodoc-docx ferrodoc-odt ferrodoc-epub ferrodoc-latex ferrodoc-rst \
+         ferrodoc-asciidoc ferrodoc-ipynb; do
+  printf '%-20s %s\n' "$c" \
+    "$(cargo search "$c" --limit 1 | sed -n "s/^$c = \"\(.*\)\".*/\1/p")"
+done
+```
+
 Then confirm the registry actually has it, rather than that the command
 exited 0:
 
@@ -101,17 +129,54 @@ One-time setup, both of which are the owner's and cannot be delegated:
   publish` runs with `--provenance`, which needs the release to come from
   a workflow.
 
-Then:
+First refresh the Python binding's lock, which still pins the *previous*
+`ferrodoc` and can only be updated once step 2 has happened:
 
 ```sh
-git tag -a v0.2.0 -m 'ferrodoc 0.2.0'
-git push origin v0.2.0
-gh release create v0.2.0 --generate-notes --notes-file CHANGELOG.md
+cargo update -p ferrodoc --manifest-path bindings/python/Cargo.toml
+git add bindings/python/Cargo.lock && git commit -m 'chore: lock the published ferrodoc'
 ```
 
-`release.yml` builds and attaches the CLI binaries; `wheels.yml` builds
-the four wheels and the sdist and publishes them to PyPI on
-`release: published`.
+Then the tag and the release. The notes are the changelog's **section for
+this version**, not the whole file — `--notes-file CHANGELOG.md` would put
+the 0.1.0 history and an `Unreleased` heading in the release body:
+
+```sh
+awk '/^## 0\.2\.0/{f=1;next} /^## /{f=0} f' CHANGELOG.md > /tmp/notes.md
+git tag -a v0.2.0 -m 'ferrodoc 0.2.0'
+git push origin v0.2.0
+gh release create v0.2.0 --title 'ferrodoc 0.2.0' --notes-file /tmp/notes.md
+```
+
+`release.yml` builds and attaches the CLI binaries and runs `npm publish
+--provenance`; `wheels.yml` builds the four wheels and the sdist and
+publishes them to PyPI. Both fire on `release: published`.
+
+### Why a wheel, and why a workflow
+
+Worth stating, because "publish to PyPI" sounds like one command and is
+not:
+
+- **The Python package is compiled Rust**, a pyo3 extension module. There
+  is no pure-Python fallback, so a wheel is not an optimisation: without
+  one, `pip install ferrodoc` downloads the sdist and tries to *compile*
+  it, which needs a Rust toolchain the average Python user does not have.
+  That install does not degrade, it fails.
+- **A compiled extension is per-platform**, so four wheels: manylinux
+  x86_64, macOS arm64, macOS x86_64 and Windows x64. They are `abi3`, so
+  one wheel per platform covers Python 3.9 and every version above it —
+  otherwise it would be four platforms times six interpreters.
+- **Three of those four cannot be built here.** macOS and Windows wheels
+  need macOS and Windows machines, which is what the runner matrix is.
+- **PyPI is not given a token at all.** The upload uses trusted
+  publishing: PyPI checks an OIDC claim that the upload came from this
+  repository, this workflow file and the `pypi` environment, and rejects
+  anything else. That is why the release event is the trigger and why
+  there is no secret to leak. npm's `--provenance` works the same way and
+  needs the workflow context for the same reason.
+
+So the GitHub release is not ceremony around the publish — it *is* the
+publish, for two of the three registries.
 
 ## 4. Installing is not building
 
@@ -127,11 +192,23 @@ Every wheel is built, installed and tested on four platforms in CI
 already. That is not the same as the package resolving from PyPI, and the
 README made the stronger claim while `pip install ferrodoc` 404'd.
 
-## Known state, 2026-08-22
+## Known state, 2026-08-23 01:50 GMT
 
-- `cargo publish --dry-run --workspace`: **12/12 packaged and verified**,
-  every one reporting 0.2.0.
-- `npm pack`: **0.2.0, 689,147 bytes**, the real module inside.
-- `maturin build`: **blocked on step 2**, as designed.
+The first real run of step 2 happened, and stopped where this file now
+says it would:
+
+- **crates.io: 10 of 12 at 0.2.0.** `ferrodoc-ast`, `-markdown`, `-html`,
+  `-text`, `-docx`, `-odt`, `-latex`, `-rst`, `-asciidoc`, `-ipynb`.
+- **`ferrodoc-epub` is not published** — it was the *sixth* brand-new
+  crate and the burst is five, so crates.io returned 429.
+- **`ferrodoc` is not published**, and was never attempted: the workspace
+  publish stopped at the refusal. It is at 0.1.0. Being an existing
+  crate it is in the 30-per-burst bucket, so it needs no wait of its own
+  once `ferrodoc-epub` is up.
+- The retry window named in the 429 was **01:42:03 GMT** and has passed.
+- **PyPI and npm have nothing.** Both 404. Whatever the confirmation
+  emails were, no package exists on either — a pending publisher and an
+  `NPM_TOKEN` are configuration, and neither publishes anything until a
+  release fires the workflows.
 - The two tokens pasted into a chat transcript on 2026-08-20 must be
   **rotated before use**. They are in that transcript.
