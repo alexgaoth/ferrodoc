@@ -705,6 +705,70 @@ fn render_page(
     return Err(format!("{to} support was not compiled into this build"));
 }
 
+/// Check a `base+ext-ext` spelling and return the base.
+///
+/// Accepted when every `+ext` is one the dialect already has and every
+/// `-ext` is one it already lacks — the request is then the conversion
+/// that would have happened anyway. Anything else names what it cannot
+/// do, and which of this build's dialects could:
+///
+/// ```console
+/// $ ferrodoc x.md -f markdown+footnotes -t html
+/// ferrodoc: `markdown` does not read `footnotes` here, and this build
+/// cannot turn one on: `gfm` and `pandoc_markdown` read it
+/// ```
+fn extensions(name: &str) -> Result<String, String> {
+    let Some(cut) = name.find(['+', '-']) else {
+        return Ok(name.to_owned());
+    };
+    let (base, mut rest) = name.split_at(cut);
+    // A dialect whose *own name* has a dash — none today, but `Format`
+    // decides that, not this function.
+    if Format::parse(name).is_some() {
+        return Ok(name.to_owned());
+    }
+    let format = Format::parse(base)
+        .ok_or_else(|| format!("unknown format {base:?} in {name:?}"))?;
+    let has = |extension: &str| format.extensions().contains(&extension);
+    while !rest.is_empty() {
+        let on = rest.starts_with('+');
+        let end = rest[1..].find(['+', '-']).map_or(rest.len(), |at| at + 1);
+        let extension = &rest[1..end];
+        rest = &rest[end..];
+        if extension.is_empty() {
+            return Err(format!("{name:?} has a `+` or `-` with no extension after it"));
+        }
+        // The name is checked **before** asking whether it is a no-op:
+        // `-nothing` is not "a extension this dialect already lacks", it
+        // is a typo, and treating it as a no-op accepted it silently.
+        if !ferrodoc::EXTENSIONS.contains(&extension) {
+            return Err(format!(
+                "no extension named {extension:?}; `pandoc --list-extensions` has the names"
+            ));
+        }
+        if has(extension) == on {
+            // Already how this dialect reads: nothing is being asked for.
+            continue;
+        }
+        let elsewhere: Vec<&str> = [Format::Markdown, Format::Gfm, Format::PandocMarkdown]
+            .into_iter()
+            .filter(|other| *other != format && other.extensions().contains(&extension))
+            .map(Format::name)
+            .collect();
+        let instead = if elsewhere.is_empty() {
+            "no dialect here reads it".to_owned()
+        } else {
+            format!("{} reads it", elsewhere.join(" and "))
+        };
+        return Err(if on {
+            format!("`{base}` does not read `{extension}` here, and this build cannot turn one on: {instead}")
+        } else {
+            format!("`{base}` reads `{extension}` here and this build cannot turn it off: {instead}")
+        });
+    }
+    Ok(base.to_owned())
+}
+
 fn version() -> String {
     format!("ferrodoc {}\n", env!("CARGO_PKG_VERSION"))
 }
@@ -1150,20 +1214,15 @@ fn resolve<'a>(
 }
 
 fn format(name: &str) -> Result<Format, String> {
-    // `markdown+footnotes-tables` is pandoc's extension syntax, and this
-    // reads none of it. Refusing by name beats the alternative: a flag
-    // that looks accepted and changes nothing is the failure mode this
+    // `markdown+footnotes-pipe_tables` is pandoc's extension syntax. What
+    // is accepted here is what the named dialect **already does**: a
+    // request that asks for nothing new is the same conversion, and one
+    // that asks for a change this build cannot make is refused by name.
+    //
+    // The alternative — accepting the syntax and ignoring it — is a flag
+    // that looks honoured and changes nothing, which is the failure this
     // project keeps finding in its own gates.
-    if let Some((base, _)) = name.split_once(['+', '-'])
-        && Format::parse(base).is_some()
-        && Format::parse(name).is_none()
-    {
-        return Err(format!(
-            "extension syntax is not supported: {name:?}. `markdown` is CommonMark, \
-             `gfm` adds tables, task lists and footnotes, and `pandoc_markdown` adds \
-             YAML metadata, header attributes, definition lists and super/subscript"
-        ));
-    }
+    let name = &extensions(name)?;
     let known = || -> String {
         Format::NAMES
             .iter()
@@ -1283,6 +1342,39 @@ mod tests {
         );
         let error = wants_page(true, Format::Plain, &titled).expect_err("a title block");
         assert!(error.contains("title block"), "{error}");
+    }
+
+    #[test]
+    fn extension_syntax_is_accepted_when_it_asks_for_nothing() {
+        // What the dialect already does is the same conversion, so the
+        // spelling is accepted and the base comes back.
+        for accepted in [
+            "gfm+footnotes",
+            "gfm+pipe_tables+strikeout",
+            "markdown-footnotes",
+            "pandoc_markdown+yaml_metadata_block",
+        ] {
+            let base = accepted.split(['+', '-']).next().expect("a base");
+            assert_eq!(extensions(accepted).as_deref(), Ok(base), "{accepted}");
+        }
+
+        // Anything that asks for a change this build cannot make names
+        // the extension, and where it does exist.
+        let off = extensions("gfm-pipe_tables").expect_err("cannot disable");
+        assert!(off.contains("pipe_tables") && off.contains("cannot turn it off"), "{off}");
+        let on = extensions("markdown+footnotes").expect_err("cannot enable");
+        assert!(on.contains("gfm"), "{on}");
+
+        // A name pandoc does not have is a typo, and saying "this dialect
+        // lacks it" would send someone looking for the wrong thing. It is
+        // checked before the no-op test, which accepted `-nothing`.
+        let typo = extensions("gfm+fotnotes").expect_err("typo");
+        assert!(typo.contains("no extension named"), "{typo}");
+        let also = extensions("gfm-nothing").expect_err("typo the other way");
+        assert!(also.contains("no extension named"), "{also}");
+
+        // A plain name is untouched.
+        assert_eq!(extensions("gfm").as_deref(), Ok("gfm"));
     }
 
     #[test]

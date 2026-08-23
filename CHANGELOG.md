@@ -10,6 +10,14 @@ break published without its note is a break twice.
 
 ## Unreleased
 
+### `+ext-ext` extension syntax (card D4.5)
+
+`-f markdown+footnotes-pipe_tables` was refused wholesale. It is now
+accepted **where it asks for nothing** — the named dialect already reads
+that way, so it is the same conversion — and refused by name otherwise,
+saying which of the three dialects does read the extension. A name pandoc
+does not have is reported as a typo rather than as a missing feature.
+
 ### `--shift-heading-level-by`, `--strip-comments`, `--eol` (card D4.8)
 
 `./scripts/flags.sh` is the gate: **144/144 flag combinations

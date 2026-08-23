@@ -9,7 +9,7 @@ dropin-004	ddbit/sun-tzu-arte-cyber-guerra:build.sh	corpus/code-and-raw.md	-t ht
 dropin-005	nitlang/nit:contrib/nitiwiki/examples/nitiwiki/highlighter.sh	corpus/headings.md	-t html %IN%	the source pipes a document in; here it is named	pandoc -t html
 dropin-006	GaloisInc/hacrypto:demonstrations/Makefile	corpus/edge-cases.md	-f markdown -t latex -o %OUT%.tex %IN%	target pdf -> latex (the .tex is what both write; TeX makes the PDF)	pandoc -f markdown -t latex -o readme.pdf readme.md
 dropin-007	markruys/gw2pvo:Makefile	corpus/readme-style.md	--from markdown --to rst --output=%OUT%.rst %IN%	-	pandoc --from markdown --to rst --output=README.rst README.md
-dropin-008	openresty/openresty.org:v2/Makefile	corpus/headings.md	--from markdown --to plain %IN%	the source's markdown_github-hard_line_breaks: the extension syntax is refused by name (card D4.5)	pandoc --from markdown_github-hard_line_breaks --to plain
+dropin-008	openresty/openresty.org:v2/Makefile	corpus/headings.md	--from markdown_github-hard_line_breaks --to plain %IN%	-	pandoc --from markdown_github-hard_line_breaks --to plain
 dropin-009	OasisLMF/ktools:docs/md/Makefile	corpus/images.md	--from markdown_github --to html --standalone %IN%	-	pandoc --from markdown_github --to html --standalone
 dropin-010	lsd-rs/lsd:.github/workflows/CICD.yml	corpus/headings.md	--standalone --to html %IN% -o %OUT%.html	target man -> html (no man writer)	pandoc --standalone --to man doc/lsd.md -o lsd.1
 dropin-011	lexchou/swallow:docs/Makefile	corpus/readme-style.md	--from markdown_github --to html --standalone -c dropin/assets/style.css %IN%	-	pandoc --from markdown_github --to html --standalone -c ../../markdown.css

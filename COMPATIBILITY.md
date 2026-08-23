@@ -739,6 +739,32 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### Extension syntax — accepted where it asks for nothing
+
+`-f markdown+footnotes-pipe_tables` is pandoc's spelling, and what is
+accepted here is what the named dialect **already does**: a request that
+asks for nothing new is the same conversion. Anything else names what it
+cannot do, and where the extension does exist:
+
+```console
+$ ferrodoc x.md -f gfm+footnotes -t html          # accepted: gfm reads them
+$ ferrodoc x.md -f markdown+footnotes -t html
+ferrodoc: `markdown` does not read `footnotes` here, and this build cannot turn one on: gfm and pandoc_markdown read it
+$ ferrodoc x.md -f gfm-pipe_tables -t html
+ferrodoc: `gfm` reads `pipe_tables` here and this build cannot turn it off: pandoc_markdown reads it
+$ ferrodoc x.md -f gfm+fotnotes -t html
+ferrodoc: no extension named "fotnotes"; `pandoc --list-extensions` has the names
+```
+
+The name is checked **before** asking whether the request is a no-op:
+`-nothing` is a typo rather than "an extension this dialect already
+lacks", and treating it as the latter accepted it silently.
+
+What each dialect implements is in `Format::extensions`, under pandoc's
+names, and it is deliberately short — claiming one that is not
+implemented would make `+ext` a silent no-op, which is the failure the
+list exists to prevent.
+
 ### Text shaping — `--shift-heading-level-by`, `--strip-comments`, `--eol`
 
 All three in `./scripts/flags.sh`, byte for byte over every document in

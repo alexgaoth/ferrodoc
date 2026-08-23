@@ -163,6 +163,49 @@ impl Format {
         matches!(self, Format::Docx | Format::Odt | Format::Epub | Format::Ipynb)
     }
 
+    /// The extensions this build actually implements for this format,
+    /// under the names pandoc gives them.
+    ///
+    /// **Measured, and deliberately short.** Claiming one that is not
+    /// implemented would make `+ext` a silent no-op, which is the whole
+    /// failure this list exists to prevent; claiming too few only makes
+    /// the CLI refuse a flag it could have accepted, and says so by name.
+    /// Checked with `printf` through each dialect rather than read off
+    /// the reader's options.
+    pub fn extensions(self) -> &'static [&'static str] {
+        match self {
+            // CommonMark, which is what comrak reads with nothing turned
+            // on. `pandoc --list-extensions=commonmark` agrees: `raw_html`
+            // and nothing else.
+            Format::Markdown => &["raw_html"],
+            Format::Gfm => &[
+                "raw_html",
+                "pipe_tables",
+                "strikeout",
+                "task_lists",
+                "tex_math_dollars",
+                "footnotes",
+                "autolink_bare_uris",
+                "gfm_auto_identifiers",
+            ],
+            Format::PandocMarkdown => &[
+                "raw_html",
+                "pipe_tables",
+                "strikeout",
+                "task_lists",
+                "tex_math_dollars",
+                "footnotes",
+                "auto_identifiers",
+                "header_attributes",
+                "definition_lists",
+                "superscript",
+                "subscript",
+                "yaml_metadata_block",
+            ],
+            _ => &[],
+        }
+    }
+
     /// What this format's writer does with lines.
     ///
     /// Measured, not chosen: `printf 'a\nb\n' | ferrodoc -t html` joins
@@ -268,6 +311,41 @@ pub enum Wrapping {
     /// ignored, which is what pandoc does too.
     NotText,
 }
+
+/// Every extension name pandoc 3.8.2.1 knows, so that a name it does not
+/// know can be told from one this build has not implemented.
+///
+/// Taken from `pandoc --list-extensions`. The distinction matters in the
+/// message: `+footnotes` on a dialect that lacks them is a different
+/// problem from `+fotnotes`, and a reader who gets "unknown extension"
+/// for the first goes looking for a typo.
+pub const EXTENSIONS: &[&str] = &[
+    "abbreviations", "all_symbols_escapable", "angle_brackets_escapable",
+    "ascii_identifiers", "auto_identifiers", "autolink_bare_uris",
+    "backtick_code_blocks", "blank_before_blockquote",
+    "blank_before_header", "bracketed_spans", "citations",
+    "definition_lists", "east_asian_line_breaks", "emoji",
+    "escaped_line_breaks", "example_lists", "fancy_lists",
+    "fenced_code_attributes", "fenced_code_blocks", "fenced_divs",
+    "footnotes", "four_space_rule", "gfm_auto_identifiers", "grid_tables",
+    "gutenberg", "hard_line_breaks", "header_attributes",
+    "ignore_line_breaks", "implicit_figures", "implicit_header_references",
+    "inline_code_attributes", "inline_notes", "intraword_underscores",
+    "latex_macros", "line_blocks", "link_attributes",
+    "lists_without_preceding_blankline", "literate_haskell", "mark",
+    "markdown_attribute", "markdown_in_html_blocks",
+    "mmd_header_identifiers", "mmd_link_attributes", "mmd_title_block",
+    "multiline_tables", "native_divs", "native_spans", "old_dashes",
+    "pandoc_title_block", "pipe_tables", "raw_attribute", "raw_html",
+    "raw_tex", "rebase_relative_paths", "shortcut_reference_links",
+    "short_subsuperscripts", "simple_tables", "smart",
+    "spaced_reference_links", "space_in_atx_header", "startnum",
+    "strikeout", "subscript", "superscript", "table_attributes",
+    "table_captions", "task_lists", "tex_math_dollars",
+    "tex_math_double_backslash", "tex_math_single_backslash",
+    "wikilinks_title_after_pipe", "wikilinks_title_before_pipe",
+    "yaml_metadata_block",
+];
 
 /// Why a conversion could not be performed.
 #[derive(Debug)]
