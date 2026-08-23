@@ -1,6 +1,6 @@
---- samples/03-odt-to-markdown/pandoc.md	2026-08-19 16:45:11.814712169 -0700
-+++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-19 16:45:11.791712156 -0700
-@@ -4,24 +4,24 @@
+--- samples/03-odt-to-markdown/pandoc.md	2026-08-23 15:57:18.170376560 -0700
++++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-23 15:57:18.127376588 -0700
+@@ -4,16 +4,16 @@
  
  ## Schedule
  
@@ -20,15 +20,11 @@
  ## Definitions
  
 -1.  Party
-+1. Party 
++1.  Party 
  
--    1.  The first party
--    2.  The second party
-+   1. The first party
-+   2. The second party
- 
--2.  Term
-+2. Term
+     1.  The first party
+     2.  The second party
+@@ -22,6 +22,6 @@
  
  fixed width
  

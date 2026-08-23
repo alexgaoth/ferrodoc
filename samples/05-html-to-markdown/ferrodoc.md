@@ -26,13 +26,13 @@ something was silently dropped.
 
 ## What each team has to do
 
-1. Export everything from the old system.
-2. Convert it:
-   - `.docx` and `.odt` to markdown for the
-     index
-   - markdown back to `.docx` for anyone who needs to edit in
-     Word
-3. Spot-check 1 % of the output by hand.
+1.  Export everything from the old system.
+2.  Convert it:
+    - `.docx` and `.odt` to markdown for the
+      index
+    - markdown back to `.docx` for anyone who needs to edit in
+      Word
+3.  Spot-check 1 % of the output by hand.
 
 ### Checklist
 
@@ -60,9 +60,7 @@ with open("report.docx", "rb") as f:
 
 An indented code block, which is a different construct:
 
-```
-ferrodoc -f markdown -t html handbook.md
-```
+    ferrodoc -f markdown -t html handbook.md
 
 ## Awkward cases, on purpose
 
@@ -70,7 +68,7 @@ Inline code with special characters: `a | b`,
 `<div>`, `--flag`, and a literal backtick:
 `` ` ``.
 
-Text with entities &amp; symbols — an em dash, "curly quotes", an
+Text with entities & symbols — an em dash, "curly quotes", an
 ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
 日本語.
 
@@ -85,8 +83,8 @@ found, and until this paragraph existed no sample document contained one
 — the claim was wider than the corpus behind it, which is the defect
 this file is supposed to catch.
 
-A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: [https\://example.com/status](https://example.com/status). An
-email: [ops\@example.com](mailto:ops@example.com).
+A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An
+email: <ops@example.com>.
 
 An image: ![the logo](logo.png "Project logo")
 
@@ -103,7 +101,7 @@ Nested quoting:
 
 ## Sign-off
 
-Contact [ops\@example.com](mailto:ops@example.com) with
+Contact <ops@example.com> with
 questions. See the `LICENSE` file for terms.
 
 [^1]: Footnote bodies can contain **formatting**

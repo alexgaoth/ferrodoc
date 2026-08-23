@@ -13,12 +13,12 @@ Terms with *underline*, <sub>subscript</sub> and <sup>superscript</sup>.
 
 ## Definitions
 
-1. Party 
+1.  Party 
 
-   1. The first party
-   2. The second party
+    1.  The first party
+    2.  The second party
 
-2. Term
+2.  Term
 
 fixed width
 

@@ -32,7 +32,7 @@
 //!   which keeps the paragraph whole and loses the soft break.
 
 use ferrodoc_ast::{
-    Alignment, Attr, Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType, Row, Table, Target,
+    Alignment, Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType, Row, Table, Target,
 };
 use std::fmt::Write as _;
 
@@ -85,7 +85,7 @@ fn render(doc: &Pandoc, gfm: bool) -> String {
 
 fn render_with(doc: &Pandoc, gfm: bool, columns: Option<usize>) -> String {
     let mut out = String::new();
-    let mut writer = Writer { gfm, columns, ..Writer::default() };
+    let mut writer = Writer { gfm, columns, bullet: '-', ..Writer::default() };
     writer.blocks(&mut out, &doc.blocks, "");
     writer.flush_notes(&mut out);
     // Exactly one trailing newline, like every other writer here.
@@ -102,8 +102,10 @@ fn render_with(doc: &Pandoc, gfm: bool, columns: Option<usize>) -> String {
 struct Writer {
     /// Footnote bodies, collected as they are referenced.
     notes: Vec<String>,
-    /// Whether the next bullet list uses `*` rather than `-`.
-    bullet: bool,
+    /// The bullet the next list uses. Two adjacent bullet lists would
+    /// merge into one on re-reading; alternating the character splits
+    /// them and, unlike a separator comment, adds no block.
+    bullet: char,
     /// Whether the emphasis about to be written must use `_` rather than
     /// `*`, because its parent is emphasis that wraps nothing else.
     alternate: bool,
@@ -111,6 +113,13 @@ struct Writer {
     gfm: bool,
     /// The column to fill to, or `None` to leave every line as it falls.
     columns: Option<usize>,
+    /// How many **list items** deep the block being written is. A
+    /// blockquote does not count: its `> ` prefix makes four more spaces
+    /// unambiguous, where a list item's own indentation does not.
+    depth: usize,
+    /// Whether the previous sibling block was a list. Four spaces after
+    /// one are that list's continuation, not a code block.
+    after_list: bool,
 }
 
 /// Marks a space a line may be broken at. Chosen because no reader here
@@ -126,6 +135,12 @@ impl Writer {
     fn blocks(&mut self, out: &mut String, blocks: &[Block], prefix: &str) {
         let mut previous: Option<&Block> = None;
         for block in blocks {
+            // A raw block in another format renders to nothing, and its
+            // separator goes with it — otherwise a document ending in one
+            // ends with a blank line pandoc does not write.
+            if matches!(block, Block::RawBlock(format, _) if format.0 != "html") {
+                continue;
+            }
             if let Some(previous) = previous {
                 // The blank line between blocks still belongs to the
                 // container: a bare newline inside a quote ends the quote.
@@ -136,7 +151,9 @@ impl Writer {
                 // ordered lists sharing a delimiter have no such escape,
                 // so they keep the comment and the round trip loses it.
                 match (previous, block) {
-                    (Block::BulletList(_), Block::BulletList(_)) => self.bullet = !self.bullet,
+                    (Block::BulletList(_), Block::BulletList(_)) => {
+                        self.bullet = if self.bullet == '-' { '*' } else { '-' };
+                    }
                     (Block::OrderedList(before, _), Block::OrderedList(after, _))
                         if before.delim == after.delim =>
                     {
@@ -146,6 +163,8 @@ impl Writer {
                     _ => {}
                 }
             }
+            self.after_list =
+                matches!(previous, Some(Block::BulletList(_) | Block::OrderedList(..)));
             self.block(out, block, prefix);
             previous = Some(block);
         }
@@ -172,6 +191,60 @@ impl Writer {
         }
     }
 
+    /// A code block, fenced or indented.
+    /// A code block: indented where that says the same thing, fenced
+    /// where it does not.
+    ///
+    /// **Pandoc indents a block that carries no attributes at all**, and
+    /// reaches for a fence only when there is something to put on it. No
+    /// round-trip gate could ever see the difference, because both
+    /// spellings read back as the same `CodeBlock` — which is why this
+    /// wrote a fence for everything until 2026-08-23.
+    ///
+    /// The three guards are each a `CommonMark` example that failed:
+    /// four spaces **inside a list item** are the item's own
+    /// indentation, four spaces **after a list** continue it, and an
+    /// indented block cannot hold a blank first line or say whether its
+    /// content ended with a newline.
+    fn code_block(&mut self, out: &mut String, attr: &ferrodoc_ast::Attr, text: &str, prefix: &str) {
+        let indentable = attr == &ferrodoc_ast::Attr::default()
+            && self.depth == 0
+            && !self.after_list
+            && !text.is_empty()
+            && !text.starts_with('\n')
+            && !text.ends_with('\n');
+        if indentable {
+            for line in text.split('\n') {
+                let line = if line.is_empty() { String::new() } else { format!("    {line}") };
+                push_line(out, prefix, &line);
+            }
+            return;
+        }
+        // A fence must be longer than any backtick run inside.
+        let longest = text
+            .split(|c| c != '`')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let fence = "`".repeat(longest.max(2) + 1);
+        // Pandoc's HTML writer tags every code block `sourceCode`,
+        // and its markdown writers drop that class and spell the
+        // first one left, after a space: `["sourceCode","bash"]`
+        // is ```` ``` bash ````, `["sourceCode"]` a bare fence.
+        let info = attr
+            .classes
+            .iter()
+            .find(|class| class.as_str() != "sourceCode")
+            .map_or(String::new(), |class| format!(" {class}"));
+        push_line(out, prefix, &format!("{fence}{info}"));
+        for line in text.split('\n') {
+            push_line(out, prefix, line);
+        }
+        push_line(out, prefix, &fence);
+            
+    
+    }
+
     fn block(&mut self, out: &mut String, block: &Block, prefix: &str) {
         match block {
             Block::Plain(inlines) | Block::Para(inlines) => {
@@ -182,29 +255,7 @@ impl Writer {
                 let text = self.inlines(inlines);
                 header(out, prefix, *level, &text);
             }
-            Block::CodeBlock(attr, text) => {
-                // A fence must be longer than any backtick run inside.
-                let longest = text
-                    .split(|c| c != '`')
-                    .map(str::len)
-                    .max()
-                    .unwrap_or(0);
-                let fence = "`".repeat(longest.max(2) + 1);
-                // Pandoc's HTML writer tags every code block `sourceCode`,
-                // and its markdown writers drop that class and spell the
-                // first one left, after a space: `["sourceCode","bash"]`
-                // is ```` ``` bash ````, `["sourceCode"]` a bare fence.
-                let info = attr
-                    .classes
-                    .iter()
-                    .find(|class| class.as_str() != "sourceCode")
-                    .map_or(String::new(), |class| format!(" {class}"));
-                push_line(out, prefix, &format!("{fence}{info}"));
-                for line in text.split('\n') {
-                    push_line(out, prefix, line);
-                }
-                push_line(out, prefix, &fence);
-            }
+            Block::CodeBlock(attr, text) => self.code_block(out, attr, text, prefix),
             Block::BlockQuote(blocks) => {
                 if blocks.is_empty() {
                     // A quote with no content is still a quote; writing
@@ -226,7 +277,12 @@ impl Writer {
                         ListNumberDelim::OneParen | ListNumberDelim::TwoParens => ')',
                         _ => '.',
                     };
-                    format!("{label}{close} ")
+                    // Pandoc pads the marker to four columns, or to one
+                    // past its own length when that is wider: `1.  `,
+                    // `10. `, `100. `. The continuation indent follows
+                    // from it, because the indent is the marker's width.
+                    let marker = format!("{label}{close}");
+                    format!("{marker:<width$}", width = marker.len().max(3) + 1)
                 });
             }
             Block::DefinitionList(items) => {
@@ -247,7 +303,15 @@ impl Writer {
             }
             // `***`, not `---`: inside a list item `- ---` is itself a
             // thematic break, so the item disappears.
-            Block::HorizontalRule => push_line(out, prefix, "***"),
+            // Pandoc's rule is 72 dashes, and it is only safe at the top
+            // level: inside a list item a run of dashes is read as the
+            // *next item's* setext underline, and `CommonMark` example 61
+            // (`- Foo\n- * * *`) loses its rule. `***` reads back the same
+            // either way, so the container keeps it.
+            Block::HorizontalRule => {
+                let rule = if self.depth == 0 { "-".repeat(72) } else { "***".to_owned() };
+                push_line(out, prefix, &rule);
+            }
             Block::LineBlock(lines) => {
                 // Hard breaks preserve the line structure.
                 let mut text = String::new();
@@ -279,7 +343,7 @@ impl Writer {
     fn bullet_list(&mut self, out: &mut String, items: &[Vec<Block>], prefix: &str) {
         // The bullet is fixed for the whole list: a marker that changed
         // between items would split the list in two.
-        let bullet = if self.bullet { '*' } else { '-' };
+        let bullet = self.bullet;
         let saved = self.bullet;
         // A `☐`/`☒` opening an item is what a GFM task item reads as, so
         // write it back as one. Both spellings re-read to the same
@@ -437,10 +501,17 @@ impl Writer {
             }
             let marker = marker(index);
             // Continuation lines line up under the item's *content*, which
-            // starts after the list marker — `- `, `10. `, and for a task
-            // item still `- `, since `[x] ` is already content. Every
-            // marker ends its list part at its first space.
-            let indent = " ".repeat(marker.find(' ').map_or(marker.len(), |i| i + 1));
+            // starts after the list marker — `- `, `10. `, `1.  `, and for
+            // a task item still `- `, since `[x] ` is already content. The
+            // marker's list part ends after its **first run of spaces**,
+            // not at the first one: `1.  ` is four columns wide and taking
+            // three of them put a stray space inside every fenced code
+            // block in a list.
+            let indent = " ".repeat(
+                marker
+                    .find(' ')
+                    .map_or(marker.len(), |i| i + marker[i..].len() - marker[i..].trim_start_matches(' ').len()),
+            );
             // A tight list's items must not contain blank lines: one
             // would make the whole list loose when it is read back, and
             // every `Plain` inside would come back as a `Para`.
@@ -453,13 +524,16 @@ impl Writer {
             // and the indent is added per line below, exactly as before.
             let inner = if self.columns.is_some() { indent.as_str() } else { "" };
             let mut body = String::new();
+            self.depth += 1;
             if tight {
                 for block in item {
+                    self.after_list = false;
                     self.block(&mut body, block, inner);
                 }
             } else {
                 self.blocks(&mut body, item, inner);
             }
+            self.depth -= 1;
             let mut lines = body.trim_end_matches('\n').split('\n');
             if let Some(first) = lines.next() {
                 let first = first.strip_prefix(inner).unwrap_or(first);
@@ -530,6 +604,15 @@ impl Writer {
     fn inlines(&mut self, inlines: &[Inline]) -> String {
         let mut out = String::new();
         for inline in inlines {
+            // A `!` ending one inline and the `[` starting the next make
+            // an image across a boundary [`escape_text`] cannot see: the
+            // `!` is the last character of its own `Str`, so there is no
+            // next character to test. `CommonMark` example 593 is
+            // `\![foo]` beside a reference definition, which came back as
+            // an `Image`.
+            if out.ends_with('!') && !out.ends_with("\\!") && opens_bracket(inline) {
+                out.insert(out.len() - 1, '\\');
+            }
             self.inline(&mut out, inline);
         }
         out
@@ -622,8 +705,12 @@ impl Writer {
                 // from the delimiter. All-space content is never stripped,
                 // so padding it would corrupt it instead.
                 let all_spaces = text.chars().all(|c| c == ' ');
+                // Pandoc pads **whenever the delimiter is longer than one
+                // backtick**, not only where a backtick sits at the edge:
+                // `` a`b `` rather than ``a`b``. Both read back the same;
+                // the bytes are the test.
                 let pad = if !all_spaces
-                    && (text.starts_with(['`', ' ']) || text.ends_with(['`', ' ']))
+                    && (ticks.len() > 1 || text.starts_with(' ') || text.ends_with(' '))
                 {
                     " "
                 } else {
@@ -640,9 +727,9 @@ impl Writer {
                 // the dollar form is the one both readers accept.
                 write_math(out, *kind, text);
             }
-            Inline::Link(attr, inner, target) => {
+            Inline::Link(_, inner, target) => {
                 let text = self.inlines(inner);
-                if write_autolink(out, attr, inner, target) {
+                if write_autolink(out, inner, target) {
                     return;
                 }
                 let _ = write!(out, "[{text}]({}", link_destination(&target.url));
@@ -872,16 +959,35 @@ fn write_math(out: &mut String, kind: MathType, text: &str) {
 ///
 /// The comparison is against the *unescaped* `Str`: the rendered text has
 /// already had `https\://…` escaped into it, which never equals the target.
-fn write_autolink(out: &mut String, attr: &Attr, inner: &[Inline], target: &Target) -> bool {
+fn write_autolink(out: &mut String, inner: &[Inline], target: &Target) -> bool {
     let [Inline::Str(literal)] = inner else { return false };
-    let bare = attr.classes.iter().any(|c| c == "uri") && *literal == target.url;
-    let mail = attr.classes.iter().any(|c| c == "email")
-        && target.url.strip_prefix("mailto:") == Some(literal.as_str());
-    if bare || mail {
+    // **The class is not the test — the text is.** This asked for a
+    // `uri`/`email` class, which pandoc's own GFM reader does not attach,
+    // so every autolink in a README came back as
+    // `[https\://x](https://x)`. Pandoc writes `<url>` for any link whose
+    // text is its target, and the classed links the ipynb reader produces
+    // are the same shape.
+    //
+    // A title keeps the long form rather than matching: pandoc drops it
+    // here, and a title that vanishes is content lost for a byte.
+    let same = *literal == target.url;
+    let mail = target.url.strip_prefix("mailto:") == Some(literal.as_str());
+    if target.title.is_empty() && (same || mail) {
         let _ = write!(out, "<{literal}>");
         return true;
     }
     false
+}
+
+/// Whether this inline's rendering starts with `[`, which a preceding
+/// `!` would turn into an image. An `Image` does not count: it writes its
+/// own `!`, so the pair is `!![…]` and the first one stays literal.
+fn opens_bracket(inline: &Inline) -> bool {
+    match inline {
+        Inline::Link(..) => true,
+        Inline::Str(text) => text.starts_with('['),
+        _ => false,
+    }
 }
 
 /// Whether `ch`, appended here, would complete one of GFM's autolink
@@ -903,19 +1009,56 @@ fn opens_autolink(out: &str, ch: char) -> bool {
 
 /// Escape text so it re-reads as itself.
 ///
-/// Conservative on purpose: characters that could open markup are always
-/// escaped, and line-leading characters that could start a block are
-/// escaped too. Everything else is left alone so the output stays readable.
+/// **Pandoc's rules, probed one character in five contexts at a time**
+/// (`scripts/writers.sh` is the check). It escaped more than pandoc for a
+/// long time, which is safe and is not the same output: `a_b` was
+/// `a\_b`, every `&` was `&amp;`, and a tab was `&#9;` — so a README
+/// converted here and there differed on nearly every line.
+///
+/// Three places keep the wider escape on purpose, each because pandoc's
+/// own output does not read back as what went in. They are the only ones,
+/// and `COMPATIBILITY.md` has the repro for each:
+///
+/// - a backslash **before ASCII punctuation**. Pandoc writes `\\` and
+///   then *drops the character*: `a\*b` comes out `a\\b`, which reads
+///   back as `a\b`;
+/// - an `&` that starts something entity-shaped. Pandoc writes it bare,
+///   so `a&amp;b` reads back as `a&b`;
+/// - the GFM autolink triggers. Pandoc writes literal `http://x` bare and
+///   its own reader turns the text into a link.
 fn escape_text(out: &mut String, text: &str, gfm: bool) {
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
         let at_line_start = out.is_empty() || out.ends_with('\n');
+        // A marker only opens a block when the line breaks after it, so
+        // `-b` is text and `- b` is a list. Pandoc splits on exactly that.
+        let opens_block = next.is_none_or(|c| c == ' ');
         match ch {
-            '\\' | '*' | '_' | '[' | ']' | '<' | '>' | '`' => {
+            '*' | '[' | ']' | '<' | '>' | '`' | '$' => {
                 out.push('\\');
                 out.push(ch);
             }
-            // GFM adds two delimiters that mean something anywhere: `~~`
-            // opens strikeout, and `|` divides a table row.
+            // `_` between two alphanumerics is not emphasis in CommonMark,
+            // and `snake_case` is most of what a technical document holds.
+            '_' if !(out.ends_with(|c: char| c.is_alphanumeric())
+                && next.is_some_and(char::is_alphanumeric)) =>
+            {
+                out.push('\\');
+                out.push(ch);
+            }
+            // Only where it would be read as an escape. See the note above
+            // for why this is wider than pandoc's.
+            '\\' if next.is_none_or(|c| c.is_ascii_punctuation()) => out.push_str("\\\\"),
+            // `|` divides a table row anywhere, and `~` opens strikeout.
+            //
+            // **Every** `~`, where pandoc escapes only a doubled one.
+            // Pandoc can afford the narrower rule because its own reader
+            // needs two tildes; this reader strikes on one (`~b~` is
+            // `Strikeout` here and `Str "~b~"` there), so a bare `~`
+            // would come back as markup. The divergence is the reader's,
+            // and until it is settled the writer has to be safe rather
+            // than identical.
             '~' | '|' if gfm => {
                 out.push('\\');
                 out.push(ch);
@@ -927,31 +1070,62 @@ fn escape_text(out: &mut String, text: &str, gfm: bool) {
                 out.push('\\');
                 out.push(ch);
             }
-            // These only mean something at the start of a line.
-            '#' | '-' | '+' | '=' | '~' | ':' | '|' if at_line_start => {
+            // These only mean something at the start of a line. `#` needs
+            // no space after it to be a heading, so it has no `opens_block`.
+            '#' if at_line_start => {
+                out.push('\\');
+                out.push(ch);
+            }
+            // `-` and `+` open a list only with a space after them — but
+            // a *run* of `-` or `=` under a paragraph line is a setext
+            // heading, which is not a block opener at all and is why this
+            // is wider than pandoc's rule. Pandoc loses `Foo\nbar\n\---`
+            // to a heading; `CommonMark` example 106 is that document.
+            '-' | '+' if at_line_start && (opens_block || next == Some(ch)) => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '=' if at_line_start && next == Some('=') => {
                 out.push('\\');
                 out.push(ch);
             }
             // `1.` and `1)` open an ordered list, but only where the line
             // so far is nothing but the number.
-            '.' | ')' if digits_since_line_start(out) => {
+            '.' | ')' if digits_since_line_start(out) && opens_block => {
                 out.push('\\');
                 out.push(ch);
             }
-            '!' => {
-                // Only dangerous immediately before a link.
-                out.push('\\');
-                out.push('!');
-            }
-            '&' => out.push_str("&amp;"),
-            // A literal newline or tab inside a `Str` is text, not
-            // structure: written raw they would split the paragraph or
-            // open an indented code block, so spell them as references.
+            // Only dangerous immediately before a link. Pandoc writes
+            // `\![` and lets the bracket stand, relying on the escaped
+            // `]` to stop a link forming — which fails when the very next
+            // inline **is** a link and supplies the `](url)` itself.
+            // `CommonMark` example 593 is that document.
+            '!' if next == Some('[') => out.push_str("\\!"),
+            '&' if entity_ahead(next, &chars) => out.push_str("&amp;"),
+            // A literal newline inside a `Str` is text, not structure:
+            // written raw it would split the paragraph. A tab is only
+            // structure at the start of a line, where it opens an
+            // indented code block.
             '\n' => out.push_str("&#10;"),
-            '\t' => out.push_str("&#9;"),
+            '\t' if at_line_start => out.push_str("&#9;"),
             ch => out.push(ch),
         }
     }
+}
+
+/// Whether the `&` just read starts an HTML entity, which is the only
+/// case where writing it bare changes what the text says.
+fn entity_ahead(next: Option<char>, rest: &std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    let Some(first) = next else { return false };
+    let tail: String = rest.clone().take(34).collect();
+    let body = if first == '#' {
+        tail[1..].trim_start_matches(|c: char| c.is_ascii_hexdigit() || c == 'x')
+    } else if first.is_ascii_alphabetic() {
+        tail.trim_start_matches(|c: char| c.is_ascii_alphanumeric())
+    } else {
+        return false;
+    };
+    body.starts_with(';') && body.len() < tail.len()
 }
 
 /// An `Attr` as HTML attributes: `id` first, then the classes as one
@@ -979,6 +1153,7 @@ fn escape_attribute(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::read_commonmark;
+    use ferrodoc_ast::Attr;
 
     /// Markdown has no syntax for these, so pandoc writes raw HTML and so
     /// does this. Dropping the tag loses meaning, not styling: `H~2~O`
@@ -1315,10 +1490,12 @@ mod tests {
     }
 
     #[test]
-    fn a_classed_autolink_goes_back_in_its_angle_form() {
+    fn an_autolink_goes_back_in_its_angle_form() {
         // `[text](url)` would lose the `uri` class on the next read, which
         // is what the ipynb writer gate scores. Probed: pandoc writes
-        // `<url>` for a `uri`-classed link and `<address>` for `email`.
+        // `<url>` for **any** link whose text is its target — the class
+        // is not part of its test, and requiring one here meant every
+        // autolink a GFM document contains came back in bracket form.
         let uri = Pandoc::new(vec![Block::Para(vec![Inline::Link(
             Box::new(Attr { classes: vec!["uri".to_owned()], ..Attr::default() }),
             vec![Inline::Str("https://example.org/r".to_owned())],
@@ -1333,13 +1510,29 @@ mod tests {
         )])]);
         assert_eq!(write_gfm(&mail), "<ops@example.com>\n");
 
-        // An unclassed link keeps the bracket form, class or no class.
+        // An unclassed link with the same text is the same autolink.
         let plain = Pandoc::new(vec![Block::Para(vec![Inline::Link(
             Box::default(),
             vec![Inline::Str("https://example.org/r".to_owned())],
             Box::new(Target { url: "https://example.org/r".to_owned(), title: String::new() }),
         )])]);
-        assert_eq!(write_gfm(&plain), "[https\\://example.org/r](https://example.org/r)\n");
+        assert_eq!(write_gfm(&plain), "<https://example.org/r>\n");
+
+        // A title has nowhere to go in the angle form, so it keeps the
+        // brackets. Pandoc drops the title; a title that vanishes is
+        // content lost for a byte.
+        let titled = Pandoc::new(vec![Block::Para(vec![Inline::Link(
+            Box::default(),
+            vec![Inline::Str("https://example.org/r".to_owned())],
+            Box::new(Target {
+                url: "https://example.org/r".to_owned(),
+                title: "t".to_owned(),
+            }),
+        )])]);
+        assert_eq!(
+            write_gfm(&titled),
+            "[https\\://example.org/r](https://example.org/r \"t\")\n"
+        );
     }
 
     #[test]

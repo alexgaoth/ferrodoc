@@ -1,6 +1,6 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-19 16:45:12.145712355 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-19 16:45:11.974712259 -0700
-@@ -17,22 +17,22 @@
+--- samples/05-html-to-markdown/pandoc.md	2026-08-23 15:57:18.654376242 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-23 15:57:18.366376431 -0700
+@@ -17,12 +17,12 @@
  
  ## Rollout schedule
  
@@ -19,51 +19,7 @@
  
  ## What each team has to do
  
--1.  Export everything from the old system.
--2.  Convert it:
--    - `.docx` and `.odt` to markdown for the
--      index
--    - markdown back to `.docx` for anyone who needs to edit in
--      Word
--3.  Spot-check 1 % of the output by hand.
-+1. Export everything from the old system.
-+2. Convert it:
-+   - `.docx` and `.odt` to markdown for the
-+     index
-+   - markdown back to `.docx` for anyone who needs to edit in
-+     Word
-+3. Spot-check 1 % of the output by hand.
- 
- ### Checklist
- 
-@@ -60,7 +60,9 @@
- 
- An indented code block, which is a different construct:
- 
--    ferrodoc -f markdown -t html handbook.md
-+```
-+ferrodoc -f markdown -t html handbook.md
-+```
- 
- ## Awkward cases, on purpose
- 
-@@ -68,7 +70,7 @@
- `<div>`, `--flag`, and a literal backtick:
- `` ` ``.
- 
--Text with entities & symbols — an em dash, "curly quotes", an
-+Text with entities &amp; symbols — an em dash, "curly quotes", an
- ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
- 日本語.
- 
-@@ -83,17 +85,13 @@
- — the claim was wider than the corpus behind it, which is the defect
- this file is supposed to catch.
- 
--A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An
--email: <ops@example.com>.
-+A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: [https\://example.com/status](https://example.com/status). An
-+email: [ops\@example.com](mailto:ops@example.com).
+@@ -88,12 +88,8 @@
  
  An image: ![the logo](logo.png "Project logo")
  
@@ -76,12 +32,3 @@
  Nested quoting:
  
  > Outer quote.
-@@ -105,7 +103,7 @@
- 
- ## Sign-off
- 
--Contact <ops@example.com> with
-+Contact [ops\@example.com](mailto:ops@example.com) with
- questions. See the `LICENSE` file for terms.
- 
- [^1]: Footnote bodies can contain **formatting**

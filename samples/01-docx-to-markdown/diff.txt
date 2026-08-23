@@ -1,17 +1,6 @@
---- samples/01-docx-to-markdown/pandoc.md	2026-08-19 16:45:11.496711990 -0700
-+++ samples/01-docx-to-markdown/ferrodoc.md	2026-08-19 16:45:11.432711954 -0700
-@@ -14,18 +14,18 @@
- 
- ## Actions
- 
--1.  Review pricing
-+1. Review pricing
- 
--2.  Hire two engineers
-+2. Hire two engineers
- 
--3.  Revisit in March
-+3. Revisit in March
+--- samples/01-docx-to-markdown/pandoc.md	2026-08-23 15:57:17.701376867 -0700
++++ samples/01-docx-to-markdown/ferrodoc.md	2026-08-23 15:57:17.622376920 -0700
+@@ -22,10 +22,10 @@
  
  See [the appendix](https://example.com/appendix) for detail.
  

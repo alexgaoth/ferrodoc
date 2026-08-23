@@ -14,11 +14,11 @@ Revenue grew **18%** against a *flat* market, and the pipeline carried into the 
 
 ## Actions
 
-1. Review pricing
+1.  Review pricing
 
-2. Hire two engineers
+2.  Hire two engineers
 
-3. Revisit in March
+3.  Revisit in March
 
 See [the appendix](https://example.com/appendix) for detail.
 
