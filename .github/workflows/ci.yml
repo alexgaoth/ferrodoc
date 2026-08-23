@@ -292,13 +292,17 @@ jobs:
               echo "sphinx accepted $name"
               continue
             fi
-            # `headings-deep.md` goes from a second-level heading straight
-            # to a fourth, and RST has no heading levels — the underline
-            # character defines one by where it first appears, so a skip
-            # is "Inconsistent title style" and no writer can avoid it.
-            # Pandoc's output for that document is **byte-identical** to
-            # this one, which is what proves the document is the limit
-            # rather than the writer. Anything else is a failure.
+            # Two documents reach a limit of the format rather than of
+            # the writer, and in both pandoc's output is **byte-identical**
+            # to this one — which is what proves it:
+            #   `headings-deep.md` goes from a second-level heading
+            #   straight to a fourth, and RST has no heading levels (the
+            #   underline character defines one by where it first appears),
+            #   so a skip is "Inconsistent title style";
+            #   `nested-structures.md` has a thematic break inside a block
+            #   quote, and docutils allows a transition nowhere but at the
+            #   top level.
+            # Anything else is a failure.
             pandoc "$doc" -f commonmark -t rst --wrap=preserve > pandoc.rst
             if diff -q "$name.rst" pandoc.rst >/dev/null; then
               echo "sphinx refused $name; pandoc writes the same bytes, so this is the format"

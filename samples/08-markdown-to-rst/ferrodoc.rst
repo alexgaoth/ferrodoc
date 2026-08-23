@@ -1,13 +1,9 @@
-.. _field-handbook:
-
 Field Handbook
 ==============
 
 A realistic document, written the way people actually write them — and
 deliberately including the awkward parts, because a sample that only shows
 easy cases tells you nothing.
-
-.. _why-this-exists:
 
 Why this exists
 ---------------
@@ -19,8 +15,6 @@ is not boring, it is usually because something was silently dropped.
    A conversion you cannot inspect is a conversion you cannot trust.
 
    — every migration post-mortem, eventually
-
-.. _rollout-schedule:
 
 Rollout schedule
 ----------------
@@ -37,47 +31,37 @@ Rollout schedule
 | Decommission | Ops   | 2026-09-15 | not started |
 +--------------+-------+------------+-------------+
 
-.. _what-each-team-has-to-do:
-
 What each team has to do
 ------------------------
 
 1. Export everything from the old system.
-
 2. Convert it:
 
    - ``.docx`` and ``.odt`` to markdown for the index
-
    - markdown back to ``.docx`` for anyone who needs to edit in Word
 
 3. Spot-check 1 % of the output by hand.
-
-.. _checklist:
 
 Checklist
 ~~~~~~~~~
 
 - ☒ Inventory complete
-
 - ☐ Pilot signed off
-
 - ☐ Rollback plan written
-
-.. _running-a-conversion:
 
 Running a conversion
 --------------------
 
 Convert a directory in one pass:
 
-.. code-block:: bash
+.. code:: bash
 
    find . -name '*.docx' -print0 |
      xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md
 
 The Python equivalent, for a pipeline that already has one:
 
-.. code-block:: python
+.. code:: python
 
    import ferrodoc
    with open("report.docx", "rb") as f:
@@ -89,18 +73,16 @@ An indented code block, which is a different construct:
 
    ferrodoc -f markdown -t html handbook.md
 
-.. _awkward-cases-on-purpose:
-
 Awkward cases, on purpose
 -------------------------
 
 Inline code with special characters: ``a | b``, ``<div>``, ``--flag``, and a
-literal backtick: `````.
+literal backtick: :literal:`\``.
 
 Text with entities & symbols — an em dash, "curly quotes", an
 ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-Struck-through text and text with a footnote. [#]_
+[STRIKEOUT:Struck-through text] and text with a footnote. [1]_
 
 Five inlines no writer test used to reach through this file: underlined
 text, small caps, a
@@ -111,12 +93,20 @@ sample document contained one — the claim was wider than the corpus behind
 it, which is the defect this file is supposed to catch.
 
 A link with a title: `the spec <https://example.com/spec>`__.
-A bare autolink: `https://example.com/status <https://example.com/status>`__. An email:
-`ops@example.com <mailto:ops@example.com>`__.
+A bare autolink: https://example.com/status. An email:
+ops@example.com.
 
 An image: |the logo|
 
+.. raw:: html
+
+   <div class="callout">
+
 Raw HTML block, which not every target format can hold.
+
+.. raw:: html
+
+   </div>
 
 Nested quoting:
 
@@ -125,19 +115,16 @@ Nested quoting:
       Inner quote, with a list:
 
       - one
-
       - two
-
-.. _sign-off:
 
 Sign-off
 --------
 
-Contact `ops@example.com <mailto:ops@example.com>`__ with questions. See the ``LICENSE`` file for
+Contact ops@example.com with questions. See the ``LICENSE`` file for
 terms.
-
 
 .. |the logo| image:: logo.png
 
-.. [#] Footnote bodies can contain **formatting** and a
+.. [1]
+   Footnote bodies can contain **formatting** and a
    `link <https://example.com>`__.

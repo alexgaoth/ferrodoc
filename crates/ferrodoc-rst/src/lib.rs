@@ -25,7 +25,9 @@
 //!   so every nested construct is rendered and then shifted, rather than
 //!   written with a running prefix.
 
-use ferrodoc_ast::{Block, Cell, Inline, ListNumberStyle, Pandoc, QuoteType, Row, Table};
+use ferrodoc_ast::{
+    Block, Cell, Inline, ListNumberDelim, ListNumberStyle, Pandoc, QuoteType, Row, Table,
+};
 use std::fmt::Write as _;
 
 /// Render a document as reStructuredText.
@@ -36,6 +38,19 @@ pub fn write_rst(doc: &Pandoc) -> String {
     def.flush(&mut out);
     let text = out.trim_end().to_owned();
     if text.is_empty() { text } else { text + "\n" }
+}
+
+/// End what is written so far with exactly one blank line, so a group of
+/// definitions is separated from the document by one and not by however
+/// many the last block happened to leave.
+fn separate(out: &mut String) {
+    if out.is_empty() {
+        return;
+    }
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    out.push_str("\n\n");
 }
 
 /// The definitions an inline defers to block level.
@@ -56,6 +71,10 @@ struct Defs {
     /// Footnote bodies, in reference order — which is what pairs them with
     /// the auto-numbered `[#]_` references.
     notes: Vec<String>,
+    /// How many names have been invented, so the next is `imageN`. One
+    /// counter for both cases pandoc invents a name for: an image with no
+    /// alt text, and one whose alt text is already taken by another URL.
+    generated: usize,
 }
 
 impl Defs {
@@ -64,31 +83,44 @@ impl Defs {
     /// names a different one. Two definitions of one name is an error in
     /// docutils, not a last-one-wins.
     fn image_name(&mut self, alt: &str, url: &str) -> String {
-        let base = if alt.is_empty() { "image" } else { alt };
-        let mut name = base.to_owned();
-        let mut suffix = 1;
-        while let Some((_, existing)) = self.images.iter().find(|(n, _)| *n == name) {
-            if existing == url {
-                return name;
+        if !alt.is_empty() {
+            match self.images.iter().find(|(name, _)| name == alt) {
+                Some((_, existing)) if existing == url => return alt.to_owned(),
+                None => {
+                    self.images.push((alt.to_owned(), url.to_owned()));
+                    return alt.to_owned();
+                }
+                Some(_) => {}
             }
-            suffix += 1;
-            name = format!("{base} {suffix}");
         }
+        self.generated += 1;
+        let name = format!("image{}", self.generated);
         self.images.push((name.clone(), url.to_owned()));
         name
     }
 
     fn flush(&self, out: &mut String) {
-        for (name, url) in &self.images {
-            let _ = write!(out, "\n.. |{name}| image:: {url}\n");
+        // The substitution definitions are **one block**, not one block
+        // each: pandoc separates the group from the document with a blank
+        // line and then writes them on consecutive lines.
+        if !self.images.is_empty() {
+            separate(out);
+            for (name, url) in &self.images {
+                let _ = writeln!(out, ".. |{name}| image:: {url}");
+            }
         }
-        for body in &self.notes {
-            // A body of more than one line is a continuation, and an
-            // unindented second line ends the footnote instead.
-            let mut lines = body.lines();
-            let _ = write!(out, "\n.. [#] {}\n", lines.next().unwrap_or_default());
-            for line in lines {
-                let _ = writeln!(out, "{INDENT}{line}");
+        // A footnote is its own block, and its body starts on the line
+        // **after** the label, indented — which is also what lets a body
+        // of more than one line stay part of the footnote.
+        for (index, body) in self.notes.iter().enumerate() {
+            separate(out);
+            let _ = writeln!(out, ".. [{}]", index + 1);
+            for line in body.lines() {
+                if line.is_empty() {
+                    out.push('\n');
+                } else {
+                    let _ = writeln!(out, "{INDENT}{line}");
+                }
             }
         }
     }
@@ -107,32 +139,48 @@ const UNDERLINES: &[char] = &['=', '-', '~', '^', '"', '\''];
 const INDENT: &str = "   ";
 
 fn blocks(list: &[Block], out: &mut String, def: &mut Defs) {
+    let mut previous: Option<&Block> = None;
     for block in list {
+        // An empty comment between a block that ends indented and a quote
+        // that starts indented, or the quote is read as more of the first.
+        // Pandoc's rule, probed pair by pair: a paragraph needs no comment
+        // and a list, a quote or a literal block does.
+        if matches!(block, Block::BlockQuote(_)) && previous.is_some_and(closes_indented) {
+            out.push_str("..\n\n");
+        }
+        let before = out.len();
         block_to(block, out, def);
+        // A raw block in another format renders to nothing and takes its
+        // separator with it.
+        if out.len() == before {
+            continue;
+        }
         // A blank line between blocks is not decoration in RST; it is what
         // ends the previous one.
         if !out.ends_with("\n\n") {
             out.push('\n');
         }
+        previous = Some(block);
     }
+}
+
+/// Whether this block leaves the reader inside an indented context, so a
+/// following quote would be read as part of it.
+fn closes_indented(block: &Block) -> bool {
+    matches!(
+        block,
+        Block::BlockQuote(_)
+            | Block::BulletList(_)
+            | Block::OrderedList(..)
+            | Block::DefinitionList(_)
+            | Block::CodeBlock(..)
+            | Block::LineBlock(_)
+    )
 }
 
 fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
     match block {
         Block::Plain(list) | Block::Para(list) => {
-            // A paragraph that is nothing but a picture is the `image`
-            // directive. Written as a substitution instead, the reference
-            // needs a name — and that name becomes the alt text, so an
-            // image with none acquires one.
-            if let [Inline::Image(_, alt, target)] = list.as_slice() {
-                let _ = writeln!(out, ".. image:: {}", target.url);
-                if !alt.is_empty() {
-                    let mut text = String::new();
-                    inlines(alt, &mut text, def);
-                    let _ = writeln!(out, "{INDENT}:alt: {}", text.trim());
-                }
-                return;
-            }
             let mut text = String::new();
             inlines(list, &mut text, def);
             let _ = writeln!(out, "{}", text.trim_end());
@@ -145,11 +193,14 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             }
         }
         Block::CodeBlock(attr, code) => {
-            // `code-block` when a language is known, so a toolchain
-            // highlights it; a plain literal block otherwise.
-            match attr.classes.first() {
+            // `code` when a language is known, so a toolchain highlights
+            // it; a plain literal block otherwise. **`code`, not
+            // `code-block`** — docutils understands both and pandoc
+            // writes the first. The `sourceCode` class is pandoc's own
+            // marker and is skipped, the way the markdown writers skip it.
+            match attr.classes.iter().find(|class| class.as_str() != "sourceCode") {
                 Some(language) => {
-                    let _ = writeln!(out, ".. code-block:: {language}\n");
+                    let _ = writeln!(out, ".. code:: {language}\n");
                 }
                 None => out.push_str("::\n\n"),
             }
@@ -175,12 +226,21 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
                     ListNumberStyle::UpperRoman => format!("{}.", roman(number, true)),
                     _ => format!("{number}."),
                 };
-                item_to(item, &marker, out, def);
+                // The delimiter the list was written with. RST reads both
+                // `1.` and `1)`, and a list that said `)` comes back
+                // saying `.` unless this does.
+                let marker = match attrs.delim {
+                    ListNumberDelim::OneParen | ListNumberDelim::TwoParens => {
+                        marker.replace('.', ")")
+                    }
+                    _ => marker,
+                };
+                item_to(item, &marker, tight(items), out, def);
             }
         }
         Block::BulletList(items) => {
             for item in items {
-                item_to(item, "-", out, def);
+                item_to(item, "-", tight(items), out, def);
             }
         }
         Block::DefinitionList(entries) => {
@@ -196,13 +256,17 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             }
         }
         Block::Header(level, attr, list) => {
-            // An explicit target above the heading is how RST names one.
-            if !attr.identifier.is_empty() {
-                let _ = writeln!(out, ".. _{}:\n", attr.identifier);
-            }
             let mut text = String::new();
             inlines(list, &mut text, def);
             let text = text.trim().to_owned();
+            // An explicit target above the heading is how RST names one —
+            // but a heading is **already** a target under the name its own
+            // text makes, so pandoc writes one only where the identifier
+            // says something the text does not. Writing it always put a
+            // `.. _a-heading:` above every heading in the document.
+            if !attr.identifier.is_empty() && attr.identifier != slug(&stringify(list)) {
+                let _ = writeln!(out, ".. _{}:\n", attr.identifier);
+            }
             let index = usize::try_from(*level).unwrap_or(1).saturating_sub(1);
             let underline = UNDERLINES.get(index).copied().unwrap_or('\'');
             // Character *width*, not byte length: an underline shorter
@@ -211,7 +275,9 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             let width = text.chars().count().max(1);
             let _ = writeln!(out, "{text}\n{}", underline.to_string().repeat(width));
         }
-        Block::HorizontalRule => out.push_str("----\n"),
+        // Fourteen dashes, which is what pandoc writes. Four is a valid
+        // transition too; the bytes are the test.
+        Block::HorizontalRule => out.push_str("--------------\n"),
         Block::Table(table) => table_to(table, out, def),
         Block::Figure(_, caption, inner) => {
             blocks(inner, out, def);
@@ -222,17 +288,37 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             }
         }
         Block::Div(_, inner) => blocks(inner, out, def),
-        Block::RawBlock(format, text) => {
-            if format.0 == "rst" {
-                out.push_str(text);
-                out.push('\n');
-            }
+        Block::RawBlock(format, text) => raw_block_to(&format.0, text, out),
+    }
+}
+
+/// A raw block, kept rather than dropped.
+///
+/// `.. raw:: html` is RST's way to carry another format's syntax through,
+/// and a toolchain that emits that format uses it. Dropping the block
+/// deleted every table and comment a converted page had.
+fn raw_block_to(format: &str, text: &str, out: &mut String) {
+    if format == "rst" {
+        out.push_str(text);
+        out.push('\n');
+        return;
+    }
+    let _ = writeln!(out, ".. raw:: {format}\n");
+    for line in text.lines() {
+        if line.is_empty() {
+            out.push('\n');
+        } else {
+            let _ = writeln!(out, "{INDENT}{line}");
         }
     }
 }
 
 /// One list item: its marker, then its content aligned under it.
-fn item_to(item: &[Block], marker: &str, out: &mut String, def: &mut Defs) {
+fn tight(items: &[Vec<Block>]) -> bool {
+    items.iter().all(|item| !item.iter().any(|block| matches!(block, Block::Para(_))))
+}
+
+fn item_to(item: &[Block], marker: &str, tight: bool, out: &mut String, def: &mut Defs) {
     let mut text = String::new();
     blocks(item, &mut text, def);
     let pad = " ".repeat(marker.chars().count() + 1);
@@ -245,7 +331,12 @@ fn item_to(item: &[Block], marker: &str, out: &mut String, def: &mut Defs) {
             let _ = writeln!(out, "{pad}{line}");
         }
     }
-    out.push('\n');
+    // A tight list has no blank line between its items — but an item
+    // holding more than one block still needs one, or the block that
+    // follows is read as more of that item.
+    if !tight || text.trim_end().contains("\n\n") {
+        out.push('\n');
+    }
 }
 
 /// Shift a rendered block right, which is how RST spells nesting.
@@ -331,9 +422,26 @@ fn cell_text(cell: &Cell, def: &mut Defs) -> String {
     out.replace('\n', " ").trim().to_owned()
 }
 
+/// Render a run of inlines, collapsing the space a dropped inline leaves.
+///
+/// Pandoc builds its output as a `Doc` where two breaking spaces with
+/// nothing between them are one space, and a raw inline in another format
+/// renders to nothing — so `plus <br/> and` is `plus and` there and was
+/// `plus  and` here.
 fn inlines(list: &[Inline], out: &mut String, def: &mut Defs) {
+    let mut after_break = false;
     for inline in list {
-        inline_to(inline, out, def);
+        let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
+        if breaking && after_break {
+            continue;
+        }
+        let mut piece = String::new();
+        inline_to(inline, &mut piece, def);
+        if piece.is_empty() {
+            continue;
+        }
+        out.push_str(&piece);
+        after_break = breaking;
     }
 }
 
@@ -346,10 +454,20 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
         // text. `COMPATIBILITY.md` records the loss.
         Inline::SoftBreak | Inline::LineBreak => out.push('\n'),
         Inline::Emph(inner) => wrap("*", inner, out, def),
-        // RST has no underline, and no strikeout either; both keep their
-        // content rather than inventing a role a toolchain would not have.
-        Inline::Underline(inner) | Inline::Strikeout(inner) | Inline::SmallCaps(inner) => {
-            inlines(inner, out, def);
+        // RST has no underline and no small caps; both keep their content
+        // rather than inventing a role a toolchain would not have. A
+        // citation and a span are their content for the same reason.
+        Inline::Underline(inner)
+        | Inline::SmallCaps(inner)
+        | Inline::Cite(_, inner)
+        | Inline::Span(_, inner) => inlines(inner, out, def),
+        // Strikeout has no RST markup either, and pandoc spells it
+        // `[STRIKEOUT:…]` — a convention rather than a directive, but it
+        // is what its own RST reader reads back.
+        Inline::Strikeout(inner) => {
+            out.push_str("[STRIKEOUT:");
+            inlines(&flattened(inner), out, def);
+            out.push(']');
         }
         Inline::Strong(inner) => wrap("**", inner, out, def),
         Inline::Superscript(inner) => role("superscript", inner, out, def),
@@ -363,11 +481,16 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             inlines(inner, out, def);
             out.push(close);
         }
-        Inline::Cite(_, inner) | Inline::Span(_, inner) => inlines(inner, out, def),
         // Double backticks, and no escaping inside them: that is what
-        // makes it literal.
+        // makes it literal — **unless the code holds a backtick**, which
+        // no run of them can enclose. Pandoc falls back to the `literal`
+        // role, where a backslash escape works.
         Inline::Code(_, code) => {
-            let _ = write!(out, "``{code}``");
+            if code.contains('`') {
+                let _ = write!(out, ":literal:`{}`", code.replace('`', "\\`"));
+            } else {
+                let _ = write!(out, "``{code}``");
+            }
         }
         Inline::Math(_, math) => {
             let _ = write!(out, ":math:`{math}`");
@@ -378,8 +501,21 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             }
         }
         Inline::Link(_, inner, target) => {
+            // **RST cannot nest inline markup**, so a link's text is
+            // plain: `\`link with *emph* inside <x>\`__` is not emphasis
+            // inside a link, it is a literal asterisk. Pandoc flattens it
+            // and so does this.
             let mut text = String::new();
-            inlines(inner, &mut text, def);
+            inlines(&flattened(inner), &mut text, def);
+            // A link whose text **is** its target needs no markup at all:
+            // RST linkifies a bare URL, and pandoc writes one. The angle
+            // form around the same string is what this wrote, and it is
+            // what made every README's autolinks differ.
+            let bare = text.trim();
+            if bare == target.url || target.url.strip_prefix("mailto:") == Some(bare) {
+                out.push_str(bare);
+                return;
+            }
             // An anonymous reference (two underscores) rather than a named
             // one: a named target must be unique in the document, and two
             // links with the same text are ordinary.
@@ -397,12 +533,107 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             let mut text = String::new();
             blocks(blocks_in_note, &mut text, def);
             def.notes.push(text.trim().to_owned());
-            out.push_str(" [#]_");
+            // Numbered, not `[#]_`: pandoc numbers them, and a numbered
+            // label is what pairs a reference with its body when a
+            // document is split.
+            let _ = write!(out, " [{}]_", def.notes.len());
         }
     }
 }
 
+/// The same inlines with every emphasis-like wrapper removed, because
+/// RST has no way to nest them.
+fn flattened(inlines: &[Inline]) -> Vec<Inline> {
+    let mut out = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        match inline {
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Underline(inner)
+            | Inline::Strikeout(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Span(_, inner)
+            | Inline::Cite(_, inner) => out.extend(flattened(inner)),
+            other => out.push(other.clone()),
+        }
+    }
+    out
+}
+
+/// The plain text of an inline run, as pandoc's `stringify` produces it
+/// for identifiers: a break is a space, and raw content and footnotes
+/// contribute nothing. Slugging the *rendered* RST instead put the
+/// footnote reference into the name, so every heading with a note got an
+/// explicit target it did not need.
+fn stringify(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    stringify_into(inlines, &mut out);
+    out
+}
+
+fn stringify_into(inlines: &[Inline], out: &mut String) {
+    for inline in inlines {
+        match inline {
+            Inline::Str(text) | Inline::Code(_, text) | Inline::Math(_, text) => {
+                out.push_str(text);
+            }
+            Inline::Space | Inline::SoftBreak | Inline::LineBreak => out.push(' '),
+            Inline::RawInline(..) | Inline::Note(_) => {}
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => stringify_into(inner, out),
+        }
+    }
+}
+
+/// The identifier a heading's own text already gives it. Pandoc's rule,
+/// and the same one the other writers use.
+fn slug(text: &str) -> String {
+    let filtered: String = text
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace() || matches!(c, '_' | '-' | '.'))
+        .flat_map(char::to_lowercase)
+        .collect();
+    let joined = filtered.split_whitespace().collect::<Vec<_>>().join("-");
+    if joined.is_empty() { "section".to_owned() } else { joined }
+}
+
 fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
+    // **RST cannot nest inline markup.** `*emph *strong* text*` is not
+    // strong inside emphasis — docutils reads the inner asterisks as
+    // literal — so pandoc closes the outer marker, writes the inner one
+    // on its own, and opens the outer one again. Without this,
+    // `sphinx-build -W` rejected the document.
+    if inner.iter().any(|i| matches!(i, Inline::Emph(_) | Inline::Strong(_))) {
+        let mut pieces: Vec<String> = Vec::new();
+        let mut run: Vec<Inline> = Vec::new();
+        for item in inner {
+            if matches!(item, Inline::Emph(_) | Inline::Strong(_)) {
+                push_run(marker, &run, &mut pieces, def);
+                run.clear();
+                let mut text = String::new();
+                inline_to(item, &mut text, def);
+                let text = text.trim();
+                if !text.is_empty() {
+                    pieces.push(text.to_owned());
+                }
+            } else {
+                run.push(item.clone());
+            }
+        }
+        push_run(marker, &run, &mut pieces, def);
+        out.push_str(&pieces.join(" "));
+        return;
+    }
     let mut text = String::new();
     inlines(inner, &mut text, def);
     if text.trim().is_empty() {
@@ -410,6 +641,19 @@ fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
         return;
     }
     let _ = write!(out, "{marker}{}{marker}", text.trim());
+}
+
+/// One run of un-nested inlines, wrapped in the marker its parent uses.
+fn push_run(marker: &str, run: &[Inline], pieces: &mut Vec<String>, def: &mut Defs) {
+    if run.is_empty() {
+        return;
+    }
+    let mut text = String::new();
+    inlines(run, &mut text, def);
+    let text = text.trim();
+    if !text.is_empty() {
+        pieces.push(format!("{marker}{text}{marker}"));
+    }
 }
 
 fn role(name: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
@@ -514,16 +758,18 @@ mod tests {
     }
 
     #[test]
-    fn a_picture_alone_is_a_directive_not_a_substitution() {
-        // A substitution reference needs a name, and the name becomes the
-        // alt text — so an image with none would acquire one.
+    fn a_picture_with_no_alt_text_is_named_rather_than_left_unnamed() {
+        // A substitution reference needs a name and an image may have no
+        // alt text to give it one. This wrote `.. image::` for a picture
+        // alone in a paragraph to avoid the question; pandoc invents
+        // `image1`, `image2`, … and uses a substitution everywhere.
         let rst = write_rst(&doc(vec![Block::Para(vec![Inline::Image(
             Box::default(),
             Vec::new(),
             Box::new(Target { url: "x.png".into(), title: String::new() }),
         )])]));
-        assert!(rst.contains(".. image:: x.png"), "{rst}");
-        assert!(!rst.contains(":alt:"), "an alt appeared from nowhere: {rst}");
+        assert!(rst.contains("|image1|"), "{rst}");
+        assert!(rst.contains(".. |image1| image:: x.png"), "{rst}");
     }
 
     #[test]
@@ -569,9 +815,12 @@ mod tests {
             Inline::Space,
             picture("a.png"),
         ])]));
-        assert!(rst.contains("|logo| |logo 2| |logo|"), "{rst}");
+        // The second URL under the same alt takes an invented name, and
+        // the counter is shared with the images that have no alt at all —
+        // pandoc's, probed against six pictures in one document.
+        assert!(rst.contains("|logo| |image1| |logo|"), "{rst}");
         assert_eq!(rst.matches(".. |logo| image:: a.png").count(), 1, "{rst}");
-        assert_eq!(rst.matches(".. |logo 2| image:: b.png").count(), 1, "{rst}");
+        assert_eq!(rst.matches(".. |image1| image:: b.png").count(), 1, "{rst}");
     }
 
     #[test]
@@ -585,8 +834,10 @@ mod tests {
             Inline::Space,
             Inline::Str("and on".into()),
         ])]));
-        assert!(rst.contains("claim [#]_ and on"), "the sentence lost its tail: {rst}");
-        assert!(rst.contains("\n.. [#] source"), "{rst}");
+        assert!(rst.contains("claim [1]_ and on"), "the sentence lost its tail: {rst}");
+        // Numbered rather than `[#]_`, and the body starts on the line
+        // after the label — both pandoc's.
+        assert!(rst.contains("\n.. [1]\n   source"), "{rst}");
     }
 
     #[test]
