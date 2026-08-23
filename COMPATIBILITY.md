@@ -800,6 +800,18 @@ care:
        <(ferrodoc corpus/headings-deep.md -t rst)   # no output
   ```
 
+- **AsciiDoc refuses the same document, for the same reason.**
+  `asciidoctor --failure-level=WARN` says "section title out of
+  sequence: expected level 3, got level 4" on `corpus/headings-deep.md`,
+  because `=` count is a level there too. Pandoc's AsciiDoc for that
+  document is byte-identical to this writer's, and CI compares them
+  before accepting the refusal:
+
+  ```sh
+  diff <(pandoc corpus/headings-deep.md -f commonmark -t asciidoc --wrap=preserve) \
+       <(ferrodoc corpus/headings-deep.md -t asciidoc)   # no output
+  ```
+
 - **AsciiDoc has no gate at all, and cannot have one.** Pandoc writes
   AsciiDoc and does not read it, so there is no oracle to compare against.
   `asciidoctor --failure-level=WARN` accepts every corpus document in CI,

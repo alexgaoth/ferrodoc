@@ -312,12 +312,30 @@ jobs:
       - name: asciidoctor reads every corpus document
         run: |
           mkdir -p "$RUNNER_TEMP/adoc" && cd "$RUNNER_TEMP/adoc"
+          fail=0
           for doc in "$GITHUB_WORKSPACE"/corpus/*.md; do
             name=$(basename "$doc" .md)
             "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t asciidoc -o "$name.adoc"
-            asciidoctor --failure-level=WARN -o "$name.html" "$name.adoc"
-            echo "asciidoctor accepted $name"
+            if asciidoctor --failure-level=WARN -o "$name.html" "$name.adoc"; then
+              echo "asciidoctor accepted $name"
+              continue
+            fi
+            # The same document and the same cause as the sphinx step
+            # above: `headings-deep.md` skips from a second-level heading
+            # to a fourth, and AsciiDoc's `=` count is a level, so
+            # asciidoctor says "section title out of sequence". Pandoc's
+            # AsciiDoc for it is byte-identical to this writer's, which
+            # is what makes it the document's limit rather than ours.
+            pandoc "$doc" -f commonmark -t asciidoc --wrap=preserve > pandoc.adoc
+            if diff -q "$name.adoc" pandoc.adoc >/dev/null; then
+              echo "asciidoctor refused $name; pandoc writes the same bytes, so this is the format"
+            else
+              echo "asciidoctor REJECTED $name, and pandoc's output differs"
+              diff pandoc.adoc "$name.adoc" | head -20
+              fail=1
+            fi
           done
+          exit $fail
 
   # The C ABI, which is how Go, Java, C#, Ruby and Julia would link this.
   # Memory is the whole risk of the item: a leak of one result per
