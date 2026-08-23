@@ -53,28 +53,39 @@ verbose=0
 # six numbers nobody sees.
 summary=""
 
+# Two source dialects, because one of them cannot express the constructs
+# the writers are worst at. `corpus/*.md` is read as CommonMark, which has
+# **no table and no task list** — so a score over it alone said `latex 7/8`
+# while `samples/07-markdown-to-latex` showed the LaTeX *table* writer
+# diverging on every row it wrote. That is this repository's most expensive
+# bug class: a gate cannot fail on a construct its corpus lacks. The `gfm`
+# pass is the same comparison over `corpus/gfm/*.gfm`, which holds tables
+# with every alignment, task lists, and footnotes.
 for format in html markdown gfm latex rst asciidoc plain; do
     case "$format" in
         html|plain) wrap=none ;;
         *) wrap=preserve ;;
     esac
     same=0 total=0
-    for doc in corpus/*.md; do
-        total=$((total + 1))
-        ( ulimit -v 6000000
-          pandoc "$doc" -f commonmark -t "$format" --wrap="$wrap" \
-              --syntax-highlighting=none ) > "$work/p" 2>/dev/null
-        "$FERRODOC" "$doc" -f commonmark -t "$format" > "$work/f" 2>/dev/null
-        if diff -q "$work/p" "$work/f" >/dev/null; then
-            same=$((same + 1))
-        elif [ "$verbose" = 1 ]; then
-            printf '  %-9s %-22s %s lines\n' "$format" "$(basename "$doc")" \
-                "$(diff "$work/p" "$work/f" | grep -c '^[<>]')"
-        fi
+    for source in "commonmark corpus/*.md" "gfm corpus/gfm/*.gfm"; do
+        read -r from pattern <<<"$source"
+        for doc in $pattern; do
+            total=$((total + 1))
+            ( ulimit -v 6000000
+              pandoc "$doc" -f "$from" -t "$format" --wrap="$wrap" \
+                  --syntax-highlighting=none ) > "$work/p" 2>/dev/null
+            "$FERRODOC" "$doc" -f "$from" -t "$format" > "$work/f" 2>/dev/null
+            if diff -q "$work/p" "$work/f" >/dev/null; then
+                same=$((same + 1))
+            elif [ "$verbose" = 1 ]; then
+                printf '  %-9s %-22s %s lines\n' "$format" "$(basename "$doc")" \
+                    "$(diff "$work/p" "$work/f" | grep -c '^[<>]')"
+            fi
+        done
     done
     printf '%-10s %d/%d byte-identical to pandoc (--wrap=%s)\n' \
         "$format" "$same" "$total" "$wrap"
     summary="$summary $format $same/$total,"
 done
 
-printf 'byte-identical:%s all on corpus/*.md\n' "${summary%,}"
+printf 'byte-identical:%s all on corpus/*.md and corpus/gfm/*.gfm\n' "${summary%,}"

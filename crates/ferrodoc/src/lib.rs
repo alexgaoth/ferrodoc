@@ -819,6 +819,20 @@ pub fn render_page(doc: &Pandoc, page: &Page<'_>) -> Result<Vec<u8>, String> {
     ferrodoc_html::write_page(doc, page).map(String::into_bytes)
 }
 
+/// An HTML fragment with `--id-prefix` on the identifiers the writer
+/// invents.
+///
+/// [`prefix_identifiers`] reaches everything the tree carries; a
+/// footnote's `fn1`/`fnref1` are made up while writing and are the one
+/// set it cannot reach. Two documents on one page colliding on `#fn1` is
+/// the exact failure the flag exists to prevent, so the fragment path
+/// needs its own way in.
+#[cfg(feature = "html")]
+#[must_use]
+pub fn render_html_with_id_prefix(doc: &Pandoc, id_prefix: &str) -> Vec<u8> {
+    ferrodoc_html::write_html_with_id_prefix(doc, id_prefix).into_bytes()
+}
+
 /// Shift every heading, as pandoc's `--shift-heading-level-by` does.
 ///
 /// Three rules, all probed against 3.8.2.1 rather than read:

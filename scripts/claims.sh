@@ -122,6 +122,22 @@ check_gates() {
         published "$figure" "$where" "$anchor"
     done < <(gate_claims)
 
+    # `writers.sh` prints its seven scores on one line and each has a
+    # table row of its own. Nothing checked them until 2026-08-23, and the
+    # LaTeX row had said 0/8 for as long as it had a row.
+    local writers score
+    writers=$(grep -P "^\Qtext writers vs pandoc's\E\t" "$scores" || true)
+    for writer in html latex plain gfm rst asciidoc markdown; do
+        score=$(printf '%s' "$writers" | grep -oE "\b$writer [0-9]+/[0-9]+" | awk '{print $2}')
+        if [ -z "$score" ]; then
+            printf '  MISSING  %-34s no writers.sh score in this run\n' "$writer"
+            failures=$((failures + 1))
+            checked=$((checked + 1))
+            continue
+        fi
+        published "$score" COMPATIBILITY.md "| \`$writer\` |"
+    done
+
     # The GFM reader is published as one number and gated as two runs.
     local corpus spec
     corpus=$(figure_from "$scores" "GFM reader (corpus)" ours || true)

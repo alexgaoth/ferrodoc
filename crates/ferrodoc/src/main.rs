@@ -698,23 +698,37 @@ a heading in the body",
     } else if wants_page(standalone, to, &doc)? {
         render_page(&doc, to, &page)?
     } else {
-        if !page.css.is_empty() {
-            return Err("--css needs --standalone: a fragment has no <head>".to_owned());
-        }
-        match wrap {
-            // The resolver goes to both arms now. It did not, so
-            // `--wrap=auto -o out.docx` dropped every embedded picture:
-            // the wrapped path called the writer that takes no media.
-            Some(wrap) => {
-                ferrodoc::render_wrapped_with_media(&doc, to, wrap, &resolve(&embedded, &base, &resource_path))
-                    .map_err(|e| e.to_string())?
-            }
-            None => ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base, &resource_path))
-                .map_err(|e| e.to_string())?,
-        }
+        render_fragment(&doc, to, wrap, &page, &resolve(&embedded, &base, &resource_path))?
     };
 
     write_output(output.as_deref(), &reshaped(converted, &shaping, to)?)
+}
+
+/// The document without a page around it.
+fn render_fragment(
+    doc: &ferrodoc::Pandoc,
+    to: Format,
+    wrap: Option<ferrodoc::Wrap>,
+    page: &ferrodoc::Page<'_>,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<Vec<u8>, String> {
+    if !page.css.is_empty() {
+        return Err("--css needs --standalone: a fragment has no <head>".to_owned());
+    }
+    // A fragment with `--id-prefix` needs the prefix on the footnote
+    // identifiers too, and those are invented by the writer rather than
+    // carried by the tree.
+    if to == Format::Html && !page.id_prefix.is_empty() {
+        return Ok(ferrodoc::render_html_with_id_prefix(doc, &page.id_prefix));
+    }
+    match wrap {
+        // The resolver goes to both arms now. It did not, so
+        // `--wrap=auto -o out.docx` dropped every embedded picture: the
+        // wrapped path called the writer that takes no media.
+        Some(wrap) => ferrodoc::render_wrapped_with_media(doc, to, wrap, media),
+        None => ferrodoc::render_with_media(doc, to, media),
+    }
+    .map_err(|e| e.to_string())
 }
 
 /// The document's bytes, from a named file or standard input.

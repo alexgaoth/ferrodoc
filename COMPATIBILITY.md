@@ -911,29 +911,35 @@ directly without asking its reader to survive anything.
 `./scripts/writers.sh` does that for every text writer, in a second, and
 `verify.sh` prints it:
 
-| writer | byte-identical to pandoc, `corpus/*.md` |
+| writer | byte-identical to pandoc |
 |---|---|
-| `html` | **8/8** |
-| `latex` | **7/8** |
-| `plain` | 5/8 |
-| `gfm` | 3/8 |
-| `rst` | 2/8 |
-| `asciidoc` | 2/8 |
-| `markdown` | 1/8 |
+| `html` | **12/12** |
+| `latex` | 7/12 |
+| `plain` | 7/12 |
+| `gfm` | 3/12 |
+| `rst` | 2/12 |
+| `asciidoc` | 2/12 |
+| `markdown` | 1/12 |
 
-It says what the round trip cannot: the HTML writer is *exactly*
-pandoc's on this corpus, and so is the LaTeX writer on seven of eight
-documents — the writer that the fidelity gate, at 1/13, called the
-furthest away. **The two oracles disagree because they measure different
-things**, and the bytes are the stricter of the two: pandoc round-trips
-the same 1 of 13, so the fidelity number is a property of pandoc's LaTeX
-reader, not of this writer.
+Twelve documents: the eight in `corpus/` read as CommonMark, and the four
+in `corpus/gfm/` read as GFM. **The second four are there because the
+first eight cannot express what the writers are worst at** — CommonMark
+has no table, no task list and no footnote, so a score over it alone said
+`latex 7/8` while `samples/07-markdown-to-latex` showed the LaTeX table
+writer diverging on every row it wrote. It is the blind-spot rule again,
+and this time it found a hole in the writer this file calls exact.
 
-The LaTeX writer went from 0/8 to 7/8 on nine measured causes, each
-probed against the pinned binary rather than read out of the manual:
-the typographic replacements (`—` → `---`, `…` → `\ldots`, the curly
-quotes, and `\-`/`\,`/`\hspace{0pt}` for the invisible spaces), the
-`-\/-` ligature break, two-space indentation of `\item` content with a
+It says two things the round trip cannot.
+
+**The LaTeX writer was never the furthest away.** Its fidelity gate
+reads 1/13 and had always been taken as this writer's score; the bytes
+say it matches pandoc on 7 of the 8 CommonMark documents. Pandoc
+round-trips the same 1 of 13, so that number is a property of pandoc's
+LaTeX *reader*. Getting there took nine measured causes, each probed
+against the pinned binary rather than read out of the manual: the
+typographic replacements (`—` → `---`, `…` → `\ldots`, the curly quotes,
+and `\-`/`\,`/`\hspace{0pt}` for the invisible spaces), the `-\/-`
+ligature break, two-space indentation of `\item` content with a
 `verbatim` environment left flush, `\texorpdfstring` when the typeset
 heading and the PDF bookmark differ, a level-6 heading written as a
 paragraph, `\pandocbounded{\includegraphics[keepaspectratio,…]}`,
@@ -941,10 +947,17 @@ paragraph, `\pandocbounded{\includegraphics[keepaspectratio,…]}`,
 block taking its blank line with it, and the space collapse around a
 dropped raw inline.
 
-**The one document that still differs is a deliberate divergence**, of
-the kind the roadmap names: match pandoc except where matching means
-copying something pandoc's own reader cannot read back. An ordered list
-starting at 3 is
+**The HTML writer, at 652/652, was dropping every footnote.** That is
+the GFM pass earning its place on the first run: `diff-html` is markdown
+→ HTML over the CommonMark suite, which has no footnote to lose, so a
+writer that deleted the reference, the body and the whole `<section
+id="footnotes">` scored 100%. `corpus/gfm/footnotes.gfm` is where it
+shows. Fixed, and the fix carries pandoc's own numbering rule.
+
+Of the LaTeX writer's remaining misses, one is a **deliberate
+divergence** of the kind the roadmap names — match pandoc except where
+matching means copying something pandoc's own reader cannot read back.
+An ordered list starting at 3 is
 `\setcounter` then `\def\labelenumi` here and the other way round in
 pandoc, because **pandoc's reader takes the start value from the first
 directive it meets and stops looking** — so pandoc's own output reads

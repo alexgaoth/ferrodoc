@@ -9,10 +9,12 @@
 //! `pandoc -f commonmark -t html --syntax-highlighting=none --wrap=none`
 //! for every construct reachable from the commonmark reader (verified
 //! differentially by `ferrodoc-harness diff-html`). Constructs the
-//! commonmark reader cannot produce (tables, figures, notes, …) get
-//! reasonable pandoc-shaped output but are not differentially verified;
-//! `Note` and non-HTML raw content are dropped, like pandoc's HTML writer
-//! does for raw content it cannot place.
+//! commonmark reader cannot produce get reasonable pandoc-shaped output
+//! and are checked by `./scripts/writers.sh`, which runs the same
+//! comparison over `corpus/gfm/*.gfm` — tables, task lists and
+//! footnotes, none of which `CommonMark` can express. Raw content in
+//! another format is dropped, which is what pandoc's HTML writer does
+//! with raw content it cannot place.
 
 mod page;
 mod read;
@@ -46,8 +48,21 @@ use std::fmt::Write as _;
 /// Render a document as HTML, matching pandoc's HTML writer with
 /// `--wrap=none` and no syntax highlighting.
 pub fn write_html(doc: &Pandoc) -> String {
+    write_html_with_id_prefix(doc, "")
+}
+
+/// The same, with `--id-prefix` on the identifiers this writer *invents*.
+///
+/// Every identifier in the tree is prefixed before it reaches here — the
+/// CLI does that — but a footnote's `fn1`/`fnref1` and the
+/// `<section id="footnotes">` are made up while writing, so they are the
+/// one set the tree cannot carry. Without this, two documents on one page
+/// collide on `#fn1`, which is the exact failure `--id-prefix` exists to
+/// prevent.
+pub fn write_html_with_id_prefix(doc: &Pandoc, id_prefix: &str) -> String {
     let mut out = String::new();
-    write_blocks(&mut out, &doc.blocks);
+    let (blocks, notes) = take_notes(&doc.blocks, id_prefix);
+    write_blocks(&mut out, &blocks);
     if out.is_empty() {
         out.push('\n'); // pandoc's output always ends with a newline
     }
@@ -56,6 +71,7 @@ pub fn write_html(doc: &Pandoc) -> String {
     if out.ends_with("\n\n") {
         out.pop();
     }
+    write_notes(&mut out, &notes, id_prefix);
     out
 }
 
@@ -308,6 +324,184 @@ fn meta_texts(doc: &Pandoc, key: &str) -> Vec<String> {
     }
     out.retain(|text| !text.is_empty());
     out
+}
+
+/// Take the footnotes out of the tree, leaving pandoc's reference where
+/// each one stood.
+///
+/// Numbering is the order of first *reference*, which is document order,
+/// so the walk that replaces them is also the walk that numbers them. A
+/// note inside a note's body is reached by the growing loop below and
+/// numbered after every note the document itself holds — pandoc's order.
+///
+/// The clone is paid for only by a document that has a note: without one
+/// the tree is borrowed as it stands.
+fn take_notes<'a>(
+    blocks: &'a [Block],
+    prefix: &str,
+) -> (std::borrow::Cow<'a, [Block]>, Vec<Vec<Block>>) {
+    if !has_note(blocks) {
+        return (std::borrow::Cow::Borrowed(blocks), Vec::new());
+    }
+    let mut owned = blocks.to_vec();
+    let mut bodies: Vec<Vec<Block>> = Vec::new();
+    walk_inlines(&mut owned, &mut |list| replace_notes(list, prefix, &mut bodies));
+    // A note whose body holds a note: the loop keeps going while the list
+    // it is walking grows.
+    let mut done = 0;
+    while done < bodies.len() {
+        let mut body = std::mem::take(&mut bodies[done]);
+        walk_inlines(&mut body, &mut |list| replace_notes(list, prefix, &mut bodies));
+        bodies[done] = body;
+        done += 1;
+    }
+    (std::borrow::Cow::Owned(owned), bodies)
+}
+
+/// Swap each `Note` in one run of inlines for its reference, **including
+/// the ones nested inside another inline** — `<em>text[^1]</em>` is a
+/// note, and looking only at the top level of the run left it behind.
+fn replace_notes(list: &mut [Inline], prefix: &str, bodies: &mut Vec<Vec<Block>>) {
+    for inline in list.iter_mut() {
+        match inline {
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => replace_notes(inner, prefix, bodies),
+            _ => {}
+        }
+        if let Inline::Note(body) = inline {
+            bodies.push(std::mem::take(body));
+            let number = bodies.len();
+            *inline = Inline::RawInline(
+                Box::new(ferrodoc_ast::Format("html".into())),
+                format!(
+                    "<a href=\"#{prefix}fn{number}\" class=\"footnote-ref\" \
+                     id=\"{prefix}fnref{number}\" role=\"doc-noteref\"><sup>{number}</sup></a>"
+                ),
+            );
+        }
+    }
+}
+
+fn has_note(blocks: &[Block]) -> bool {
+    let mut found = false;
+    let mut copy = blocks.to_vec();
+    walk_inlines(&mut copy, &mut |list| found = found || note_inside(list));
+    found
+}
+
+fn note_inside(list: &[Inline]) -> bool {
+    list.iter().any(|inline| match inline {
+        Inline::Note(_) => true,
+        Inline::Emph(inner)
+        | Inline::Strong(inner)
+        | Inline::Strikeout(inner)
+        | Inline::Superscript(inner)
+        | Inline::Subscript(inner)
+        | Inline::SmallCaps(inner)
+        | Inline::Underline(inner)
+        | Inline::Span(_, inner)
+        | Inline::Quoted(_, inner)
+        | Inline::Cite(_, inner)
+        | Inline::Link(_, inner, _)
+        | Inline::Image(_, inner, _) => note_inside(inner),
+        _ => false,
+    })
+}
+
+/// Apply `f` to every run of inlines in the tree.
+fn walk_inlines(blocks: &mut [Block], f: &mut impl FnMut(&mut Vec<Inline>)) {
+    for block in blocks {
+        match block {
+            Block::Plain(list) | Block::Para(list) | Block::Header(_, _, list) => f(list),
+            Block::LineBlock(lines) => {
+                for line in lines {
+                    f(line);
+                }
+            }
+            Block::BlockQuote(inner) | Block::Div(_, inner) => walk_inlines(inner, f),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    walk_inlines(item, f);
+                }
+            }
+            Block::DefinitionList(entries) => {
+                for (term, definitions) in entries {
+                    f(term);
+                    for definition in definitions {
+                        walk_inlines(definition, f);
+                    }
+                }
+            }
+            Block::Figure(_, caption, inner) => {
+                walk_inlines(&mut caption.blocks, f);
+                walk_inlines(inner, f);
+            }
+            Block::Table(table) => {
+                walk_inlines(&mut table.caption.blocks, f);
+                for row in table
+                    .head
+                    .rows
+                    .iter_mut()
+                    .chain(
+                        table.bodies.iter_mut().flat_map(|b| b.head.iter_mut().chain(&mut b.body)),
+                    )
+                    .chain(table.foot.rows.iter_mut())
+                {
+                    for cell in &mut row.cells {
+                        walk_inlines(&mut cell.blocks, f);
+                    }
+                }
+            }
+            Block::HorizontalRule | Block::CodeBlock(..) | Block::RawBlock(..) => {}
+        }
+    }
+}
+
+/// The endnote section pandoc puts at the end of a document with notes.
+///
+/// Two rules, both probed: the backlink goes **inside** the last block
+/// when that block is a paragraph and on a line of its own when it is
+/// not, and a note with an empty body gets **no backlink at all**.
+fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str) {
+    if notes.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "<section id=\"{prefix}footnotes\" class=\"footnotes footnotes-end-of-document\" \
+         role=\"doc-endnotes\">\n<hr />\n<ol>"
+    );
+    for (index, body) in notes.iter().enumerate() {
+        let number = index + 1;
+        let back = format!(
+            "<a href=\"#{prefix}fnref{number}\" class=\"footnote-back\" \
+             role=\"doc-backlink\">\u{21a9}\u{fe0e}</a>"
+        );
+        let _ = write!(out, "<li id=\"{prefix}fn{number}\">");
+        let mut rendered = String::new();
+        write_blocks(&mut rendered, body);
+        let rendered = rendered.trim_end_matches('\n');
+        if rendered.is_empty() {
+            out.push_str("</li>\n");
+        } else if matches!(body.last(), Some(Block::Para(_) | Block::Plain(_))) {
+            // The last paragraph ends `…</p>`; the backlink goes before it.
+            let (before, close) = rendered.split_at(rendered.len() - "</p>".len());
+            let _ = writeln!(out, "{before}{back}{close}</li>");
+        } else {
+            let _ = writeln!(out, "{rendered}\n{back}</li>");
+        }
+    }
+    out.push_str("</ol>\n</section>\n");
 }
 
 fn write_blocks(out: &mut String, blocks: &[Block]) {
@@ -878,6 +1072,73 @@ mod tests {
     }
 
     use super::*;
+
+    /// The footnote section, with the two rules that are not guessable.
+    ///
+    /// Every line here is `pandoc -f json -t html --wrap=none` output,
+    /// run and pasted. The writer dropped footnotes entirely until
+    /// 2026-08-23 and `diff-html` scored 652/652 throughout, because the
+    /// `CommonMark` suite it runs on has no footnote to lose.
+    #[test]
+    fn a_footnote_becomes_a_reference_and_an_endnote() {
+        let note = |body: Vec<Block>| {
+            write_html(&Pandoc::new(vec![Block::Para(vec![
+                Inline::Str("a".into()),
+                Inline::Note(body),
+            ])]))
+        };
+        let para = note(vec![Block::Para(vec![Inline::Str("body".into())])]);
+        assert!(
+            para.contains(
+                "a<a href=\"#fn1\" class=\"footnote-ref\" id=\"fnref1\" \
+                 role=\"doc-noteref\"><sup>1</sup></a>"
+            ),
+            "{para}"
+        );
+        // The backlink goes **inside** the last paragraph.
+        assert!(
+            para.contains(
+                "<li id=\"fn1\"><p>body<a href=\"#fnref1\" class=\"footnote-back\" \
+                 role=\"doc-backlink\">\u{21a9}\u{fe0e}</a></p></li>"
+            ),
+            "{para}"
+        );
+        // …and on a line of its own when the last block is not one.
+        let list = note(vec![Block::BulletList(vec![vec![Block::Plain(vec![
+            Inline::Str("x".into()),
+        ])]])]);
+        assert!(list.contains("</ul>\n<a href=\"#fnref1\""), "{list}");
+        // An empty body gets no backlink at all.
+        assert!(note(Vec::new()).contains("<li id=\"fn1\"></li>"), "{}", note(Vec::new()));
+    }
+
+    /// A note inside another inline is still a note. Looking only at the
+    /// top level of each run left `<em>text[^1]</em>` unnumbered, which
+    /// shifted every footnote after it by one.
+    #[test]
+    fn a_footnote_nested_in_an_inline_is_numbered_in_place() {
+        let html = write_html(&Pandoc::new(vec![Block::Para(vec![
+            Inline::Emph(vec![Inline::Note(vec![Block::Para(vec![Inline::Str("x".into())])])]),
+            Inline::Note(vec![Block::Para(vec![Inline::Str("y".into())])]),
+        ])]));
+        assert!(html.contains("<em><a href=\"#fn1\""), "{html}");
+        assert!(html.contains("</em><a href=\"#fn2\""), "{html}");
+    }
+
+    /// `--id-prefix` cannot reach the footnote identifiers through the
+    /// tree, because the writer invents them. Two documents on one page
+    /// colliding on `#fn1` is what the flag exists to prevent.
+    #[test]
+    fn id_prefix_reaches_the_identifiers_the_writer_invents() {
+        let doc = Pandoc::new(vec![Block::Para(vec![
+            Inline::Str("a".into()),
+            Inline::Note(vec![Block::Para(vec![Inline::Str("b".into())])]),
+        ])]);
+        let html = write_html_with_id_prefix(&doc, "P-");
+        for expected in ["#P-fn1", "id=\"P-fnref1\"", "id=\"P-fn1\"", "id=\"P-footnotes\""] {
+            assert!(html.contains(expected), "{expected} in {html}");
+        }
+    }
 
     /// No differential gate reaches this: `diff-html` is markdown → HTML
     /// through `read_commonmark`, and `CommonMark` cannot express an

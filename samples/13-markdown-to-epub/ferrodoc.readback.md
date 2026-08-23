@@ -86,7 +86,7 @@ Inline code with special characters: `a | b`, `<div>`, `--flag`, and a literal b
 
 Text with entities & symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
-~~Struck-through text~~ and text with a footnote.
+~~Struck-through text~~ and text with a footnote.[^1]
 
 Five inlines no writer test used to reach through this file: <u>underlined text</u>, <span class="smallcaps">small caps</span>, a <span id="ch001.xhtml_marked" class="note">span carrying an id and a class</span>, and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because `docs/gates.md` claims `--samples` keeps them found, and until this paragraph existed no sample document contained one — the claim was wider than the corpus behind it, which is the defect this file is supposed to catch.
 
@@ -120,3 +120,5 @@ Contact <ops@example.com> with questions. See the `LICENSE` file for terms.
 </div>
 
 </div>
+
+[^1]: Footnote bodies can contain **formatting** and a [link](https://example.com).

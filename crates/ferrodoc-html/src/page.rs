@@ -11,7 +11,7 @@
 //! comparing bytes, not from the manual.
 
 use crate::template::{Context, Value, render};
-use crate::{escape_text, meta_text, meta_texts, toc_list_to_depth, write_html};
+use crate::{escape_text, meta_text, meta_texts, toc_list_to_depth, write_html_with_id_prefix};
 use ferrodoc_ast::Pandoc;
 
 /// Pandoc's default HTML template, verbatim. See `templates/LICENSE`.
@@ -163,7 +163,9 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
         set("displaymath-css", Value::Flag);
     }
 
-    set("body", Value::Text(trimmed(&write_html(doc))));
+    // The prefix reaches the body because the footnote identifiers are
+    // invented while writing, not carried by the tree.
+    set("body", Value::Text(trimmed(&write_html_with_id_prefix(doc, &page.id_prefix))));
 
     // `-V` last, because it wins. `pandoc -V lang=fr` overrides a
     // document that says otherwise, and a caller who passes one has said
