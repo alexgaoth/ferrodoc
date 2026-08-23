@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# `-s` output against pandoc's, byte for byte, over a matrix of the flags
-# that shape a page.
+# Every CLI flag that shapes output, against pandoc, byte for byte.
 #
-# The fragment writer had matched pandoc for a long time; the page around
-# it was 176 lines away, and no gate could see that — `diff-html` scores
-# fragments. This runs every document in `corpus/` through ten flag
-# combinations and requires **every one** to be identical, because
-# reproducing pandoc's own template is not a thing one gets 90% right:
-# a page that is nearly pandoc's is a page every diff of a migrated site
-# reports.
+# The gates score *conversions*; this scores **flags**. `diff-html` runs
+# markdown -> HTML with the flags it chose, so it could not see that `-s`
+# output was 176 lines away from pandoc's, and it cannot see what
+# `--shift-heading-level-by` or `--strip-comments` do either.
 #
-#   scripts/standalone.sh              the score
-#   scripts/standalone.sh --verbose    and the first lines of each diff
+# Required at **100**, not gated at a floor: these are flags whose whole
+# job is to produce particular bytes. A `--eol=crlf` that is 90% right is
+# a file with mixed line endings.
+#
+#   scripts/flags.sh              the score
+#   scripts/flags.sh --verbose    and the first lines of each diff
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -65,8 +65,16 @@ done <<EOF
 -s -B $A/before.html -A $A/after.html
 -s --template $A/template.html
 -s --template $A/template.html -c $A/style.css --toc
+--shift-heading-level-by=1
+--shift-heading-level-by=-1
+--shift-heading-level-by=-2
+--shift-heading-level-by=-3
+--strip-comments
+--strip-comments --shift-heading-level-by=1
+--eol=crlf
+--eol=lf
 EOF
 
 echo
-echo "$same/$total standalone command lines byte-identical"
+echo "$same/$total flag combinations byte-identical"
 [ "$same" = "$total" ] || exit 1

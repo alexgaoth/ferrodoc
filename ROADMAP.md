@@ -419,8 +419,8 @@ template from the wild does too.
 #### Where this stands, 2026-08-23 — **the exit test passes**
 
 ```console
-$ ./scripts/standalone.sh
-80/80 standalone command lines byte-identical
+$ ./scripts/flags.sh
+144/144 flag combinations byte-identical
 ```
 
 Ten flag combinations over every document in `corpus/`: `-s`, `--toc`,

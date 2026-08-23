@@ -242,12 +242,12 @@ if [ "$want_gates" = 1 ]; then
     # See dropin/README.md.
     gate "real command lines" ./scripts/dropin.sh --fail-under 1
 
-    # `-s` output against pandoc's, over ten combinations of the flags
-    # that shape a page. A **gate at 100**, not a floor: the page comes
-    # from pandoc's own template now, and reproducing a template is not
-    # something one gets 90% right. `diff-html` cannot see any of this —
-    # it scores fragments.
-    gate "standalone pages"     ./scripts/standalone.sh
+    # Every flag that shapes output, against pandoc, over every document
+    # in `corpus/`. A **gate at 100**, not a floor: a flag's whole job is
+    # to produce particular bytes, and `--eol=crlf` that is 90% right is a
+    # file with mixed line endings. `diff-html` sees none of this — it
+    # scores one conversion with the flags it chose itself.
+    gate "flags vs pandoc"      ./scripts/flags.sh
 
     # Each text writer against pandoc's own writer, on the same AST.
     # The gates for these are *fidelity* runs — write it, read it back —

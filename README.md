@@ -272,7 +272,7 @@ Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`,
 **through pandoc's own default template**, which is vendored here under
 the BSD-3 licence pandoc offers for it: byte-identical output across
 `--toc`, `--toc-depth`, `--css`, `-V`, `-H`, `-B`, `-A` and a
-third-party `--template`, checked by `./scripts/standalone.sh`.
+third-party `--template`, checked by `./scripts/flags.sh`.
 
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
 no table syntax, so a table degrades to one paragraph per cell there.

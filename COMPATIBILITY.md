@@ -739,6 +739,28 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### Text shaping — `--shift-heading-level-by`, `--strip-comments`, `--eol`
+
+All three in `./scripts/flags.sh`, byte for byte over every document in
+`corpus/`. Three rules were measured rather than assumed, and each was
+wrong the first time:
+
+- **the heading that becomes the title is the one the shift takes to
+  exactly level 0**, whatever level it started at. `corpus/headings-deep.md`
+  opens at `##`, so `--shift-heading-level-by=-2` makes *that* the title —
+  and it **overwrites** a title the document already had. A heading pushed
+  below level 0 becomes a paragraph;
+- **`--strip-comments` cuts the comment out of the text and keeps the
+  block.** A raw block whose source was `<!-- c -->\n` comes back as
+  `"\n"`; removing the block instead loses a line of output. Inline
+  comments go the same way;
+- **an unterminated `<!--` is left alone.** A browser swallows the rest of
+  the document with one, and assuming that dropped two list items in
+  `corpus/truncation-cases.md` that pandoc keeps.
+
+`--eol` rewrites text output only: a `.docx` is a zip, and rewriting bytes
+inside one would corrupt it.
+
 ### Diagnostics — `--quiet`, `--fail-if-warnings`, `--verbose`
 
 Matched against the binary, exit codes and stderr included:
@@ -777,12 +799,12 @@ language: `$var$`, `$if$`/`$else$`/`$endif$`, `$for$`/`$sep$`/`$endfor$`
 and `$partial()$`. Anything outside it — pipes, nested fields — is
 **refused by name** rather than left as a hole in the page.
 
-`./scripts/standalone.sh` runs every document in `corpus/` through ten
-combinations of the flags that shape a page and requires all of them:
+`./scripts/flags.sh` runs every document in `corpus/` through every
+flag combination that shapes output and requires all of them:
 
 ```console
-$ ./scripts/standalone.sh
-80/80 standalone command lines byte-identical
+$ ./scripts/flags.sh
+144/144 flag combinations byte-identical
 ```
 
 That covers `-s`, `--toc`, `--toc-depth`, `--css`, `-V`, `--title-prefix`,

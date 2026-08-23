@@ -10,6 +10,21 @@ break published without its note is a break twice.
 
 ## Unreleased
 
+### `--shift-heading-level-by`, `--strip-comments`, `--eol` (card D4.8)
+
+`./scripts/flags.sh` is the gate: **144/144 flag combinations
+byte-identical** to pandoc over every document in `corpus/`, covering
+these three and the page flags below. Required at 100, not gated at a
+floor — a `--eol=crlf` that is 90% right is a file with mixed line
+endings.
+
+Three rules were measured rather than read, and each was wrong the first
+time: the heading promoted to the title is the one the shift takes to
+**exactly level 0** whatever level it started at; `--strip-comments` cuts
+the comment out of the raw text and keeps the block, so the newline that
+followed it survives; and an **unterminated** `<!--` is left alone rather
+than swallowing the rest of the document.
+
 ### Standalone HTML is pandoc's page, byte for byte (0.5)
 
 `-s` output was one fixed page shape against pandoc's template language,

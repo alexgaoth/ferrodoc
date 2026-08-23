@@ -33,6 +33,7 @@ pub mod ast {
 }
 
 pub use ferrodoc_ast::Pandoc;
+use ferrodoc_ast::Block;
 /// What goes into a standalone HTML page besides the document.
 #[cfg(feature = "html")]
 pub use ferrodoc_html::Page;
@@ -737,6 +738,158 @@ pub fn render_latex_standalone(doc: &Pandoc) -> String {
 #[cfg(feature = "html")]
 pub fn render_page(doc: &Pandoc, page: &Page<'_>) -> Result<Vec<u8>, String> {
     ferrodoc_html::write_page(doc, page).map(String::into_bytes)
+}
+
+/// Shift every heading, as pandoc's `--shift-heading-level-by` does.
+///
+/// Three rules, all probed against 3.8.2.1 rather than read:
+///
+/// - a heading whose new level would be **below 1 becomes a paragraph**,
+///   keeping its text — `--shift-heading-level-by=-2` on a document of
+///   `#` and `##` produces two paragraphs;
+/// - **except** the one case where the shift takes the heading at the
+///   very start of the document to exactly level 0 — whatever level it
+///   started at: that one becomes the document's `title`, and
+///   **overwrites** a title the document already had;
+/// - a heading shifted upward is simply deeper; there is no ceiling here,
+///   and the HTML writer's `<h7>` is HTML's problem rather than this
+///   transform's.
+pub fn shift_heading_level(doc: &mut Pandoc, by: i64) {
+    if by == 0 {
+        return;
+    }
+    // The heading that becomes the title is the one the shift takes to
+    // **exactly level 0**, whatever level it started at — not the level-1
+    // case alone. `corpus/headings-deep.md` opens at `##`, and
+    // `--shift-heading-level-by=-2` makes *that* the title.
+    if by < 0
+        && let Some(Block::Header(level, _, inlines)) = doc.blocks.first()
+        && level + by == 0
+    {
+        let title = ferrodoc_ast::MetaValue::MetaInlines(inlines.clone());
+        doc.meta.insert("title".to_owned(), title);
+        doc.blocks.remove(0);
+    }
+    shift_blocks(&mut doc.blocks, by);
+}
+
+fn shift_blocks(blocks: &mut [Block], by: i64) {
+    for block in blocks.iter_mut() {
+        match block {
+            Block::Header(level, _, inlines) => {
+                if *level + by < 1 {
+                    *block = Block::Para(std::mem::take(inlines));
+                } else {
+                    *level += by;
+                }
+            }
+            Block::Div(_, inner) | Block::BlockQuote(inner) => shift_blocks(inner, by),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    shift_blocks(item, by);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Drop every HTML comment, as pandoc's `--strip-comments` does.
+///
+/// Pandoc strips them while *reading*; doing it to the tree afterwards is
+/// the same thing for every reader at once, and there is no reader here
+/// that produces a comment any other way than as raw HTML.
+pub fn strip_comments(doc: &mut Pandoc) {
+    strip_comment_blocks(&mut doc.blocks);
+}
+
+fn strip_comment_blocks(blocks: &mut [Block]) {
+    for block in blocks.iter_mut() {
+        // Inline comments as well as block ones: `a <!-- c --> b` inside
+        // a paragraph is a `RawInline`, and stripping only the blocks
+        // left it in the output.
+        match block {
+            Block::Plain(inlines) | Block::Para(inlines) | Block::Header(_, _, inlines) => {
+                strip_comment_inlines(inlines);
+            }
+            // A table cell's comment is out of reach here and stays;
+            // `corpus/` has none and inventing the walk for it would be
+            // code no input has reached.
+            _ => {}
+        }
+    }
+    for block in blocks.iter_mut() {
+        // **The comment is cut out of the text; the block stays.**
+        // Pandoc strips comments while lexing, so a raw block whose
+        // source was `<!-- a comment -->\n` comes back as `"\n"` — the
+        // newline that followed it survives, and so does anything else
+        // in the same block. Removing the block instead loses a line of
+        // the output, measured against `pandoc -t json --strip-comments`.
+        if let Block::RawBlock(format, text) = block
+            && format.0 == "html"
+        {
+            *text = without_comments(text);
+        }
+    }
+    for block in blocks.iter_mut() {
+        match block {
+            Block::Div(_, inner) | Block::BlockQuote(inner) => strip_comment_blocks(inner),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    strip_comment_blocks(item);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn strip_comment_inlines(inlines: &mut [ferrodoc_ast::Inline]) {
+    use ferrodoc_ast::Inline;
+    for inline in inlines {
+        match inline {
+            Inline::RawInline(format, text) if format.0 == "html" => {
+                *text = without_comments(text);
+            }
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner) => strip_comment_inlines(inner),
+            Inline::Link(_, inner, _) | Inline::Image(_, inner, _) => {
+                strip_comment_inlines(inner);
+            }
+            Inline::Note(blocks) => strip_comment_blocks(blocks),
+            _ => {}
+        }
+    }
+}
+
+/// Every **complete** `<!-- … -->` cut out, and everything else kept.
+///
+/// An unterminated `<!--` is left exactly where it is. A browser would
+/// swallow the rest of the document with it, and assuming that dropped
+/// two list items in `corpus/truncation-cases.md` that pandoc keeps —
+/// which is the whole reason that file exists.
+fn without_comments(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("<!--") {
+        match rest[start..].find("-->") {
+            Some(end) => {
+                out.push_str(&rest[..start]);
+                rest = &rest[start + end + 3..];
+            }
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Number a document's headings, as pandoc's `--number-sections` does.

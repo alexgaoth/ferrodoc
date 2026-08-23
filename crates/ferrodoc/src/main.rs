@@ -36,6 +36,11 @@ OPTIONS:
                             it and an earlier one does not, which is what
                             pandoc does. A key this build has no flag for
                             is an error naming the key.
+        --shift-heading-level-by N   Shift every heading; a heading pushed
+                            above level 1 becomes a paragraph, and `-1` on
+                            a leading `#` makes it the title
+        --strip-comments    Drop HTML comments
+        --eol crlf|lf|native  What ends a line in text output
         --quiet             Say nothing on stderr but errors
         --fail-if-warnings  Exit 3 if anything warned
         --verbose           Accepted; this build has no extra diagnostics
@@ -200,6 +205,8 @@ struct Options {
     standalone: bool,
     /// Everything that only shapes a standalone page.
     page: PageFlags,
+    /// The flags that reshape the document or its bytes.
+    shaping: Shaping,
     extract_media: Option<PathBuf>,
     /// The layout asked for, or `None` for the writer's own — which is
     /// not the same for all of them; see `Format::wrapping`.
@@ -371,6 +378,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     let mut stdin_requested = false;
     let mut standalone = false;
     let mut page = PageFlags::default();
+    let mut shaping = Shaping::default();
     let mut extract_media: Option<PathBuf> = None;
     // `preserve` is the default and `none` is the same thing for this
     // writer, which never inserted a break of its own: both leave every
@@ -383,12 +391,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
 
     let mut i = 0;
     while i < args.len() {
-        // `--opt=value` as well as `--opt value`, because that is how
-        // pandoc is written in everybody's existing Makefile.
-        let (arg, attached) = match args[i].split_once('=') {
-            Some((name, value)) if name.starts_with("--") => (name, Some(value.to_owned())),
-            _ => (args[i].as_str(), None),
-        };
+        let (arg, attached) = split_attached(&args[i]);
         let mut value = |name: &str| -> Result<String, String> {
             if let Some(attached) = attached.clone() {
                 return Ok(attached);
@@ -399,16 +402,12 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
                 .ok_or_else(|| format!("{name} needs a value"))
         };
         match arg {
-            "-h" | "--help" => {
-                print!("{}", usage());
-                return Ok(None);
-            }
             // `-v` is the version and `-V` is a variable, which is
             // pandoc's assignment and the opposite of what this had:
             // `ferrodoc -s -V lang=fr` printed a version string and
             // converted nothing.
-            "-v" | "--version" => {
-                println!("ferrodoc {}", env!("CARGO_PKG_VERSION"));
+            "-h" | "--help" | "-v" | "--version" => {
+                print!("{}", if arg.contains('h') { usage() } else { version() });
                 return Ok(None);
             }
             "-f" | "--from" => {
@@ -426,6 +425,11 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             // one; refusing it would fail a command line pandoc runs, so
             // its absence is a row in COMPATIBILITY.md instead.
             "--quiet" | "--fail-if-warnings" | "--verbose" => {}
+            "--strip-comments" => shaping.strip_comments = true,
+            "--shift-heading-level-by" | "--eol" => {
+                let given = value(arg)?;
+                shaping_option(arg, &given, &mut shaping)?;
+            }
             "-s" | "--standalone" => standalone = true,
             // `-c` is pandoc's short form and appears in real Makefiles
             // more often than the long one.
@@ -438,11 +442,9 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             }
             "--toc" | "--table-of-contents" => toc = true,
             "-N" | "--number-sections" => number_sections = true,
-            "-M" | "--metadata" => metadata.push(metadata_pair(value("--metadata")?)),
-            "--extract-media" => {
-                extract_media = Some(PathBuf::from(value("--extract-media")?));
-            }
-            "--wrap" => wrap = Some(wrap_mode(&value("--wrap")?)?),
+            "-M" | "--metadata" => metadata.push(metadata_pair(value(arg)?)),
+            "--extract-media" => extract_media = Some(PathBuf::from(value(arg)?)),
+            "--wrap" => wrap = Some(wrap_mode(&value(arg)?)?),
             "--columns" => {
                 let raw = value("--columns")?;
                 columns = raw
@@ -485,6 +487,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         input,
         standalone,
         page,
+        shaping,
         extract_media,
         wrap: wrap.map(|wrap| widened(wrap, columns)),
         toc,
@@ -502,6 +505,7 @@ fn run() -> Result<(), String> {
         input,
         standalone,
         page,
+        shaping,
         extract_media,
         wrap,
         toc,
@@ -531,15 +535,7 @@ a heading in the body",
         .and_then(std::path::Path::parent)
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_owned();
-    // Only when the output can hold them, or when asked for them: a
-    // document's images can be far larger than its text, and reading them
-    // to throw them away is how a `docx -> markdown` conversion runs a
-    // machine out of memory.
-    let (mut doc, embedded) = if to.embeds_media() || extract_media.is_some() {
-        ferrodoc::parse_with_media(&bytes, from).map_err(|e| e.to_string())?
-    } else {
-        (ferrodoc::parse(&bytes, from).map_err(|e| e.to_string())?, ferrodoc::Media::new())
-    };
+    let (mut doc, embedded) = read_document(&bytes, from, to, extract_media.is_some())?;
     if let Some(dir) = extract_media.as_deref() {
         extract(&mut doc, &embedded, dir)?;
     }
@@ -573,6 +569,15 @@ a heading in the body",
     if toc && to != Format::Html {
         warn(&format!("ferrodoc: --toc is HTML-only here; the {to} output has no contents"));
     }
+    if shaping.strip_comments {
+        ferrodoc::strip_comments(&mut doc);
+    }
+    // Before `--number-sections`, which counts levels: shifting after it
+    // would number the document that was, not the one being written.
+    if shaping.shift_headings != 0 {
+        ferrodoc::shift_heading_level(&mut doc, shaping.shift_headings);
+    }
+
     // Pandoc puts the **input file's name** in `<title>` when the
     // document has no title of its own; only the caller knows it.
     let stem = input
@@ -580,17 +585,7 @@ a heading in the body",
         .and_then(|path| path.file_stem())
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let page = ferrodoc::Page {
-        css: page.css,
-        toc,
-        toc_depth: page.toc_depth,
-        header_includes: page.header_includes,
-        include_before: page.include_before,
-        include_after: page.include_after,
-        variables: page.variables,
-        template: page.template.as_deref(),
-        pagetitle: Some(&stem),
-    };
+    let page = page.as_page(toc, &stem);
     let converted = if wants_page(standalone, to, &doc)? {
         render_page(&doc, to, &page)?
     } else {
@@ -610,6 +605,16 @@ a heading in the body",
         }
     };
 
+    let converted = match shaping.eol {
+        // Only `\n` is rewritten, and only outside a binary format: a
+        // `.docx` is a zip, and rewriting bytes inside one would corrupt
+        // it. Pandoc applies `--eol` to text output alone for the same
+        // reason.
+        Some(ending) if ending != "\n" && !to.embeds_media() => {
+            String::from_utf8_lossy(&converted).replace('\n', ending).into_bytes()
+        }
+        _ => converted,
+    };
     write_output(output.as_deref(), &converted)
 }
 
@@ -700,6 +705,19 @@ fn render_page(
     return Err(format!("{to} support was not compiled into this build"));
 }
 
+fn version() -> String {
+    format!("ferrodoc {}\n", env!("CARGO_PKG_VERSION"))
+}
+
+/// `--opt=value` as well as `--opt value`, because that is how pandoc is
+/// written in everybody's existing Makefile.
+fn split_attached(arg: &str) -> (&str, Option<String>) {
+    match arg.split_once('=') {
+        Some((name, value)) if name.starts_with("--") => (name, Some(value.to_owned())),
+        _ => (arg, None),
+    }
+}
+
 /// Read `--quiet` and `--fail-if-warnings` before anything else.
 ///
 /// **They are position-independent**, which an ordinary match arm cannot
@@ -767,6 +785,61 @@ fn widened(wrap: Wrap, columns: usize) -> Wrap {
     }
 }
 
+/// Read the document, and its media only when something will hold it.
+///
+/// A document's images can be far larger than its text, and reading them
+/// to throw them away is how a `docx -> markdown` conversion runs a
+/// machine out of memory.
+fn read_document(
+    bytes: &[u8],
+    from: Format,
+    to: Format,
+    extracting: bool,
+) -> Result<(ferrodoc::Pandoc, ferrodoc::Media), String> {
+    if to.embeds_media() || extracting {
+        return ferrodoc::parse_with_media(bytes, from).map_err(|e| e.to_string());
+    }
+    let doc = ferrodoc::parse(bytes, from).map_err(|e| e.to_string())?;
+    Ok((doc, ferrodoc::Media::new()))
+}
+
+/// The flags that reshape the document or the bytes it is written as.
+/// Grouped for the same reason as [`PageFlags`]: separately they are four
+/// near-identical arms in a function that has enough of them.
+#[derive(Default)]
+struct Shaping {
+    /// `--shift-heading-level-by`.
+    shift_headings: i64,
+    /// `--strip-comments`.
+    strip_comments: bool,
+    /// `--eol`: what ends a line in text output.
+    eol: Option<&'static str>,
+}
+
+fn shaping_option(name: &str, given: &str, shaping: &mut Shaping) -> Result<(), String> {
+    match name {
+        "--shift-heading-level-by" => {
+            shaping.shift_headings = given
+                .parse()
+                .map_err(|_| format!("--shift-heading-level-by wants a number, not {given:?}"))?;
+        }
+        "--eol" => {
+            shaping.eol = match given {
+                "crlf" => Some("\r\n"),
+                "lf" => Some("\n"),
+                // Pandoc's `native` is the platform's, and this builds
+                // for one platform at a time.
+                "native" => Some(if cfg!(windows) { "\r\n" } else { "\n" }),
+                other => {
+                    return Err(format!("unknown --eol {other:?}; expected crlf, lf or native"));
+                }
+            };
+        }
+        other => return Err(format!("{other} is not a shaping flag")),
+    }
+    Ok(())
+}
+
 /// The flags that only shape a standalone page, gathered so
 /// `parse_args` does not carry seven near-identical arms.
 struct PageFlags {
@@ -803,6 +876,25 @@ impl Default for PageFlags {
 }
 
 /// Whether this flag is one of the page flags, all of which take a value.
+impl PageFlags {
+    /// As the library sees them. `pagetitle` is the input file's name,
+    /// which is what pandoc puts in `<title>` when the document has no
+    /// title and which only the caller knows.
+    fn as_page<'a>(&'a self, toc: bool, stem: &'a str) -> ferrodoc::Page<'a> {
+        ferrodoc::Page {
+            css: self.css.clone(),
+            toc,
+            toc_depth: self.toc_depth,
+            header_includes: self.header_includes.clone(),
+            include_before: self.include_before.clone(),
+            include_after: self.include_after.clone(),
+            variables: self.variables.clone(),
+            template: self.template.as_deref(),
+            pagetitle: Some(stem),
+        }
+    }
+}
+
 fn page_flag(name: &str) -> bool {
     matches!(
         name,
