@@ -40,6 +40,9 @@ OPTIONS:
                             above level 1 becomes a paragraph, and `-1` on
                             a leading `#` makes it the title
         --strip-comments    Drop HTML comments
+        --ascii             Escape every non-ASCII character (html only)
+        --id-prefix PREFIX  Prefix every identifier and internal link
+        --metadata-file FILE   Metadata as a flat `key: value` file
         --eol crlf|lf|native  What ends a line in text output
         --quiet             Say nothing on stderr but errors
         --fail-if-warnings  Exit 3 if anything warned
@@ -291,6 +294,33 @@ fn expand_defaults(args: &[String], depth: usize) -> Result<Vec<String>, String>
     Ok(out)
 }
 
+/// A `--metadata-file`, as the pairs it sets.
+///
+/// The same flat `key: value` YAML the defaults reader accepts — a
+/// nested map or a list is refused by name rather than skipped, because
+/// metadata silently dropped is a title that never appears in the
+/// output to be noticed.
+fn metadata_file(path: &str) -> Result<Vec<(String, String)>, String> {
+    let text = slurp(path)?;
+    let mut pairs = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed == "---" {
+            continue;
+        }
+        if line.starts_with([' ', '\t']) || trimmed.starts_with('-') {
+            return Err(format!(
+                "{path}: cannot read {trimmed:?}: this reads a flat `key: value` file"
+            ));
+        }
+        let (key, raw) = trimmed
+            .split_once(':')
+            .ok_or_else(|| format!("{path}: cannot read {trimmed:?}: expected `key: value`"))?;
+        pairs.push((key.to_owned(), raw.trim().trim_matches(['"', '\'']).to_owned()));
+    }
+    Ok(pairs)
+}
+
 /// The keys of a defaults file, as the flags they stand for.
 ///
 /// The YAML read here is the same subset the pandoc-markdown metadata
@@ -410,15 +440,9 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
                 print!("{}", if arg.contains('h') { usage() } else { version() });
                 return Ok(None);
             }
-            "-f" | "--from" => {
-                let name = value("--from")?;
-                from = Some(format(&name)?);
-            }
-            "-t" | "--to" => {
-                let name = value("--to")?;
-                to = Some(format(&name)?);
-            }
-            "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
+            "-f" | "--from" => from = Some(format(&value(arg)?)?),
+            "-t" | "--to" => to = Some(format(&value(arg)?)?),
+            "-o" | "--output" => output = Some(PathBuf::from(value(arg)?)),
             // `--quiet` and `--fail-if-warnings` were read before this
             // loop started — see `diagnostics`. `--verbose` adds `[INFO]`
             // lines in pandoc and there is nothing here that would say
@@ -426,6 +450,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             // its absence is a row in COMPATIBILITY.md instead.
             "--quiet" | "--fail-if-warnings" | "--verbose" => {}
             "--strip-comments" => shaping.strip_comments = true,
+            "--ascii" => shaping.ascii = true,
             "--shift-heading-level-by" | "--eol" => {
                 let given = value(arg)?;
                 shaping_option(arg, &given, &mut shaping)?;
@@ -443,6 +468,15 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             "--toc" | "--table-of-contents" => toc = true,
             "-N" | "--number-sections" => number_sections = true,
             "-M" | "--metadata" => metadata.push(metadata_pair(value(arg)?)),
+            // The same flat `key: value` subset a `--defaults` file uses,
+            // and refusing an unreadable key by name for the same reason:
+            // metadata quietly dropped is a title that never appears.
+            "--metadata-file" => {
+                let path = value(arg)?;
+                for (key, given) in metadata_file(&path)? {
+                    metadata.push((key, Some(given)));
+                }
+            }
             "--extract-media" => extract_media = Some(PathBuf::from(value(arg)?)),
             "--wrap" => wrap = Some(wrap_mode(&value(arg)?)?),
             "--columns" => {
@@ -577,6 +611,7 @@ a heading in the body",
     if shaping.shift_headings != 0 {
         ferrodoc::shift_heading_level(&mut doc, shaping.shift_headings);
     }
+    ferrodoc::prefix_identifiers(&mut doc, &page.id_prefix);
 
     // Pandoc puts the **input file's name** in `<title>` when the
     // document has no title of its own; only the caller knows it.
@@ -605,17 +640,7 @@ a heading in the body",
         }
     };
 
-    let converted = match shaping.eol {
-        // Only `\n` is rewritten, and only outside a binary format: a
-        // `.docx` is a zip, and rewriting bytes inside one would corrupt
-        // it. Pandoc applies `--eol` to text output alone for the same
-        // reason.
-        Some(ending) if ending != "\n" && !to.embeds_media() => {
-            String::from_utf8_lossy(&converted).replace('\n', ending).into_bytes()
-        }
-        _ => converted,
-    };
-    write_output(output.as_deref(), &converted)
+    write_output(output.as_deref(), &reshaped(converted, &shaping, to)?)
 }
 
 /// The document's bytes, from a named file or standard input.
@@ -878,6 +903,8 @@ struct Shaping {
     strip_comments: bool,
     /// `--eol`: what ends a line in text output.
     eol: Option<&'static str>,
+    /// `--ascii`, which this build has for HTML alone.
+    ascii: bool,
 }
 
 fn shaping_option(name: &str, given: &str, shaping: &mut Shaping) -> Result<(), String> {
@@ -921,6 +948,8 @@ struct PageFlags {
     variables: Vec<(String, String)>,
     /// `--template`, already read.
     template: Option<String>,
+    /// `--id-prefix`.
+    id_prefix: String,
 }
 
 impl Default for PageFlags {
@@ -935,6 +964,7 @@ impl Default for PageFlags {
             include_after: Vec::new(),
             variables: Vec::new(),
             template: None,
+            id_prefix: String::new(),
         }
     }
 }
@@ -954,6 +984,7 @@ impl PageFlags {
             include_after: self.include_after.clone(),
             variables: self.variables.clone(),
             template: self.template.as_deref(),
+            id_prefix: self.id_prefix.clone(),
             pagetitle: Some(stem),
         }
     }
@@ -973,6 +1004,7 @@ fn page_flag(name: &str) -> bool {
             | "-V"
             | "--variable"
             | "--template"
+            | "--id-prefix"
     )
 }
 
@@ -996,11 +1028,40 @@ fn page_option(name: &str, given: String, page: &mut PageFlags) -> Result<(), St
         // trimming it the way an include is trimmed costs the page its
         // last line.
         "--template" => page.template = Some(slurp(&given)?),
+        "--id-prefix" => page.id_prefix = given,
         // `page_flag` is the list; the two cannot disagree without this
         // arm being reached.
         other => return Err(format!("{other} is not a page flag")),
     }
     Ok(())
+}
+
+/// The two flags that rewrite the finished bytes.
+fn reshaped(converted: Vec<u8>, shaping: &Shaping, to: Format) -> Result<Vec<u8>, String> {
+    // `--ascii` is HTML's here: every other writer spells the escape
+    // differently — `&eacute;` in markdown, `\'{e}` in LaTeX, nothing at
+    // all in RST — and inventing one would be a flag that looks honoured
+    // and writes something pandoc does not.
+    let converted = if shaping.ascii {
+        if to != Format::Html {
+            return Err(format!(
+                "--ascii is html-only here; the {to} writer has its own spelling for a \
+                 non-ASCII character and this build does not write it"
+            ));
+        }
+        ferrodoc::ascii_only(&String::from_utf8_lossy(&converted)).into_bytes()
+    } else {
+        converted
+    };
+    // `--eol` rewrites text output only: a `.docx` is a zip, and
+    // rewriting bytes inside one would corrupt it. Pandoc applies it to
+    // text alone for the same reason.
+    Ok(match shaping.eol {
+        Some(ending) if ending != "\n" && !to.embeds_media() => {
+            String::from_utf8_lossy(&converted).replace('\n', ending).into_bytes()
+        }
+        _ => converted,
+    })
 }
 
 /// A file the command line named, read now rather than at conversion

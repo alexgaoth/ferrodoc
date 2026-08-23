@@ -10,6 +10,16 @@ break published without its note is a break twice.
 
 ## Unreleased
 
+### `--ascii`, `--id-prefix`, `--metadata-file`
+
+`./scripts/flags.sh` is now **184/184 byte-identical** to pandoc.
+
+`--ascii` is HTML-only and says so: pandoc spells the escape differently
+in every writer, and inventing one would be a flag that looks honoured
+and writes something pandoc does not. `--id-prefix` rewrites internal
+links as well as identifiers, so anchors still land. `--metadata-file`
+reads the flat `key: value` subset and refuses the rest by name.
+
 ### `+ext-ext` extension syntax (card D4.5)
 
 `-f markdown+footnotes-pipe_tables` was refused wholesale. It is now

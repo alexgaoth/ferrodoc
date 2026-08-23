@@ -42,6 +42,9 @@ pub struct Page<'a> {
     pub variables: Vec<(String, String)>,
     /// A `--template` to use instead of pandoc's default.
     pub template: Option<&'a str>,
+    /// `--id-prefix`, which the template also puts on the contents'
+    /// own `<nav id>`.
+    pub id_prefix: String,
     /// What `<title>` says when the document has no title. Pandoc uses
     /// the **input file's name**, which only the caller knows.
     pub pagetitle: Option<&'a str>,
@@ -105,6 +108,9 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
     let pagetitle = title.unwrap_or_else(|| page.pagetitle.unwrap_or_default().to_owned());
     set("pagetitle", Value::Text(escaped(&pagetitle)));
 
+    if !page.id_prefix.is_empty() {
+        set("idprefix", Value::Text(page.id_prefix.clone()));
+    }
     if !page.css.is_empty() {
         set("css", Value::List(page.css.clone()));
     }
@@ -122,7 +128,7 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
     // empty `<nav>`. Pandoc leaves the variable unset rather than setting
     // it to an empty list, so the template's `$if(toc)$` is false.
     if page.toc {
-        let contents = trimmed(&toc_list_to_depth(doc, page.toc_depth));
+        let contents = trimmed(&toc_list_to_depth(doc, page.toc_depth, &page.id_prefix));
         if !contents.is_empty() {
             // **Both names, and both holding the contents.** Pandoc's own
             // template tests `$if(toc)$` and interpolates

@@ -190,8 +190,20 @@ pub fn write_toc_to_depth(doc: &Pandoc, depth: i64) -> String {
 /// The contents **without** its `<nav>`, which is what the page template
 /// wraps for itself. Emitting the wrapper here as well is how `-s --toc`
 /// produced two of them.
-pub fn toc_list_to_depth(doc: &Pandoc, depth: i64) -> String {
+pub fn toc_list_to_depth(doc: &Pandoc, depth: i64, id_prefix: &str) -> String {
     let nav = write_toc_to_depth(doc, depth);
+    // The entry ids carry the prefix **before** the `toc-`, which is
+    // pandoc's spelling: `id="p-toc-x"` beside `href="#p-x"`. The tree's
+    // identifiers already carry it by the time this runs, so the prefix
+    // is *moved* rather than added — adding gave `p-toc-p-x`.
+    let nav = if id_prefix.is_empty() {
+        nav
+    } else {
+        nav.replace(
+            &format!("\" id=\"toc-{id_prefix}"),
+            &format!("\" id=\"{id_prefix}toc-"),
+        )
+    };
     nav.strip_prefix("<nav id=\"TOC\" role=\"doc-toc\">\n")
         .and_then(|rest| rest.strip_suffix("\n</nav>\n"))
         .map(str::to_owned)

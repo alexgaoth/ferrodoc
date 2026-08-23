@@ -39,6 +39,7 @@ use ferrodoc_ast::Block;
 pub use ferrodoc_html::Page;
 
 use std::fmt;
+use std::fmt::Write as _;
 
 /// A document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -870,6 +871,105 @@ fn shift_blocks(blocks: &mut [Block], by: i64) {
             _ => {}
         }
     }
+}
+
+/// Prefix every identifier, as pandoc's `--id-prefix` does.
+///
+/// Not only the identifiers: an **internal link is rewritten too**, so
+/// `[to A](#a)` becomes `href="#p-a"` and still points at the heading it
+/// named. Measured — prefixing the targets and not the links would break
+/// every anchor in the document, which is the opposite of what the flag
+/// is for (two documents in one page, each keeping its own links).
+pub fn prefix_identifiers(doc: &mut Pandoc, prefix: &str) {
+    if prefix.is_empty() {
+        return;
+    }
+    prefix_blocks(&mut doc.blocks, prefix);
+}
+
+fn prefix_blocks(blocks: &mut [Block], prefix: &str) {
+    for block in blocks.iter_mut() {
+        match block {
+            Block::Header(_, attr, inlines) => {
+                prefix_attr(attr, prefix);
+                prefix_inlines(inlines, prefix);
+            }
+            Block::Div(attr, inner) => {
+                prefix_attr(attr, prefix);
+                prefix_blocks(inner, prefix);
+            }
+            Block::Plain(inlines) | Block::Para(inlines) => prefix_inlines(inlines, prefix),
+            Block::BlockQuote(inner) => prefix_blocks(inner, prefix),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    prefix_blocks(item, prefix);
+                }
+            }
+            Block::CodeBlock(attr, _) => prefix_attr(attr, prefix),
+            _ => {}
+        }
+    }
+}
+
+fn prefix_attr(attr: &mut ferrodoc_ast::Attr, prefix: &str) {
+    if !attr.identifier.is_empty() {
+        attr.identifier.insert_str(0, prefix);
+    }
+}
+
+fn prefix_inlines(inlines: &mut [ferrodoc_ast::Inline], prefix: &str) {
+    use ferrodoc_ast::Inline;
+    for inline in inlines {
+        match inline {
+            Inline::Link(attr, inner, target) => {
+                prefix_attr(attr, prefix);
+                if let Some(fragment) = target.url.strip_prefix('#') {
+                    target.url = format!("#{prefix}{fragment}");
+                }
+                prefix_inlines(inner, prefix);
+            }
+            Inline::Image(attr, inner, _) | Inline::Span(attr, inner) => {
+                prefix_attr(attr, prefix);
+                prefix_inlines(inner, prefix);
+            }
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner) => prefix_inlines(inner, prefix),
+            Inline::Note(blocks) => prefix_blocks(blocks, prefix),
+            Inline::Code(attr, _) => prefix_attr(attr, prefix),
+            _ => {}
+        }
+    }
+}
+
+/// Every non-ASCII character as a numeric entity, as pandoc's `--ascii`
+/// does **for HTML**.
+///
+/// A whole-output pass, which is what pandoc does here: the escape
+/// reaches text, attributes, URLs, identifiers and raw HTML alike —
+/// measured on a document with a `café` in each. Every other writer has
+/// its own spelling (`&eacute;` in markdown, `\'{e}` in LaTeX, nothing at
+/// all in RST), so the CLI refuses the flag for them by name rather than
+/// inventing one.
+pub fn ascii_only(html: &str) -> String {
+    if html.is_ascii() {
+        return html.to_owned();
+    }
+    let mut out = String::with_capacity(html.len());
+    for ch in html.chars() {
+        if ch.is_ascii() {
+            out.push(ch);
+        } else {
+            let _ = write!(out, "&#x{:X};", ch as u32);
+        }
+    }
+    out
 }
 
 /// Drop every HTML comment, as pandoc's `--strip-comments` does.

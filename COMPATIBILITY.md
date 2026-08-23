@@ -739,6 +739,30 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### `--ascii`, `--id-prefix`, `--metadata-file`
+
+All three in `./scripts/flags.sh`, byte for byte.
+
+**`--ascii` is HTML's here.** Pandoc escapes a non-ASCII character
+differently in every writer — `&#xE9;` in HTML, `&eacute;` in markdown
+and plain, `\'{e}` in LaTeX, and not at all in RST — so this build has
+the HTML one and **refuses the flag by name** for the others rather than
+inventing a spelling. Where it applies it is a whole-output pass, which
+is what pandoc does: text, attributes, URLs, identifiers and raw HTML
+alike, measured on a document with a `café` in each.
+
+**`--id-prefix` rewrites internal links too.** `[to A](#a)` becomes
+`href="#p-a"` and still points at the heading it named; prefixing the
+targets alone would break every anchor in the document, which is the
+opposite of what the flag is for. The contents' entry ids carry the
+prefix **before** the `toc-` — `id="p-toc-x"` beside `href="#p-x"` — and
+the `<nav>` gets it too.
+
+**`--metadata-file`** reads the same flat `key: value` subset a
+`--defaults` file does, and refuses a key it cannot read by name.
+Metadata quietly dropped is a title that never appears in the output to
+be noticed.
+
 ### Extension syntax — accepted where it asks for nothing
 
 `-f markdown+footnotes-pipe_tables` is pandoc's spelling, and what is

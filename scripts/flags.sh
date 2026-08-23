@@ -73,6 +73,11 @@ done <<EOF
 --strip-comments --shift-heading-level-by=1
 --eol=crlf
 --eol=lf
+--ascii
+--id-prefix=p-
+--ascii --id-prefix=q-
+-s --toc --id-prefix=p-
+-s --metadata-file $A/meta.yaml
 EOF
 
 echo
