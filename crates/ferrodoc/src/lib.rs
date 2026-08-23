@@ -159,6 +159,28 @@ impl Format {
         matches!(self, Format::Docx | Format::Odt | Format::Epub | Format::Ipynb)
     }
 
+    /// What this format's writer does with lines.
+    ///
+    /// Measured, not chosen: `printf 'a\nb\n' | ferrodoc -t html` joins
+    /// the two lines and `-t rst` does not, and until this existed
+    /// nothing in the code said so. It decides which [`Wrap`] modes
+    /// [`render_wrapped`] can honour.
+    pub fn wrapping(self) -> Wrapping {
+        match self {
+            // The markdown writers take a column count already.
+            Format::Markdown | Format::Gfm => Wrapping::Fills,
+            Format::Html | Format::Plain => Wrapping::Joined,
+            Format::Latex | Format::Rst | Format::Asciidoc => Wrapping::Preserved,
+            // `pandoc --wrap=auto -t docx` is accepted and does nothing
+            // there too, so ignoring it is the compatible answer.
+            Format::Docx | Format::Odt | Format::Epub | Format::Ipynb | Format::Json => {
+                Wrapping::NotText
+            }
+            // Read-only, so nothing is ever written with a wrap.
+            Format::PandocMarkdown => Wrapping::NotText,
+        }
+    }
+
     /// Whether documents can be written to this format.
     ///
     /// All but one: `pandoc_markdown` is read only. Writing it would be a
@@ -195,6 +217,54 @@ impl fmt::Display for Format {
     }
 }
 
+/// How the output's lines are laid out — pandoc's `--wrap`, with the
+/// same three values and the same meanings.
+///
+/// **Not every writer honours every mode, and the ones that do not say
+/// so** rather than quietly producing the layout they already had. A
+/// flag that looks accepted and changes nothing is the failure this
+/// project spends its time removing; [`Format::wrapping`] is what each
+/// writer can actually do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wrap {
+    /// Fill each paragraph to this many columns. Pandoc's default, at 72.
+    Auto(usize),
+    /// One line per block: every soft break becomes a space.
+    None,
+    /// Leave every line where the document put it.
+    Preserve,
+}
+
+impl fmt::Display for Wrap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Wrap::Auto(columns) => write!(f, "--wrap=auto --columns={columns}"),
+            Wrap::None => f.write_str("--wrap=none"),
+            Wrap::Preserve => f.write_str("--wrap=preserve"),
+        }
+    }
+}
+
+/// What a writer does with lines, and therefore which [`Wrap`] modes it
+/// can honour.
+///
+/// These are not a design: they are what the writers measurably do
+/// today, and they are not the same for all of them — the HTML and plain
+/// writers join soft breaks where the others keep them, which
+/// `samples/` had encoded per format without naming.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Wrapping {
+    /// All three modes: this writer can fill to a column.
+    Fills,
+    /// [`Wrap::None`] only — every soft break becomes a space.
+    Joined,
+    /// [`Wrap::Preserve`] only — lines stay where the document put them.
+    Preserved,
+    /// Not a line-based format. `--wrap` means nothing here and is
+    /// ignored, which is what pandoc does too.
+    NotText,
+}
+
 /// Why a conversion could not be performed.
 #[derive(Debug)]
 pub enum Error {
@@ -206,6 +276,9 @@ pub enum Error {
     /// Only a build that trimmed the default feature set can produce
     /// this; see [`Format::compiled`].
     NotCompiled(Format),
+    /// The output format's writer cannot lay lines out that way. See
+    /// [`Format::wrapping`].
+    NotWrappable(Format, Wrap),
     /// The input was not valid for its format.
     Invalid {
         /// The format the input was supposed to be in.
@@ -227,6 +300,19 @@ impl fmt::Display for Error {
             Error::NotCompiled(format) => {
                 write!(f, "cannot handle {format}: this build was compiled without it")
             }
+            Error::NotWrappable(format, wrap) => write!(
+                f,
+                "cannot write {format} with {wrap}: {}",
+                match format.wrapping() {
+                    Wrapping::Fills => "this build cannot",
+                    Wrapping::Joined =>
+                        "that writer joins every soft break into a space, which is --wrap=none",
+                    Wrapping::Preserved =>
+                        "that writer leaves lines where the document put them, \
+                         which is --wrap=preserve",
+                    Wrapping::NotText => "it is not a line-based format",
+                }
+            ),
             Error::Invalid { format, detail } => write!(f, "invalid {format} input: {detail}"),
         }
     }
@@ -459,13 +545,57 @@ pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
 /// # Errors
 ///
 /// The same as [`render`].
-pub fn render_wrapped(doc: &Pandoc, to: Format, columns: usize) -> Result<Vec<u8>, Error> {
-    match to {
+pub fn render_wrapped(doc: &Pandoc, to: Format, wrap: Wrap) -> Result<Vec<u8>, Error> {
+    render_wrapped_with_media(doc, to, wrap, &|_| None)
+}
+
+/// Render with a line layout and a media resolver.
+///
+/// Returns [`Error::NotWrappable`] when the writer cannot lay lines out
+/// that way. It used to fall through to the unwrapped writer instead, so
+/// `--wrap=auto -t html` was accepted and changed nothing — the exact
+/// shape of failure this project keeps finding in its own gates.
+pub fn render_wrapped_with_media(
+    doc: &Pandoc,
+    to: Format,
+    wrap: Wrap,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<Vec<u8>, Error> {
+    let wrapping = to.wrapping();
+    // A writer that already lays lines out one way cannot be asked for
+    // another. Saying so is the whole point: this used to fall through to
+    // the unwrapped writer, so `--wrap=auto -t html` was accepted and
+    // changed nothing.
+    let honoured = match wrapping {
+        // A format with no lines at all ignores it, which is what pandoc
+        // does with `--wrap=auto -t docx`.
+        Wrapping::Fills | Wrapping::NotText => true,
+        Wrapping::Joined => wrap == Wrap::None,
+        Wrapping::Preserved => wrap == Wrap::Preserve,
+    };
+    if !honoured {
+        return Err(Error::NotWrappable(to, wrap));
+    }
+    // Only the filling writers take a column count. `--wrap=none` is a
+    // fill with no limit: pandoc turns every soft break into a space and
+    // lets the paragraph run. Measured against `pandoc --wrap=none`, not
+    // assumed — this was the same thing as `preserve` here until it was
+    // compared.
+    let columns = match (wrapping, wrap) {
+        (Wrapping::Fills, Wrap::None) => Some(usize::MAX),
+        (Wrapping::Fills, Wrap::Auto(columns)) => Some(columns),
+        _ => None,
+    };
+    match (columns, to) {
         #[cfg(feature = "markdown")]
-        Format::Markdown => Ok(ferrodoc_markdown::write_markdown_wrapped(doc, columns).into_bytes()),
+        (Some(columns), Format::Markdown) => {
+            Ok(ferrodoc_markdown::write_markdown_wrapped(doc, columns).into_bytes())
+        }
         #[cfg(feature = "markdown")]
-        Format::Gfm => Ok(ferrodoc_markdown::write_gfm_wrapped(doc, columns).into_bytes()),
-        _ => render(doc, to),
+        (Some(columns), Format::Gfm) => {
+            Ok(ferrodoc_markdown::write_gfm_wrapped(doc, columns).into_bytes())
+        }
+        _ => render_with_media(doc, to, media),
     }
 }
 
@@ -664,6 +794,50 @@ mod tests {
         // refused by name rather than answered wrongly.
         assert_eq!(Format::parse("html4"), None);
         assert_eq!(Format::parse("markdown_strict"), None);
+    }
+
+    #[test]
+    fn every_wrap_mode_is_honoured_or_refused_by_name() {
+        use ferrodoc_ast::{Block, Inline};
+        // Two words with a soft break between them, which is the only
+        // thing the three modes disagree about.
+        let doc = Pandoc::new(vec![Block::Para(vec![
+            Inline::Str("one".into()),
+            Inline::SoftBreak,
+            Inline::Str("two".into()),
+        ])]);
+        let out = |to, wrap| {
+            render_wrapped(&doc, to, wrap).map(|bytes| String::from_utf8(bytes).expect("utf-8"))
+        };
+
+        // `none` joins and `preserve` keeps. These were the same value
+        // until it was measured against `pandoc --wrap=none`.
+        assert_eq!(out(Format::Gfm, Wrap::None).unwrap(), "one two\n");
+        assert_eq!(out(Format::Gfm, Wrap::Preserve).unwrap(), "one\ntwo\n");
+        assert_eq!(out(Format::Gfm, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
+        assert_eq!(out(Format::Gfm, Wrap::Auto(72)).unwrap(), "one two\n");
+
+        // A writer that cannot lay lines out that way says which one it
+        // does rather than returning the layout it already had.
+        for (to, refused) in [
+            (Format::Html, Wrap::Auto(72)),
+            (Format::Html, Wrap::Preserve),
+            (Format::Plain, Wrap::Auto(72)),
+            (Format::Latex, Wrap::None),
+            (Format::Rst, Wrap::Auto(72)),
+            (Format::Asciidoc, Wrap::None),
+        ] {
+            let error = out(to, refused).expect_err(&format!("{to} {refused}"));
+            let message = error.to_string();
+            assert!(message.contains(&to.to_string()), "{message}");
+            assert!(matches!(error, Error::NotWrappable(..)), "{message}");
+        }
+        // ...and the one it does do goes through.
+        assert_eq!(out(Format::Html, Wrap::None).unwrap(), "<p>one two</p>\n");
+
+        // `pandoc --wrap=auto -t json` is accepted and does nothing;
+        // refusing it would break a command line pandoc runs.
+        assert!(out(Format::Json, Wrap::Auto(72)).is_ok());
     }
 
     #[test]

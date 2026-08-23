@@ -1,6 +1,6 @@
 //! The `ferrodoc` command-line converter.
 
-use ferrodoc::Format;
+use ferrodoc::{Format, Wrap};
 use ferrodoc::ast::{Block, Inline};
 use std::fmt::Write as _;
 use std::io::{Read as _, Write as _};
@@ -22,11 +22,14 @@ OPTIONS:
     -o, --output <FILE>     Write to FILE instead of standard output
     -s, --standalone        Wrap HTML in a page, or LaTeX in a whole document
         --css <FILE>        Inline a stylesheet into that page
-        --wrap <MODE>       preserve (default) | none | auto. `auto` fills
-                            text output to --columns, which is what pandoc
-                            does by default; ferrodoc leaves lines where
-                            they fall unless asked. Only the markdown
-                            writers fill.
+        --wrap <MODE>       auto | none | preserve, as pandoc means them:
+                            `auto` fills to --columns (pandoc's default),
+                            `none` puts each block on one line, `preserve`
+                            keeps the document's own breaks. A writer that
+                            cannot lay lines out that way says so rather
+                            than ignoring the flag: markdown and gfm do
+                            all three, html and plain are `none`, latex,
+                            rst and asciidoc are `preserve`.
         --columns <N>       Fill width for --wrap=auto [72]
         --toc               Put a table of contents at the top of the page.
                             HTML output with --standalone; accepted and
@@ -173,26 +176,30 @@ struct Options {
     standalone: bool,
     css: Option<PathBuf>,
     extract_media: Option<PathBuf>,
-    /// The width to fill to, or `None` to leave lines where they fall.
-    wrap_columns: Option<usize>,
+    /// The layout asked for, or `None` for the writer's own — which is
+    /// not the same for all of them; see `Format::wrapping`.
+    wrap: Option<Wrap>,
     toc: bool,
     number_sections: bool,
     /// `-M key=value`, in the order given: a later one wins.
     metadata: Vec<(String, Option<String>)>,
 }
 
-/// `--wrap=auto` fills to `--columns`; `none` and `preserve` are the same
-/// thing for this writer, which never inserted a break of its own, so both
-/// leave every line where the document put it. `Some(0)` is a placeholder
-/// the caller replaces once `--columns` has been seen — the flags may come
-/// in either order.
+/// `--wrap=auto|none|preserve`, pandoc's three, all now meaning what
+/// they mean there.
 ///
-/// Extracted from `parse_args` only because the three flags added beside it
-/// took that function past its line budget; the behaviour is unchanged.
-fn wrap_mode(mode: &str) -> Result<Option<usize>, String> {
+/// `none` and `preserve` were the same value here, and they are not the
+/// same thing: `none` joins every soft break into a space and `preserve`
+/// keeps them. Measured against the binary, which is how a flag that had
+/// been accepted and ignored for two versions was found.
+///
+/// `Auto(0)` is a placeholder the caller replaces once `--columns` has
+/// been seen — the two flags may come in either order.
+fn wrap_mode(mode: &str) -> Result<Wrap, String> {
     match mode {
-        "auto" => Ok(Some(0)),
-        "none" | "preserve" => Ok(None),
+        "auto" => Ok(Wrap::Auto(0)),
+        "none" => Ok(Wrap::None),
+        "preserve" => Ok(Wrap::Preserve),
         other => Err(format!("unknown --wrap {other:?}; expected auto, none or preserve")),
     }
 }
@@ -220,7 +227,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     // `preserve` is the default and `none` is the same thing for this
     // writer, which never inserted a break of its own: both leave every
     // line where the document put it. Only `auto` fills.
-    let mut wrap_columns: Option<usize> = None;
+    let mut wrap: Option<Wrap> = None;
     let mut columns = 72usize;
     let mut toc = false;
     let mut number_sections = false;
@@ -269,7 +276,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
             "--extract-media" => {
                 extract_media = Some(PathBuf::from(value("--extract-media")?));
             }
-            "--wrap" => wrap_columns = wrap_mode(&value("--wrap")?)?,
+            "--wrap" => wrap = Some(wrap_mode(&value("--wrap")?)?),
             "--columns" => {
                 let raw = value("--columns")?;
                 columns = raw
@@ -313,7 +320,12 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         standalone,
         css,
         extract_media,
-        wrap_columns: wrap_columns.map(|_| columns),
+        // `--columns` is only read when `--wrap=auto` asked for it, and
+        // may have been given before or after it.
+        wrap: wrap.map(|wrap| match wrap {
+            Wrap::Auto(_) => Wrap::Auto(columns),
+            other => other,
+        }),
         toc,
         number_sections,
         metadata,
@@ -330,7 +342,7 @@ fn run() -> Result<(), String> {
         standalone,
         css,
         extract_media,
-        wrap_columns,
+        wrap,
         toc,
         number_sections,
         metadata,
@@ -415,9 +427,13 @@ a heading in the body"
         if css.is_some() {
             return Err("--css needs --standalone: a fragment has no <head>".to_owned());
         }
-        match wrap_columns {
-            Some(columns) => {
-                ferrodoc::render_wrapped(&doc, to, columns).map_err(|e| e.to_string())?
+        match wrap {
+            // The resolver goes to both arms now. It did not, so
+            // `--wrap=auto -o out.docx` dropped every embedded picture:
+            // the wrapped path called the writer that takes no media.
+            Some(wrap) => {
+                ferrodoc::render_wrapped_with_media(&doc, to, wrap, &resolve(&embedded, &base))
+                    .map_err(|e| e.to_string())?
             }
             None => ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
                 .map_err(|e| e.to_string())?,

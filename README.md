@@ -273,11 +273,30 @@ it.
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
 no table syntax, so a table degrades to one paragraph per cell there.
 
-**One default differs from pandoc's on purpose:** pandoc fills text output
-to 72 columns, and ferrodoc leaves lines where the document put them.
-`--wrap=auto --columns N` matches pandoc when you want that — the point of
-the default is that diffing a corpus converted by both tools shows real
-differences rather than re-flowed paragraphs.
+**Line layout differs from pandoc's, and not in one way.** Pandoc fills
+text output to 72 columns by default. ferrodoc does not fill at all
+unless asked, and what it does instead is **not the same for every
+writer**: `html` and `plain` join every soft break into a space, which is
+pandoc's `--wrap=none`, while `markdown`, `gfm`, `latex`, `rst` and
+`asciidoc` keep the document's own breaks, which is `--wrap=preserve`.
+That was not a decision, it was seven writers written separately, and it
+is written down here because it had been claimed as one behaviour.
+
+`--wrap=auto|none|preserve` means what it means in pandoc, and a writer
+that cannot lay lines out the way you asked **says so** rather than
+returning the layout it already had:
+
+```console
+$ ferrodoc notes.md -t html --wrap=auto
+ferrodoc: cannot write html with --wrap=auto --columns=72: that writer joins every soft break into a space, which is --wrap=none
+```
+
+Matching pandoc's default is the intent — `ferrodoc -t gfm --wrap=auto
+--columns=72` already produces pandoc's default output byte for byte —
+and the default flips when every text writer can fill. Until then, that
+gap is counted rather than described: `./scripts/dropin.sh` runs 48 real
+pandoc command lines through both binaries and publishes how many produce
+identical bytes.
 
 `--extract-media DIR` writes the input's embedded images under `DIR` and
 repoints the output at them, matching `pandoc --extract-media` file for

@@ -10,6 +10,39 @@ break published without its note is a break twice.
 
 ## Unreleased
 
+### `--wrap` means what pandoc means by it (roadmap card D4.3)
+
+Three defects, found by measuring the flag rather than reading it:
+
+- **`--wrap=none` and `--wrap=preserve` were the same value.** They are
+  not the same thing — `none` joins every soft break into a space,
+  `preserve` keeps them — and on the one writer that could tell them
+  apart, both preserved.
+- **`--wrap=auto` was a silent no-op for five of the seven text
+  writers**, and dropped embedded media on the way past: the wrapped path
+  called the writer that takes no media resolver, so
+  `--wrap=auto -o out.docx` lost every picture.
+- **ferrodoc had no single wrap default**, and `README.md` claimed it
+  did. `html` and `plain` join, which is pandoc's `--wrap=none`;
+  `markdown`, `gfm`, `latex`, `rst` and `asciidoc` keep the document's
+  breaks, which is `--wrap=preserve`.
+
+Now: `Format::wrapping()` states what each writer does, `Wrap` carries
+pandoc's three modes, and a writer that cannot honour the mode asked for
+returns `Error::NotWrappable` naming what it does instead. Breaking for
+callers of `render_wrapped`, which took a bare column count:
+
+```rust
+// was
+pub fn render_wrapped(doc: &Pandoc, to: Format, columns: usize) -> Result<Vec<u8>, Error>
+// now
+pub fn render_wrapped(doc: &Pandoc, to: Format, wrap: Wrap) -> Result<Vec<u8>, Error>
+pub fn render_wrapped_with_media(doc: &Pandoc, to: Format, wrap: Wrap,
+                                 media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<u8>, Error>
+```
+
+### Other
+
 - `-t html5` and `-f html5` are accepted. Pandoc has spelled it that way
   for a decade and writes identical bytes for it; ferrodoc refused it for
   its name alone. `html4` stays refused **by name**, because pandoc's

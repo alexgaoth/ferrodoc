@@ -234,12 +234,53 @@ mean shipping eight of them with no way to say whether they helped.
 |---|---|---|---|
 | **D4.1 — the drop-in corpus** | Collect **real** pandoc command lines — from Makefiles, CI jobs, README snippets, the pandoc manual's own examples — with the documents they run on. Commit them as data, not as a script. | At least 40 invocations, each recorded with its source, running under pandoc alone. A synthetic invocation nobody writes is not admitted. | Running ferrodoc against them. Any flag work. |
 | **D4.2 — `scripts/dropin.sh`** | Run each corpus command line through both binaries, comparing stdout, any output file, exit code and stderr byte for byte. Print `N/M command lines identical` and classify every miss as *fixable*, *deliberate* or *out of surface*. | Wired into `verify.sh`; publishes its number; mutation-tested by breaking one known-good flag and watching the number fall. | Fixing any miss it finds. |
-| **D4.3 — the `--wrap` decision** | Settle it as a compatibility question and write the reasoning: match pandoc's 72-column fill by default and keep `preserve` behind a flag, or keep `preserve` and count every wrapped output as a known difference. Implement whichever wins. | `dropin.sh` re-run: the wrap-related misses move to the chosen classification, and none is left unclassified. Existing gates hold. | The dialect question. Any other flag. |
+| **D4.3 — the `--wrap` decision** *(decided)* | **Match pandoc, in stages.** See below. | `dropin.sh` re-run; the three modes tested against every writer class. | The dialect question. Any other flag. |
 | **D4.4 — the `markdown` dialect decision** | Same treatment for `-f markdown`: CommonMark here, pandoc-markdown there, with `pandoc_markdown` now available. Decide whether `markdown` aliases it, and write why. | `dropin.sh` re-run; `diff-spec` and `diff-gfm` unmoved, proving `commonmark` is still `commonmark` whatever the alias does. | Extension syntax. |
 | **D4.5 — extension syntax** | Accept `+ext-ext` for the extensions the three dialects actually implement; refuse the rest **by name**, saying which dialect would have it. | A table test over every extension pandoc names: each is accepted, or refused with a message naming it. Silent acceptance fails the test. | Implementing a missing extension. |
 | **D4.6 — diagnostics** | `--quiet`, `--verbose`, `--log`, `--fail-if-warnings`, and unknown-flag behaviour: fail naming the flag and whether it is unimplemented or out of scope. | Every unknown flag produces a message naming it; `--fail-if-warnings` turns the metadata-block warning into a non-zero exit. **No silent acceptance anywhere.** | Rewriting existing warnings. |
 | **D4.7 — paths and defaults** | `--defaults`, `--resource-path`, `--data-dir`. These are what a Makefile actually carries. | A `--defaults` file setting from/to/wrap produces the same bytes as the equivalent flags; `--resource-path` resolves an image outside the document's directory. | Templates or `--reference-doc`, which are 0.5. |
 | **D4.8 — text shaping** | `--eol`, `--ascii`, `--strip-comments`, `--shift-heading-level-by`, `--id-prefix`. | One literal-output test each, compared against pandoc on the same input. `--eol=crlf` is checked on bytes, not on a rendered diff. | Highlighting. Anything in 0.5. |
+
+#### D4.3 — decided: match pandoc, and the default cannot flip yet
+
+The card offered two answers: match pandoc's 72-column fill, or keep
+`preserve` and count every wrapped output as a deliberate difference.
+**Match pandoc** — a converter whose selling line is "put it where pandoc
+is" cannot reflow every paragraph of every text conversion and call it a
+decision. `ferrodoc -t gfm --wrap=auto --columns=72` already produces
+pandoc's default output byte for byte, so nothing is being promised that
+has not been measured.
+
+But measuring the flag first turned up three things that had to be fixed
+before any default could be flipped, and they are worth more than the
+flip:
+
+1. **ferrodoc has no single wrap default.** `html` and `plain` join every
+   soft break into a space — pandoc's `--wrap=none` — while `markdown`,
+   `gfm`, `latex`, `rst` and `asciidoc` keep the document's breaks, which
+   is `--wrap=preserve`. Seven writers written separately, and `README.md`
+   claimed one behaviour for all of them. `samples/generate.sh` had
+   discovered it empirically — it runs pandoc **both ways and keeps the
+   closer output** — without anyone naming what it had found.
+2. **`--wrap=none` and `--wrap=preserve` were the same value.** They are
+   not the same thing: `none` joins, `preserve` keeps. On the one writer
+   that could tell them apart, ferrodoc did `preserve` for both — an
+   explicit flag, accepted, doing something else.
+3. **`--wrap=auto` was a silent no-op for five of seven writers**, and it
+   dropped embedded media on the way past, because the wrapped path
+   called the writer that takes no resolver.
+
+All three are fixed: `Format::wrapping()` states what each writer does,
+`Wrap` has pandoc's three modes, and a writer that cannot honour the mode
+asked for **returns an error naming what it does instead** rather than
+the layout it already had.
+
+**So the remaining work is filling, not deciding.** The default becomes
+`auto` at the version where `html`, `plain`, `latex`, `rst` and
+`asciidoc` can fill to a column — one card each, and the HTML one is the
+one worth doing first because it is most of the drop-in corpus. Until
+then every wrapped output is counted as *fixable* by `dropin.sh`, which
+is the honest classification: it is going to be fixed.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number
