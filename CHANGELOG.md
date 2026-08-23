@@ -66,6 +66,21 @@ the document and leave out what the file was written to do.
 Seven of the 48 command lines in `dropin/` were refused for this flag
 alone; with `-c` that count is 15 down to 7.
 
+### `-s` is pandoc's no-op where it is one (card D4.6)
+
+`ferrodoc --standalone --to plain x.md` used to fail and write nothing,
+where pandoc writes the document. `-s` is pandoc's no-op for a format
+with no page form — **but only while the document carries no metadata**:
+with any at all it writes a title block, and for `plain` that is two
+blank lines even for a key no title block would show. So it is accepted
+and ignored where the bytes are identical, and refused by name where they
+would not be.
+
+That, plus `--defaults`, took the drop-in corpus **off zero**: one of the
+48 real command lines now produces byte-identical output, and
+`scripts/dropin.sh --fail-under 1` is a gate rather than a measurement,
+as its own comment had promised.
+
 ### Other
 
 - `-t html5` and `-f html5` are accepted. Pandoc has spelled it that way

@@ -235,10 +235,12 @@ if [ "$want_gates" = 1 ]; then
     # The only number here that answers "would a user notice". Every gate
     # above scores an AST or one conversion with flags the gate chose;
     # this runs 48 command lines people actually wrote and compares the
-    # bytes. It is a measurement rather than a gate because it is at 0/48
-    # and a floor of zero holds nothing — **it becomes a gate the day it
-    # is not zero.** See dropin/README.md.
-    measure "real command lines" ./scripts/dropin.sh
+    # bytes. It was a measurement while it read 0/48, on the promise that
+    # it became a gate the day it was not zero. That day was the one
+    # `--defaults` landed. A **count**, not a percentage: over 48 rows a
+    # percentage floor tolerates a whole row going backwards.
+    # See dropin/README.md.
+    gate "real command lines" ./scripts/dropin.sh --fail-under 1
 
     # Each text writer against pandoc's own writer, on the same AST.
     # The gates for these are *fidelity* runs — write it, read it back —

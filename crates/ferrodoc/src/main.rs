@@ -550,7 +550,7 @@ a heading in the body"
     if toc && to != Format::Html {
         eprintln!("ferrodoc: --toc is HTML-only here; the {to} output has no contents");
     }
-    let converted = if standalone {
+    let converted = if wants_page(standalone, to, &doc)? {
         render_page(&doc, to, css.as_deref(), toc)?
     } else {
         if css.is_some() {
@@ -593,6 +593,31 @@ fn write_output(output: Option<&std::path::Path>, bytes: &[u8]) -> Result<(), St
     std::fs::write(path, bytes).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
+/// Whether `-s` writes a page here, is pandoc's no-op, or is refused.
+///
+/// Pandoc accepts `-s` for every format, and for one with no page form it
+/// is a **no-op only while the document carries no metadata**: with any at
+/// all it writes a title block, and for `plain` that is two blank lines
+/// even for a key no title block would show. Measured key by key against
+/// 3.8.2.1.
+///
+/// So accept and ignore where the bytes are identical, and refuse by name
+/// where they would not be. Erroring on both was worse than either:
+/// `pandoc --standalone --to man x.md`, a real line from a real Makefile,
+/// wrote nothing here at all.
+fn wants_page(standalone: bool, to: Format, doc: &ferrodoc::Pandoc) -> Result<bool, String> {
+    match (standalone, to) {
+        (false, _) => Ok(false),
+        (true, Format::Html | Format::Latex) => Ok(true),
+        (true, _) if doc.meta.is_empty() => Ok(false),
+        (true, _) => Err(format!(
+            "--standalone for {to} would write a title block from this document's \
+             metadata, which this build does not write; drop -s, or convert to \
+             html or latex, which have one"
+        )),
+    }
+}
+
 /// A complete document rather than a fragment: an HTML page with `css`
 /// inlined, or a LaTeX file with a preamble and `\begin{document}`.
 ///
@@ -623,6 +648,10 @@ fn render_page(
         return Err(format!("{to} support was not compiled into this build"));
     }
     if to != Format::Html {
+        // `run` decides before this is reached: `-s` for a format with no
+        // page form is either ignored or refused there. Kept as a guard,
+        // because a third page format added later should not silently get
+        // a fragment out of this function.
         return Err(format!("--standalone applies to html or latex output, not {to}"));
     }
     let css = css
@@ -943,6 +972,30 @@ mod tests {
 
     /// Every container, because a walk that misses one leaves a picture
     /// pointing at a file that is not there — and nothing fails loudly.
+    #[test]
+    fn standalone_is_pandocs_no_op_until_the_document_has_metadata() {
+        // `pandoc --standalone --to man x.md` is a real Makefile line, and
+        // erroring on it wrote nothing at all where pandoc writes the
+        // document.
+        let plain = ferrodoc::Pandoc::new(Vec::new());
+        assert!(!wants_page(true, Format::Plain, &plain).expect("no-op"));
+        assert!(!wants_page(true, Format::Rst, &plain).expect("no-op"));
+        assert!(wants_page(true, Format::Html, &plain).expect("a page"));
+        assert!(wants_page(true, Format::Latex, &plain).expect("a page"));
+        assert!(!wants_page(false, Format::Html, &plain).expect("a fragment"));
+
+        // With metadata it is not a no-op — pandoc writes a title block —
+        // so it is refused by name rather than quietly writing the
+        // document without one.
+        let mut titled = ferrodoc::Pandoc::new(Vec::new());
+        titled.meta.insert(
+            "title".to_owned(),
+            ferrodoc_ast::MetaValue::MetaString("X".to_owned()),
+        );
+        let error = wants_page(true, Format::Plain, &titled).expect_err("a title block");
+        assert!(error.contains("title block"), "{error}");
+    }
+
     #[test]
     fn a_defaults_file_is_the_flags_it_stands_for() {
         let flags = |yaml: &str| defaults_to_args(yaml, "d.yaml");

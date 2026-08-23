@@ -21,6 +21,7 @@
 # from. See `dropin/README.md`.
 #
 #   scripts/dropin.sh              the number, and one line per miss
+#   scripts/dropin.sh --fail-under N   ...and exit non-zero below N rows
 #   scripts/dropin.sh --verbose    and the first lines of each diff
 #   scripts/dropin.sh --attribute  and what one change would fix each miss
 #   scripts/dropin.sh dropin-013   one row, with its diff
@@ -40,12 +41,14 @@ CORPUS=dropin/commands.tsv
 verbose=0
 attribute=0
 only=""
+floor=0
 case "${1-}" in
     --verbose) verbose=1 ;;
     --attribute) attribute=1 ;;
+    --fail-under) floor=${2:?--fail-under needs a count} ;;
     "") ;;
     dropin-*) only="$1"; verbose=1 ;;
-    *) echo "usage: $0 [--verbose|--attribute|dropin-NNN]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--verbose|--attribute|--fail-under N|dropin-NNN]" >&2; exit 2 ;;
 esac
 
 have=$(pandoc --version 2>/dev/null | head -1 | awk '{print $2}')
@@ -212,3 +215,10 @@ if [ "${#misses[@]}" -gt 0 ]; then
 fi
 percent=$(awk -v a="$identical" -v b="$total" 'BEGIN { printf "%.1f", b ? a * 100 / b : 0 }')
 echo "$identical/$total command lines identical ($percent%)"
+# A count rather than a percentage: the corpus is 48 rows and a
+# percentage floor over a corpus that small tolerates a whole row going
+# backwards. It is a count of rows that must keep working.
+if [ "$identical" -lt "$floor" ]; then
+    echo "below the floor of $floor" >&2
+    exit 1
+fi

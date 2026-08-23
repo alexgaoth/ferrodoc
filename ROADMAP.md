@@ -282,6 +282,34 @@ one worth doing first because it is most of the drop-in corpus. Until
 then every wrapped output is counted as *fixable* by `dropin.sh`, which
 is the honest classification: it is going to be fixed.
 
+#### 0.5 — a licence fact that decides how far `-s` can go
+
+Byte-identical standalone HTML means reproducing **pandoc's default
+template and its default stylesheet**: a 70-line template and a 212-line
+`templates/styles.html`, both printable from the pinned binary
+(`pandoc --print-default-template=html5`,
+`pandoc --print-default-data-file=templates/styles.html`). That is 174 of
+the 176 lines by which `ferrodoc -s -t html` differs from
+`pandoc -s -t html` today; the other two are `<html lang=…>` and the
+`<title>`.
+
+Pandoc is GPL-2.0-or-later, so the question is whether that is even
+available to an MIT/Apache-2.0 project. **It is:** pandoc's `COPYRIGHT`
+carves the templates out —
+
+> Pandoc's templates (in `data/templates`) are dual-licensed as either
+> GPL (v2 or higher, same as pandoc) or (at your option) the BSD 3-clause
+> license.
+
+and `templates/styles.html` is one of those files. BSD-3 is compatible
+with this project's licences and needs its notice carried.
+
+**That is the owner's decision, not a technical one**, and it is what 0.5
+turns on: taking pandoc's template and stylesheet under BSD-3 with
+attribution makes `-s` byte-identical and reachable; writing a page of
+one's own means `-s` output can never match, and the 1.0 claim has to
+name standalone HTML as an exception the way it names citations.
+
 #### What the drop-in number is waiting on now
 
 `--defaults` and the `-c` alias took *out of surface* from **15 rows to
