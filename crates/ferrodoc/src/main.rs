@@ -45,6 +45,7 @@ OPTIONS:
         --metadata-file FILE   Metadata as a flat `key: value` file
         --resource-path DIR[:DIR]  Where to look for a picture the
                             document names, after its own directory
+        --reference-doc FILE   Take the styles from this .docx
         --data-dir DIR      Where `templates/default.html5` and a
                             `--template` named rather than pathed live
         --eol crlf|lf|native  What ends a line in text output
@@ -216,6 +217,8 @@ struct Options {
     shaping: Shaping,
     /// `--resource-path`, searched after the document's own directory.
     resource_path: Vec<PathBuf>,
+    /// `--reference-doc`, already read.
+    reference: Option<Vec<u8>>,
     extract_media: Option<PathBuf>,
     /// The layout asked for, or `None` for the writer's own — which is
     /// not the same for all of them; see `Format::wrapping`.
@@ -423,6 +426,7 @@ struct Parsed {
     shaping: Shaping,
     resource_path: Vec<PathBuf>,
     data_dir: Option<PathBuf>,
+    reference: Option<Vec<u8>>,
     extract_media: Option<PathBuf>,
     wrap: Option<Wrap>,
     columns: usize,
@@ -472,6 +476,13 @@ fn take_flag(
             out.resource_path.extend(value(arg)?.split(':').map(PathBuf::from));
         }
         "--data-dir" => out.data_dir = Some(PathBuf::from(value(arg)?)),
+        // Read now: a missing reference should fail before the document
+        // is converted rather than after.
+        "--reference-doc" | "--reference-docx" => {
+            let path = value(arg)?;
+            out.reference =
+                Some(std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}"))?);
+        }
         "-M" | "--metadata" => out.metadata.push(metadata_pair(value(arg)?)),
         // The same flat `key: value` subset a `--defaults` file uses, and
         // refusing an unreadable key by name for the same reason:
@@ -560,6 +571,7 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         page: out.page,
         shaping: out.shaping,
         resource_path: out.resource_path,
+        reference: out.reference,
         extract_media: out.extract_media,
         // `--columns` is only read when `--wrap=auto` asked for it, and
         // may have been given either side of it.
@@ -581,6 +593,7 @@ fn run() -> Result<(), String> {
         page,
         shaping,
         resource_path,
+        reference,
         extract_media,
         wrap,
         toc,
@@ -662,7 +675,17 @@ a heading in the body",
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
     let page = page.as_page(toc, &stem);
-    let converted = if wants_page(standalone, to, &doc)? {
+    let converted = if let Some(reference) = &reference {
+        // `--reference-doc` replaces the whole render: the package it
+        // produces is the reference's, with this document in it.
+        ferrodoc::render_with_reference(
+            &doc,
+            to,
+            reference,
+            &resolve(&embedded, &base, &resource_path),
+        )
+        .map_err(|e| e.to_string())?
+    } else if wants_page(standalone, to, &doc)? {
         render_page(&doc, to, &page)?
     } else {
         if !page.css.is_empty() {

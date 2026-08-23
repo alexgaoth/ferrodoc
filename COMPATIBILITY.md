@@ -739,6 +739,30 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### `--reference-doc` — the styles, and only the styles
+
+The single most common reason a team cannot switch converters: the house
+styles live in a `.docx` somebody made in Word.
+
+**Two parts come across and no others**: `word/styles.xml`, which is what
+a style *is*, and `word/numbering.xml`, which is what a list style is.
+Copying the rest of the reference package — theme, fonts, settings —
+would mean either declaring those parts in a `[Content_Types].xml` this
+writer did not build, or shipping parts nothing declares, and both are
+ways to write a `.docx` Word offers to repair on open.
+
+```console
+$ ferrodoc report.md -t docx --reference-doc=house.docx -o out.docx
+$ unzip -p out.docx word/styles.xml | cmp - <(unzip -p house.docx word/styles.xml)
+```
+
+A reference that is not a `.docx`, or has no styles part, is **named**
+rather than quietly falling back to the built-in styles: a team whose
+branding vanished would find out downstream.
+
+With this, **every one of the 48 command lines in `dropin/` runs** —
+none is refused for a flag this build does not have.
+
 ### `--resource-path` and `--data-dir`
 
 `--resource-path DIR:DIR` is searched **after** the document's own

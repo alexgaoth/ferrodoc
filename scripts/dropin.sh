@@ -214,7 +214,10 @@ if [ "${#misses[@]}" -gt 0 ]; then
     echo
 fi
 percent=$(awk -v a="$identical" -v b="$total" 'BEGIN { printf "%.1f", b ? a * 100 / b : 0 }')
-echo "$identical/$total command lines identical ($percent%)"
+# One line, because `verify.sh` reports a gate by its last: the count of
+# refusals belongs beside the score rather than under it.
+refused=$(printf '%s\n' "${misses[@]}" | grep -c 'out of surface' || true)
+echo "$identical/$total command lines identical ($percent%), $refused refused for a missing flag"
 # A count rather than a percentage: the corpus is 48 rows and a
 # percentage floor over a corpus that small tolerates a whole row going
 # backwards. It is a count of rows that must keep working.

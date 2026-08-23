@@ -10,6 +10,17 @@ break published without its note is a break twice.
 
 ## Unreleased
 
+### `--reference-doc` for DOCX, and no refusals left in the corpus
+
+The house styles live in a `.docx` somebody made in Word, and this is the
+flag that reaches them. `word/styles.xml` and `word/numbering.xml` come
+from the reference; nothing else does, because copying the rest would
+mean shipping parts nothing declares. A reference that is not a `.docx`,
+or has no styles part, is named rather than ignored.
+
+**Every one of the 48 real command lines in `dropin/` now runs.** None is
+refused for a flag this build does not have.
+
 ### `--resource-path` and `--data-dir` (card D4.7 finished)
 
 `--resource-path` is searched after the document's own directory, so a

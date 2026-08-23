@@ -102,7 +102,7 @@ pub mod media;
 #[doc(hidden)]
 pub mod xml;
 
-pub use write::{write_docx, write_docx_with_media};
+pub use write::{write_docx, write_docx_with_media, write_docx_with_reference};
 
 use combine::{Modifier, smush_blocks, smush_inlines, stack};
 use ferrodoc_ast::{

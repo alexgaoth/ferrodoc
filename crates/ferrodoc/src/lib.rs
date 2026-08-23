@@ -873,6 +873,33 @@ fn shift_blocks(blocks: &mut [Block], by: i64) {
     }
 }
 
+/// Render a document to DOCX, taking its **styles** from a reference
+/// `.docx` — pandoc's `--reference-doc`.
+///
+/// The single most common reason a team cannot switch converters: the
+/// house styles live in a `.docx` somebody made in Word. Two parts are
+/// taken from it, `word/styles.xml` and `word/numbering.xml`, and no
+/// others; see `ferrodoc_docx::write_docx_with_reference` for why.
+///
+/// # Errors
+///
+/// A reference that is not a `.docx`, or has no styles part.
+#[cfg(feature = "docx")]
+pub fn render_with_reference(
+    doc: &Pandoc,
+    to: Format,
+    reference: &[u8],
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<Vec<u8>, Error> {
+    if to != Format::Docx {
+        return Err(Error::NotWritable(to));
+    }
+    let resolve = |url: &str| data_url(url).or_else(|| media(url));
+    ferrodoc_docx::write_docx_with_reference(doc, &resolve, Some(reference)).map_err(|e| {
+        Error::Invalid { format: to, detail: e.to_string() }
+    })
+}
+
 /// Prefix every identifier, as pandoc's `--id-prefix` does.
 ///
 /// Not only the identifiers: an **internal link is rewritten too**, so

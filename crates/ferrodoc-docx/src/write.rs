@@ -41,6 +41,67 @@ pub fn write_docx_with_media(
     doc: &Pandoc,
     media: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
+    write_docx_with_reference(doc, media, None)
+}
+
+/// The same, taking the document's **styles** from a reference `.docx`.
+///
+/// This is pandoc's `--reference-doc`, and it is the single most common
+/// reason a team cannot switch converters: the house styles live in a
+/// `.docx` somebody made in Word.
+///
+/// **Two parts are taken and no others**: `word/styles.xml`, which is
+/// what a style *is*, and `word/numbering.xml`, which is what a list
+/// style is. Copying the rest of the reference package — its theme,
+/// fonts, settings — would mean either declaring those parts in a
+/// `[Content_Types].xml` this writer did not build, or shipping parts
+/// nothing declares. Both are ways to write a `.docx` Word repairs on
+/// open, and the styles are what the flag is for.
+///
+/// # Errors
+///
+/// A reference that is not a zip, or has no `word/styles.xml` — named,
+/// rather than silently falling back to the built-in styles, because a
+/// team whose branding vanished would find out downstream.
+pub fn write_docx_with_reference(
+    doc: &Pandoc,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+    reference: Option<&[u8]>,
+) -> Result<Vec<u8>, Error> {
+    let borrowed;
+    let (styles, numbering) = match reference {
+        None => (STYLES.to_owned(), None),
+        Some(bytes) => {
+            borrowed = reference_parts(bytes)?;
+            (borrowed.0.clone(), borrowed.1.clone())
+        }
+    };
+    write_package(doc, media, &styles, numbering.as_deref())
+}
+
+/// `word/styles.xml` and `word/numbering.xml` out of a reference package.
+fn reference_parts(bytes: &[u8]) -> Result<(String, Option<String>), Error> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| Error::Zip(format!("the reference document is not a .docx: {e}")))?;
+    let read = |archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>, name: &str| {
+        let mut part = archive.by_name(name).ok()?;
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut part, &mut text).ok()?;
+        Some(text)
+    };
+    let styles = read(&mut archive, "word/styles.xml").ok_or_else(|| {
+        Error::Zip("the reference document has no word/styles.xml".to_owned())
+    })?;
+    let numbering = read(&mut archive, "word/numbering.xml");
+    Ok((styles, numbering))
+}
+
+fn write_package(
+    doc: &Pandoc,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+    styles: &str,
+    numbering: Option<&str>,
+) -> Result<Vec<u8>, Error> {
     let mut w = Writer { media, ..Writer::default() };
     // Metadata is written as the styled leading paragraphs the reader
     // recognizes, which is where a `.docx` actually carries it.
@@ -71,8 +132,12 @@ pub fn write_docx_with_media(
     part("_rels/.rels", PACKAGE_RELS)?;
     part("word/document.xml", &document)?;
     part("word/_rels/document.xml.rels", &w.document_rels())?;
-    part("word/styles.xml", STYLES)?;
-    part("word/numbering.xml", &w.numbering())?;
+    part("word/styles.xml", styles)?;
+    // The reference's list styles when it has them; this writer's when it
+    // does not, because a `.docx` whose numbering part is missing renders
+    // every list unnumbered.
+    let generated = w.numbering();
+    part("word/numbering.xml", numbering.unwrap_or(&generated))?;
     part("word/footnotes.xml", &w.footnotes_part())?;
     part("word/_rels/footnotes.xml.rels", &w.footnotes_rels())?;
     // `part` borrows the zip; the media parts are written directly.
@@ -1102,6 +1167,55 @@ const STYLES: &str = concat!(
 
 #[cfg(test)]
 mod tests {
+
+    /// `--reference-doc` is the single most common reason a team cannot
+    /// switch converters, and what it has to do is exact: the styles in
+    /// the output are the reference's, byte for byte.
+    #[test]
+    fn a_reference_document_supplies_the_styles_and_nothing_else() {
+        let doc = Pandoc::new(vec![Block::Para(vec![Inline::Str("x".into())])]);
+        let plain = write_docx(&doc).expect("a package");
+
+        // A reference whose styles part is unmistakable.
+        let mut altered = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut altered));
+            let options = SimpleFileOptions::default();
+            zip.start_file("word/styles.xml", options).expect("writable");
+            zip.write_all(b"<w:styles>house</w:styles>").expect("writable");
+            zip.finish().expect("a zip");
+        }
+        let with = write_docx_with_reference(&doc, &|_| None, Some(&altered)).expect("a package");
+        assert_eq!(part_of(&with, "word/styles.xml"), "<w:styles>house</w:styles>");
+        // ...and nothing else came across: the document is still ours.
+        assert_eq!(part_of(&with, "word/document.xml"), part_of(&plain, "word/document.xml"));
+        // A reference with no numbering keeps this writer's, or every
+        // list in the output renders unnumbered.
+        assert_eq!(part_of(&with, "word/numbering.xml"), part_of(&plain, "word/numbering.xml"));
+
+        // A reference that is not a `.docx`, and one with no styles, are
+        // both named rather than silently ignored — a team whose branding
+        // vanished would find out downstream.
+        let not_a_zip = write_docx_with_reference(&doc, &|_| None, Some(b"not a zip"));
+        assert!(not_a_zip.expect_err("not a zip").to_string().contains("not a .docx"));
+        let empty = {
+            let mut bytes = Vec::new();
+            let zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            zip.finish().expect("a zip");
+            bytes
+        };
+        let no_styles = write_docx_with_reference(&doc, &|_| None, Some(&empty));
+        assert!(no_styles.expect_err("no styles").to_string().contains("styles.xml"));
+    }
+
+    /// One part of a package, as text.
+    fn part_of(bytes: &[u8], name: &str) -> String {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        let mut part = archive.by_name(name).expect(name);
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut part, &mut text).expect("readable");
+        text
+    }
     use super::*;
     use crate::read_docx;
 
