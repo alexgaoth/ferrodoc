@@ -1,0 +1,16 @@
+# **No line-ending conversion, anywhere in this repository.**
+#
+# Almost every file here is compared byte for byte against pandoc by
+# something: the corpus fixtures, the committed `samples/`, and — since
+# 0.3 — pandoc's own template and stylesheet, which are `include_str!`d
+# into the HTML writer and emitted verbatim.
+#
+# Without this, a Windows checkout turns those templates into CRLF and
+# `ferrodoc -s` produces a different page there than it does on Linux.
+# That is not a test failure to fix; it is the output claim breaking on
+# one platform. It surfaced as one, on the first Windows run after the
+# templates landed.
+#
+# `--eol=crlf` is how a caller asks for carriage returns, and it applies
+# to the output rather than to the sources.
+* -text
