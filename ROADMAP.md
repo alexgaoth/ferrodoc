@@ -235,7 +235,7 @@ mean shipping eight of them with no way to say whether they helped.
 | **D4.1 — the drop-in corpus** | Collect **real** pandoc command lines — from Makefiles, CI jobs, README snippets, the pandoc manual's own examples — with the documents they run on. Commit them as data, not as a script. | At least 40 invocations, each recorded with its source, running under pandoc alone. A synthetic invocation nobody writes is not admitted. | Running ferrodoc against them. Any flag work. |
 | **D4.2 — `scripts/dropin.sh`** | Run each corpus command line through both binaries, comparing stdout, any output file, exit code and stderr byte for byte. Print `N/M command lines identical` and classify every miss as *fixable*, *deliberate* or *out of surface*. | Wired into `verify.sh`; publishes its number; mutation-tested by breaking one known-good flag and watching the number fall. | Fixing any miss it finds. |
 | **D4.3 — the `--wrap` decision** *(decided)* | **Match pandoc, in stages.** See below. | `dropin.sh` re-run; the three modes tested against every writer class. | The dialect question. Any other flag. |
-| **D4.4 — the `markdown` dialect decision** | Same treatment for `-f markdown`: CommonMark here, pandoc-markdown there, with `pandoc_markdown` now available. Decide whether `markdown` aliases it, and write why. | `dropin.sh` re-run; `diff-spec` and `diff-gfm` unmoved, proving `commonmark` is still `commonmark` whatever the alias does. | Extension syntax. |
+| **D4.4 — the `markdown` dialect decision** *(decided)* | **No alias, and here is the number.** See below. | `diff-pandoc-md corpus` gates the reader at its measured 30%; `diff-spec` and `diff-gfm` unmoved. | Extension syntax. |
 | **D4.5 — extension syntax** | Accept `+ext-ext` for the extensions the three dialects actually implement; refuse the rest **by name**, saying which dialect would have it. | A table test over every extension pandoc names: each is accepted, or refused with a message naming it. Silent acceptance fails the test. | Implementing a missing extension. |
 | **D4.6 — diagnostics** | `--quiet`, `--verbose`, `--log`, `--fail-if-warnings`, and unknown-flag behaviour: fail naming the flag and whether it is unimplemented or out of scope. | Every unknown flag produces a message naming it; `--fail-if-warnings` turns the metadata-block warning into a non-zero exit. **No silent acceptance anywhere.** | Rewriting existing warnings. |
 | **D4.7 — paths and defaults** | `--defaults`, `--resource-path`, `--data-dir`. These are what a Makefile actually carries. | A `--defaults` file setting from/to/wrap produces the same bytes as the equivalent flags; `--resource-path` resolves an image outside the document's directory. | Templates or `--reference-doc`, which are 0.5. |
@@ -281,6 +281,37 @@ the layout it already had.
 one worth doing first because it is most of the drop-in corpus. Until
 then every wrapped output is counted as *fixable* by `dropin.sh`, which
 is the honest classification: it is going to be fixed.
+
+#### D4.4 — decided: `markdown` does not alias `pandoc_markdown`, yet
+
+The card asked whether `-f markdown` should mean pandoc's dialect here as
+it does there. The answer is a measurement, and it was not available
+until this card: the `pandoc_markdown` reader agrees with
+`pandoc -f markdown` on **6 of 20** markdown documents in `corpus/`.
+
+Aliasing a reader that disagrees with pandoc on two thirds of a corpus
+would move the difference from *a name you have to type* to *every
+conversion you already run*, and it would do it silently. `markdown`
+stays CommonMark until the number is close to 100.
+
+The gate that said `3/3` was the shape of the problem, not evidence
+against it: three fixtures written for this reader, scoring what a corpus
+of one's own constructs always scores. `verify.sh` now runs both — the
+hand-authored three at 100, because a fixture that starts failing is a
+regression, and every markdown document under `corpus/` at its measured
+30%, because that is the number that says how far the dialect is.
+
+**What the 14 failures are**, from the widened run: `smart` quotes
+(pandoc's `markdown` turns `'` into `’` by default and this does not),
+`implicit_figures` (an image alone in a paragraph is a `Figure` block
+there and a `Para` here), a code span inside a table cell, and one YAML
+metadata block this reader refuses — `abstract: |`, a block scalar
+outside the subset it reads. Each is a card, and `smart` is the one that
+touches nearly every prose document.
+
+**One thing the widening fixed on its own:** the gate used to *abort* on
+a refused document rather than count it, so a single `abstract: |`
+stopped the other nineteen being measured at all.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number

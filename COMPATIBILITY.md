@@ -76,6 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **6/20** over every markdown document |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's

@@ -413,18 +413,37 @@ fn collect_by_extension(path: &Path, extension: &str, cases: &mut Vec<Case>) -> 
 fn diff_pandoc_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
     let mut cases = Vec::new();
     for p in paths {
-        collect_by_extension(Path::new(p), "pmd", &mut cases)?;
+        // Every markdown document, not only the `.pmd` fixtures written
+        // for this reader. Three hand-authored files read 3/3, which is
+        // what a corpus of one's own constructs always reads; the same
+        // reader over every markdown document in `corpus/` reads 6/20.
+        // The narrow run is still gated at 100 separately — see
+        // `verify.sh` — because a hand-authored fixture that starts
+        // failing is a regression, and the wide one is what says how far
+        // this dialect actually is.
+        for extension in ["pmd", "md", "gfm"] {
+            collect_by_extension(Path::new(p), extension, &mut cases)?;
+        }
     }
     if cases.is_empty() {
         bail!("no pandoc-markdown inputs found");
     }
+    cases.sort_by(|a, b| a.name.cmp(&b.name));
     let mut matched = 0usize;
     let mut failures = Vec::new();
     for case in &cases {
-        let ours = serde_json::to_value(
-            ferrodoc_markdown::read_pandoc_markdown(&case.markdown)
-                .map_err(|e| anyhow::anyhow!("{e}"))?,
-        )?;
+        // A refusal is a failing document, not a failing run. This used
+        // to abort on the first one, so the widened corpus could not be
+        // scored at all: one `abstract: |` in a metadata block stopped
+        // nineteen other documents being measured.
+        let read = match ferrodoc_markdown::read_pandoc_markdown(&case.markdown) {
+            Ok(doc) => doc,
+            Err(e) => {
+                failures.push((case, format!("refused: {e}")));
+                continue;
+            }
+        };
+        let ours = serde_json::to_value(read)?;
         let theirs: Value = serde_json::from_slice(&run_pandoc(
             &case.markdown,
             &["-f", "markdown", "-t", "json"],

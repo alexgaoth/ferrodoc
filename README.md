@@ -115,7 +115,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
-| `ferrodoc-markdown` pandoc-markdown reader | **3/3** corpus documents produce identical ASTs — a YAML metadata block, header attributes, definition lists and super/subscript |
+| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, and **6/20** over every markdown document in `corpus/` — which is why `-f markdown` is still CommonMark here |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
@@ -261,7 +261,17 @@ Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`,
 > means.** Pandoc's own dialect adds YAML metadata blocks, header
 > attributes (`# H {#id .class}`), definition lists and
 > superscript/subscript; none of those are read here, and they come through
-> as the literal text they are written with. Footnotes are read by `gfm`
+> as the literal text they are written with. `-f pandoc_markdown` reads
+> them — and **does not yet alias `markdown`**, because measured against
+> `pandoc -f markdown` over every markdown document in `corpus/` it agrees
+> on **6 of 20**. Aliasing a reader that disagrees with pandoc on two
+> thirds of a corpus would move the difference from a name you have to
+> type to every conversion you already run. The gap is `smart` quotes,
+> `implicit_figures`, and code spans inside table cells:
+>
+> ```sh
+> cargo run -p ferrodoc-harness -- diff-pandoc-md corpus --verbose
+> ``` Footnotes are read by `gfm`
 > and not by `markdown` — which is how pandoc has it too. The one case
 > where the output is *wrong* rather than narrower is a YAML metadata
 > block, because the title and author land in the body, so ferrodoc prints

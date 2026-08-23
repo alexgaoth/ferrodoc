@@ -41,6 +41,19 @@ pub fn render_wrapped_with_media(doc: &Pandoc, to: Format, wrap: Wrap,
                                  media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Vec<u8>, Error>
 ```
 
+### `-f markdown` stays CommonMark, and now says by how much (card D4.4)
+
+`diff-pandoc-md` scored **3/3** against three fixtures written for the
+pandoc-markdown reader. Run over every markdown document in `corpus/` the
+same reader scores **6/20**, so `markdown` does not alias
+`pandoc_markdown`: that would move the difference from a name you type to
+every conversion you already run. `verify.sh` gates both — the fixtures
+at 100, the wide corpus at its measured 30%.
+
+The widened run also fixed the gate: a document the reader *refuses* now
+counts as a failure instead of aborting the run, so one `abstract: |` no
+longer stops the other nineteen being measured.
+
 ### Other
 
 - `-t html5` and `-f html5` are accepted. Pandoc has spelled it that way

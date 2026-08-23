@@ -155,6 +155,12 @@ if [ "$want_gates" = 1 ]; then
     gate "GFM reader (spec)"    $HARNESS diff-gfm        $SPEC --fail-under 99.8
     gate "GFM writer"           $HARNESS diff-gfm-md     corpus/gfm $SPEC --fail-under 100
     gate "pandoc-markdown"      $HARNESS diff-pandoc-md  corpus/pandoc-markdown --fail-under 100
+    # The same reader over *every* markdown document in the corpus, not
+    # only the three fixtures written for it. 3/3 is what a corpus of
+    # one's own constructs always reads; this is the number that says how
+    # far pandoc's dialect actually is, and it is why `-f markdown` does
+    # not alias it — see ROADMAP card D4.4.
+    gate "pandoc-markdown (all markdown)" $HARNESS diff-pandoc-md corpus --fail-under 30
     # `--toc` and `--number-sections` have no gate in the harness: the
     # rest of a standalone page is deliberately not pandoc's, so only
     # the `<nav>` block and the heading lines are comparable. The
