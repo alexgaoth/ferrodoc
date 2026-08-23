@@ -106,6 +106,14 @@ if [ "$want_checks" = 1 ]; then
     echo "== build, test, lint"
     step "cargo test --workspace" ok cargo test --workspace --quiet
     step "cargo clippy -D warnings" ok cargo clippy --workspace --all-targets -- -D warnings
+    # **A trimmed build is a different program**, and only CI was
+    # checking it: `--reference-doc` compiled here and broke a build
+    # without `docx`, because an entry point behind a `cfg` was called
+    # without one. Cheap — the crate is already compiled — and it catches
+    # the one mistake features invite.
+    step "trimmed build (markdown + html)" ok \
+        cargo clippy -p ferrodoc --all-targets --no-default-features \
+        --features markdown,html -- -D warnings
     # Every library crate must keep working where there is no operating
     # system: that is the browser and edge-worker claim in the README.
     step "wasm32 build" ok cargo build --quiet --workspace \

@@ -884,7 +884,6 @@ fn shift_blocks(blocks: &mut [Block], by: i64) {
 /// # Errors
 ///
 /// A reference that is not a `.docx`, or has no styles part.
-#[cfg(feature = "docx")]
 pub fn render_with_reference(
     doc: &Pandoc,
     to: Format,
@@ -894,10 +893,21 @@ pub fn render_with_reference(
     if to != Format::Docx {
         return Err(Error::NotWritable(to));
     }
-    let resolve = |url: &str| data_url(url).or_else(|| media(url));
-    ferrodoc_docx::write_docx_with_reference(doc, &resolve, Some(reference)).map_err(|e| {
-        Error::Invalid { format: to, detail: e.to_string() }
-    })
+    // Present in every build, like every other entry point here: a build
+    // trimmed with `--no-default-features` says which format it was
+    // compiled without, and the CLI does not have to know which features
+    // it was built with to call this.
+    #[cfg(not(feature = "docx"))]
+    {
+        let _ = (doc, reference, media);
+        Err(Error::NotCompiled(to))
+    }
+    #[cfg(feature = "docx")]
+    {
+        let resolve = |url: &str| data_url(url).or_else(|| media(url));
+        ferrodoc_docx::write_docx_with_reference(doc, &resolve, Some(reference))
+            .map_err(|e| Error::Invalid { format: to, detail: e.to_string() })
+    }
 }
 
 /// Prefix every identifier, as pandoc's `--id-prefix` does.
