@@ -100,18 +100,12 @@ impl Defs {
     }
 
     fn flush(&self, out: &mut String) {
-        // The substitution definitions are **one block**, not one block
-        // each: pandoc separates the group from the document with a blank
-        // line and then writes them on consecutive lines.
-        if !self.images.is_empty() {
-            separate(out);
-            for (name, url) in &self.images {
-                let _ = writeln!(out, ".. |{name}| image:: {url}");
-            }
-        }
+        // **Footnotes first, substitutions last** — pandoc's order, and
+        // the one `samples/08-markdown-to-rst` is measured against.
+        //
         // A footnote is its own block, and its body starts on the line
-        // **after** the label, indented — which is also what lets a body
-        // of more than one line stay part of the footnote.
+        // after the label, indented — which is also what lets a body of
+        // more than one line stay part of the footnote.
         for (index, body) in self.notes.iter().enumerate() {
             separate(out);
             let _ = writeln!(out, ".. [{}]", index + 1);
@@ -121,6 +115,15 @@ impl Defs {
                 } else {
                     let _ = writeln!(out, "{INDENT}{line}");
                 }
+            }
+        }
+        // The substitution definitions are **one block**, not one block
+        // each: pandoc separates the group from the document with a blank
+        // line and then writes them on consecutive lines.
+        if !self.images.is_empty() {
+            separate(out);
+            for (name, url) in &self.images {
+                let _ = writeln!(out, ".. |{name}| image:: {url}");
             }
         }
     }
@@ -181,6 +184,15 @@ fn closes_indented(block: &Block) -> bool {
 fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
     match block {
         Block::Plain(list) | Block::Para(list) => {
+            // **A hard break has no paragraph spelling in RST**, so a
+            // paragraph holding one is written as a line block: each hard
+            // break starts a new `| ` line and a soft break continues the
+            // one before it, indented two. Written as plain text the
+            // break simply vanished.
+            if list.iter().any(|inline| matches!(inline, Inline::LineBreak)) {
+                hard_broken_para_to(list, out, def);
+                return;
+            }
             let mut text = String::new();
             inlines(list, &mut text, def);
             let _ = writeln!(out, "{}", text.trim_end());
@@ -292,6 +304,21 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
     }
 }
 
+/// A paragraph holding a hard break, written as a line block: each hard
+/// break starts a new `| ` line and a soft break continues the one before
+/// it, indented two.
+fn hard_broken_para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
+    for segment in list.split(|inline| matches!(inline, Inline::LineBreak)) {
+        let mut text = String::new();
+        inlines(segment, &mut text, def);
+        let mut lines = text.trim_end().lines();
+        let _ = writeln!(out, "| {}", lines.next().unwrap_or_default());
+        for line in lines {
+            let _ = writeln!(out, "  {line}");
+        }
+    }
+}
+
 /// A raw block, kept rather than dropped.
 ///
 /// `.. raw:: html` is RST's way to carry another format's syntax through,
@@ -322,8 +349,17 @@ fn item_to(item: &[Block], marker: &str, tight: bool, out: &mut String, def: &mu
     let mut text = String::new();
     blocks(item, &mut text, def);
     let pad = " ".repeat(marker.chars().count() + 1);
+    // A **directive** cannot start on the marker's own line: `1. .. raw::
+    // html` is read as a paragraph beginning with two dots. Pandoc writes
+    // the marker, a blank line, and the content indented under it. A
+    // literal block's `::` is fine where it stands, so the test is what
+    // the content starts with rather than what kind of block it is.
+    let own_line = text.starts_with(".. ");
+    if own_line {
+        let _ = writeln!(out, "{marker} \n");
+    }
     for (index, line) in text.trim_end().lines().enumerate() {
-        if index == 0 {
+        if index == 0 && !own_line {
             let _ = writeln!(out, "{marker} {line}");
         } else if line.is_empty() {
             out.push('\n');
@@ -356,6 +392,10 @@ fn indent(text: &str) -> String {
 /// A grid table, because it is the only RST table that can hold a cell
 /// with more than one line in it.
 fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
+    if simple_enough(table) {
+        simple_table_to(table, out, def);
+        return;
+    }
     let rows: Vec<Vec<String>> = table
         .head
         .rows
@@ -405,9 +445,105 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
     out.push('\n');
 }
 
+/// Whether pandoc would write this as a **simple** table — the
+/// `=== ===` form — rather than a grid.
+///
+/// Two conditions, both probed: every cell is one paragraph or empty, and
+/// **the table has more than one column**. A one-column simple table is
+/// ambiguous with a section underline, and pandoc writes a grid for it
+/// however short the cell is.
+fn simple_enough(table: &Table) -> bool {
+    table.colspecs.len() >= 2
+        && table
+            .head
+            .rows
+            .iter()
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(table.foot.rows.iter())
+            .all(|row| {
+                row.cells.iter().all(|cell| {
+                    cell.col_span <= 1
+                        && cell.row_span <= 1
+                        && matches!(cell.blocks.as_slice(), [] | [Block::Plain(_) | Block::Para(_)])
+                })
+            })
+}
+
+/// The `=== ===` form: column rules, then the rows, with each cell but
+/// the last padded to its column and one space between.
+fn simple_table_to(table: &Table, out: &mut String, def: &mut Defs) {
+    let columns = table.colspecs.len();
+    let head: Vec<Vec<String>> =
+        table.head.rows.iter().map(|row| simple_cells(row, columns, def)).collect();
+    let body: Vec<Vec<String>> = table
+        .bodies
+        .iter()
+        .flat_map(|b| b.head.iter().chain(&b.body))
+        .chain(table.foot.rows.iter())
+        .map(|row| simple_cells(row, columns, def))
+        .collect();
+    if head.is_empty() && body.is_empty() {
+        return;
+    }
+    let widths: Vec<usize> = (0..columns)
+        .map(|column| {
+            head.iter()
+                .chain(&body)
+                .filter_map(|row| row.get(column))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(1)
+                .max(1)
+        })
+        .collect();
+    let rule = |out: &mut String| {
+        let parts: Vec<String> = widths.iter().map(|width| "=".repeat(*width)).collect();
+        let _ = writeln!(out, "{}", parts.join(" "));
+    };
+    let write_row = |row: &[String], out: &mut String| {
+        let mut line = String::new();
+        for (column, width) in widths.iter().enumerate() {
+            let cell = row.get(column).map_or("", String::as_str);
+            // An empty first cell would leave the row starting with the
+            // separator, which reads as a continuation of the row above.
+            // A backslash is RST's way to say "this cell is empty".
+            let cell = if column == 0 && cell.is_empty() { "\\" } else { cell };
+            line.push_str(cell);
+            if column + 1 < widths.len() {
+                let _ = write!(line, "{} ", " ".repeat(width - cell.chars().count()));
+            }
+        }
+        let _ = writeln!(out, "{line}");
+    };
+    rule(out);
+    for row in &head {
+        write_row(row, out);
+    }
+    if !head.is_empty() {
+        rule(out);
+    }
+    for row in &body {
+        write_row(row, out);
+    }
+    rule(out);
+    out.push('\n');
+}
+
 fn row_cells(row: &Row, columns: usize, def: &mut Defs) -> Vec<String> {
     let mut cells: Vec<String> = row.cells.iter().map(|cell| cell_text(cell, def)).collect();
     cells.resize(columns.max(cells.len()), String::new());
+    cells
+}
+
+/// One simple-table row's cells, with the marker an empty leading cell
+/// needs already in place — `\ ` is two columns wide and the column has
+/// to be at least that, so it cannot be substituted after the widths are
+/// measured.
+fn simple_cells(row: &Row, columns: usize, def: &mut Defs) -> Vec<String> {
+    let mut cells = row_cells(row, columns, def);
+    if cells.first().is_some_and(String::is_empty) {
+        "\\ ".clone_into(&mut cells[0]);
+    }
     cells
 }
 
@@ -667,13 +803,43 @@ fn role(name: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
 /// Only `*`, `` ` `` and `|` matter inside text, and only where they could
 /// begin a construct; escaping every one of them would fill ordinary prose
 /// with backslashes.
+/// Escape the characters RST gives a meaning to.
+///
+/// **Positional, the way RST's own rules are.** A `*` can only open
+/// markup where a start-string may stand — after whitespace or one of
+/// `-:/'"<([{` — and only close it where an end-string may — before
+/// whitespace or one of `-.,:;!?\/'")]}>`. A `*` with ordinary text on
+/// both sides is neither, so `2*3` and `a|b` need no backslash, and
+/// escaping them anyway put one in the middle of every product and every
+/// pipe a document mentioned. Probed against the pinned binary, character
+/// by character and position by position.
 fn escape(text: &str) -> String {
+    const OPENERS: &str = "-:/'\"<([{";
+    const CLOSERS: &str = "-.,:;!?\\/'\")]}>";
     let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if matches!(ch, '*' | '`' | '|' | '\\') {
-            out.push('\\');
+    let mut chars = text.chars().peekable();
+    let mut previous: Option<char> = None;
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
+        match ch {
+            // A backslash is an escape wherever it stands.
+            '\\' => out.push_str("\\\\"),
+            '*' | '`' | '|' | '_' => {
+                let inside = previous
+                    .is_some_and(|c| !c.is_whitespace() && !OPENERS.contains(c))
+                    && next.is_some_and(|c| !c.is_whitespace() && !CLOSERS.contains(c));
+                // `__` is an anonymous hyperlink reference even in the
+                // middle of a word, so the first of a pair is escaped
+                // wherever it stands.
+                let intraword = inside && !(ch == '_' && next == Some('_'));
+                if !intraword {
+                    out.push('\\');
+                }
+                out.push(ch);
+            }
+            ch => out.push(ch),
         }
-        out.push(ch);
+        previous = Some(ch);
     }
     out
 }
@@ -880,6 +1046,73 @@ mod tests {
     fn a_grid_table_lines_up() {
         // Every rule and every row has to be the same width, or docutils
         // rejects the table outright rather than mis-rendering it.
+        //
+        // The grid form is reached by a cell holding **two** blocks:
+        // pandoc writes the `=== ===` simple form for a table whose cells
+        // are each one paragraph, and this one is not.
+        let cell = |text: &str| ferrodoc_ast::Cell {
+            attr: Attr::default(),
+            alignment: ferrodoc_ast::Alignment::AlignDefault,
+            row_span: 1,
+            col_span: 1,
+            blocks: vec![Block::Plain(vec![Inline::Str(text.into())])],
+        };
+        let row = |a: &str, b: &str| Row { attr: Attr::default(), cells: vec![cell(a), cell(b)] };
+        let two_block_cell = ferrodoc_ast::Cell {
+            attr: Attr::default(),
+            alignment: ferrodoc_ast::Alignment::AlignDefault,
+            row_span: 1,
+            col_span: 1,
+            blocks: vec![
+                Block::Plain(vec![Inline::Str("a".into())]),
+                Block::Para(vec![Inline::Str("second".into())]),
+            ],
+        };
+        let table = Table {
+            attr: Attr::default(),
+            caption: ferrodoc_ast::Caption::default(),
+            colspecs: vec![
+                ferrodoc_ast::ColSpec {
+                    alignment: ferrodoc_ast::Alignment::AlignDefault,
+                    width: ferrodoc_ast::ColWidth::ColWidthDefault,
+                };
+                2
+            ],
+            head: ferrodoc_ast::TableHead {
+                attr: Attr::default(),
+                rows: vec![row("Header", "H2")],
+            },
+            bodies: vec![ferrodoc_ast::TableBody {
+                attr: Attr::default(),
+                row_head_columns: 0,
+                head: Vec::new(),
+                body: vec![Row {
+                    attr: Attr::default(),
+                    cells: vec![two_block_cell, cell("b")],
+                }],
+            }],
+            foot: ferrodoc_ast::TableFoot { attr: Attr::default(), rows: Vec::new() },
+        };
+        let rst = write_rst(&doc(vec![Block::Table(Box::new(table))]));
+        let widths: Vec<usize> = rst
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| line.chars().count())
+            .collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "rows are not all the same width:\n{rst}"
+        );
+        assert!(rst.contains("+=="), "the header rule is missing:\n{rst}");
+    }
+
+    #[test]
+    fn a_simple_table_pads_every_column_but_the_last() {
+        // Pandoc's `=== ===` form, which is what a table of one-paragraph
+        // cells becomes. The rule must be as wide as the widest cell in
+        // its column or docutils reads the overflow as a new column; the
+        // **last** column is not padded, which is why the rows are not
+        // all one width.
         let cell = |text: &str| ferrodoc_ast::Cell {
             attr: Attr::default(),
             alignment: ferrodoc_ast::Alignment::AlignDefault,
@@ -911,15 +1144,6 @@ mod tests {
             foot: ferrodoc_ast::TableFoot { attr: Attr::default(), rows: Vec::new() },
         };
         let rst = write_rst(&doc(vec![Block::Table(Box::new(table))]));
-        let widths: Vec<usize> = rst
-            .lines()
-            .filter(|line| !line.is_empty())
-            .map(|line| line.chars().count())
-            .collect();
-        assert!(
-            widths.windows(2).all(|pair| pair[0] == pair[1]),
-            "rows are not all the same width:\n{rst}"
-        );
-        assert!(rst.contains("+=="), "the header rule is missing:\n{rst}");
+        assert_eq!(rst, "====== ==\nHeader H2\n====== ==\na      b\n====== ==\n");
     }
 }
