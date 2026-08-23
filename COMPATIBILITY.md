@@ -739,6 +739,30 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### Diagnostics — `--quiet`, `--fail-if-warnings`, `--verbose`
+
+Matched against the binary, exit codes and stderr included:
+
+```console
+$ ferrodoc x.md -f markdown_github -t html --fail-if-warnings > /dev/null
+[WARNING] Deprecated: markdown_github. Use gfm instead.
+Failing because there were warnings.
+$ echo $?
+3
+```
+
+`--quiet` silences every warning and `--fail-if-warnings` exits **3**
+with pandoc's own line, both position-independent: `-f markdown_github
+--quiet` warns while the *first* flag is parsed, so the flags are read
+before anything else is.
+
+**`--verbose` is accepted and adds nothing.** Pandoc's writes `[INFO]`
+lines about what it is doing; there is nothing here that would say one.
+Refusing the flag would fail a command line pandoc runs happily, so the
+missing lines are a difference recorded here rather than an error — the
+one place in the CLI where accepting-and-doing-less is the better answer,
+because no document byte depends on it.
+
 ### Standalone pages — pandoc's own template, byte for byte
 
 `-s` output used to be one fixed page shape against pandoc's template

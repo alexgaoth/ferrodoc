@@ -36,6 +36,9 @@ OPTIONS:
                             it and an earlier one does not, which is what
                             pandoc does. A key this build has no flag for
                             is an error naming the key.
+        --quiet             Say nothing on stderr but errors
+        --fail-if-warnings  Exit 3 if anything warned
+        --verbose           Accepted; this build has no extra diagnostics
         --toc               Put a table of contents at the top of the page.
                             HTML output with --standalone; accepted and
                             ignored otherwise, which is what pandoc does.
@@ -171,6 +174,15 @@ fn usage() -> String {
 
 fn main() -> ExitCode {
     match run() {
+        // `--fail-if-warnings` turns a warning into a non-zero exit, and
+        // pandoc's is **3** with a line saying why. A build script that
+        // asked to be told is one that wanted to stop.
+        Ok(()) if FAIL_ON_WARNING.load(std::sync::atomic::Ordering::Relaxed)
+            && WARNED.load(std::sync::atomic::Ordering::Relaxed) =>
+        {
+            eprintln!("Failing because there were warnings.");
+            ExitCode::from(3)
+        }
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("ferrodoc: {message}");
@@ -351,6 +363,7 @@ fn defaults_key(key: &str, value: &str, items: &[String]) -> Option<Vec<String>>
 
 fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     let args = &expand_defaults(args, 0)?;
+    diagnostics(args);
     let mut from: Option<Format> = None;
     let mut to: Option<Format> = None;
     let mut output: Option<PathBuf> = None;
@@ -407,6 +420,12 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
                 to = Some(format(&name)?);
             }
             "-o" | "--output" => output = Some(PathBuf::from(value("--output")?)),
+            // `--quiet` and `--fail-if-warnings` were read before this
+            // loop started — see `diagnostics`. `--verbose` adds `[INFO]`
+            // lines in pandoc and there is nothing here that would say
+            // one; refusing it would fail a command line pandoc runs, so
+            // its absence is a row in COMPATIBILITY.md instead.
+            "--quiet" | "--fail-if-warnings" | "--verbose" => {}
             "-s" | "--standalone" => standalone = true,
             // `-c` is pandoc's short form and appears in real Makefiles
             // more often than the long one.
@@ -498,10 +517,10 @@ fn run() -> Result<(), String> {
 
     let bytes = read_input(input.as_deref())?;
     if matches!(from, Format::Markdown | Format::Gfm) && opens_with_metadata_block(&bytes) {
-        eprintln!(
+        warn(
             "ferrodoc: this document opens with what pandoc would read as a YAML \
 metadata block; ferrodoc reads CommonMark, where it is a thematic break and \
-a heading in the body"
+a heading in the body",
         );
     }
 
@@ -543,14 +562,16 @@ a heading in the body"
             // well. Here it is an HTML transform, so saying nothing would
             // be a silent loss — the one thing the dialect warning in
             // 7c06bb3 exists to avoid.
-            eprintln!("ferrodoc: --number-sections is HTML-only here; the {to} output is unnumbered");
+            warn(&format!(
+                "ferrodoc: --number-sections is HTML-only here; the {to} output is unnumbered"
+            ));
         }
     }
     // `--toc` without `-s` is accepted and emits nothing, because there is
     // no page to put the contents in — probed, pandoc does the same, and
     // erroring would fail a Makefile that pandoc runs happily.
     if toc && to != Format::Html {
-        eprintln!("ferrodoc: --toc is HTML-only here; the {to} output has no contents");
+        warn(&format!("ferrodoc: --toc is HTML-only here; the {to} output has no contents"));
     }
     // Pandoc puts the **input file's name** in `<title>` when the
     // document has no title of its own; only the caller knows it.
@@ -654,7 +675,7 @@ fn render_page(
             return Err("--css applies to html output, not latex".to_owned());
         }
         if page.toc {
-            eprintln!("ferrodoc: --toc is HTML-only here; the latex output has no contents");
+            warn("ferrodoc: --toc is HTML-only here; the latex output has no contents");
         }
         // Without this, `-s` on LaTeX would hand pdflatex a fragment with
         // no preamble — which is the exact mistake the flag prevents for
@@ -677,6 +698,48 @@ fn render_page(
     return ferrodoc::render_page(doc, page);
     #[cfg(not(feature = "html"))]
     return Err(format!("{to} support was not compiled into this build"));
+}
+
+/// Read `--quiet` and `--fail-if-warnings` before anything else.
+///
+/// **They are position-independent**, which an ordinary match arm cannot
+/// be: `-f markdown_github --quiet` warns *while the first flag is being
+/// parsed*, so a `--quiet` reached in turn arrives too late to silence
+/// it. Pandoc silences it.
+fn diagnostics(args: &[String]) {
+    use std::sync::atomic::Ordering::Relaxed;
+    for arg in args {
+        match arg.as_str() {
+            "--quiet" => QUIET.store(true, Relaxed),
+            "--fail-if-warnings" => FAIL_ON_WARNING.store(true, Relaxed),
+            _ => {}
+        }
+    }
+}
+
+/// Whether warnings are printed, and whether any has been.
+///
+/// A CLI process, so two atomics rather than a value threaded through
+/// every function that might have something to say. `--quiet` and
+/// `--fail-if-warnings` are pandoc's, and both are position-independent
+/// there, so a sink the whole run shares is the shape that matches.
+static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `--fail-if-warnings`: read once, in `main`, after the run.
+static FAIL_ON_WARNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Say something on stderr that is not an error, unless `--quiet`.
+///
+/// Every warning goes through here so that `--quiet` silences all of
+/// them and `--fail-if-warnings` counts all of them — a warning printed
+/// with `eprintln!` beside this is one neither flag can see.
+fn warn(message: &str) {
+    use std::sync::atomic::Ordering::Relaxed;
+    WARNED.store(true, Relaxed);
+    if !QUIET.load(Relaxed) {
+        eprintln!("{message}");
+    }
 }
 
 /// A format not given explicitly comes from a file extension — and when
@@ -1024,7 +1087,7 @@ fn format(name: &str) -> Result<Format, String> {
     // silent acceptance is the one answer that helps nobody. `dropin/`
     // found it: two rows differ in nothing but this line.
     if name.eq_ignore_ascii_case("markdown_github") {
-        eprintln!("[WARNING] Deprecated: markdown_github. Use gfm instead.");
+        warn("[WARNING] Deprecated: markdown_github. Use gfm instead.");
     }
     // Only a build trimmed with cargo features can reach this: the name is
     // real, the code for it was not compiled in. Saying so beats "unknown
