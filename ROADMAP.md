@@ -324,8 +324,19 @@ between them.
 | EPUB spec chunks | 8/22 | resolved by the raw-HTML decision, or the gate retired as measuring the wrong thing |
 | `scripts/sweep-epub-xhtml.sh` | 77 of 128 differ | **zero unrecorded**, which is the real number for the HTML reader |
 
-**Exit test:** the sweep reports no divergence outside the recorded set, and
-`docs/divergences.md` and `COMPATIBILITY.md` agree with the gates.
+**A second oracle exists and is now measured.** `./scripts/writers.sh`
+compares each text writer against **pandoc's own writer** on the same
+AST, byte for byte, in a second — the comparison the fidelity round trips
+could never make for a format pandoc does not read back. Today:
+`html 8/8`, `plain 5/8`, `gfm 3/8`, `rst 2/8`, `asciidoc 2/8`,
+`markdown 1/8`, `latex 0/8` on `corpus/*.md`. It is reported and not
+gated, because no floor has been chosen; **the card is to choose one per
+writer and gate it**, which is a far tighter contract than the round trip
+and is the one the 1.0 claim is written in.
+
+**Exit test:** the sweep reports no divergence outside the recorded set,
+`docs/divergences.md` and `COMPATIBILITY.md` agree with the gates, and
+every writer above has a floor.
 
 **Not this version:** new formats, performance work.
 
