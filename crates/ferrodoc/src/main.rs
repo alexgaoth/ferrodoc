@@ -711,6 +711,13 @@ fn format(name: &str) -> Result<Format, String> {
     };
     let format = Format::parse(name)
         .ok_or_else(|| format!("unknown format {name:?}; known formats: {}", known()))?;
+    // Pandoc's own wording, byte for byte, because a Makefile that has
+    // said `markdown_github` for ten years is where this came from and a
+    // silent acceptance is the one answer that helps nobody. `dropin/`
+    // found it: two rows differ in nothing but this line.
+    if name.eq_ignore_ascii_case("markdown_github") {
+        eprintln!("[WARNING] Deprecated: markdown_github. Use gfm instead.");
+    }
     // Only a build trimmed with cargo features can reach this: the name is
     // real, the code for it was not compiled in. Saying so beats "unknown
     // format", which would send someone looking for a typo.

@@ -96,7 +96,12 @@ impl Format {
             "markdown" | "commonmark" | "md" => Some(Format::Markdown),
             "gfm" | "markdown_github" => Some(Format::Gfm),
             "pandoc_markdown" | "pandoc-markdown" => Some(Format::PandocMarkdown),
-            "html" | "htm" => Some(Format::Html),
+            // `html5` is pandoc's own spelling and produces identical
+            // bytes there; a Makefile writing `-t html5` was refused for
+            // a name. `html4` is *not* an alias — pandoc's html4 writer
+            // differs on real constructs, so it stays refused by name
+            // rather than answered wrongly.
+            "html" | "htm" | "html5" => Some(Format::Html),
             "docx" => Some(Format::Docx),
             "odt" => Some(Format::Odt),
             "epub" | "epub2" | "epub3" => Some(Format::Epub),
@@ -649,6 +654,16 @@ mod tests {
         assert_eq!(Format::parse("CommonMark"), Some(Format::Markdown));
         assert_eq!(Format::from_path(std::path::Path::new("a/b.docx")), Some(Format::Docx));
         assert_eq!(Format::parse("pdf"), None);
+        // The spellings a real Makefile uses. `dropin/` found `html5`
+        // being refused for its name alone; `pandoc -t html5` and
+        // `pandoc -t html` write the same bytes.
+        assert_eq!(Format::parse("html5"), Some(Format::Html));
+        assert_eq!(Format::parse("markdown_github"), Some(Format::Gfm));
+        // Not aliases: pandoc's html4 writer differs on real constructs
+        // and `markdown_strict` is a different dialect, so both are
+        // refused by name rather than answered wrongly.
+        assert_eq!(Format::parse("html4"), None);
+        assert_eq!(Format::parse("markdown_strict"), None);
     }
 
     #[test]

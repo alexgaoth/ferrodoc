@@ -8,6 +8,20 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
+## Unreleased
+
+- `-t html5` and `-f html5` are accepted. Pandoc has spelled it that way
+  for a decade and writes identical bytes for it; ferrodoc refused it for
+  its name alone. `html4` stays refused **by name**, because pandoc's
+  html4 writer differs on real constructs and answering it with html
+  output would be wrong rather than absent.
+- `--from markdown_github` now prints pandoc's own deprecation line,
+  byte for byte: `[WARNING] Deprecated: markdown_github. Use gfm
+  instead.`
+- `dropin/` and `scripts/dropin.sh`: 48 real pandoc command lines, run
+  through both binaries and compared byte for byte. Both changes above
+  were found by it.
+
 ## 0.2.0
 
 Not yet on the registries. `cargo add ferrodoc`, `pip install ferrodoc`
