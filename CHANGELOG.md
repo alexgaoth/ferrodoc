@@ -10,6 +10,14 @@ break published without its note is a break twice.
 
 ## Unreleased
 
+### `--resource-path` and `--data-dir` (card D4.7 finished)
+
+`--resource-path` is searched after the document's own directory, so a
+picture beside the document still wins. `--data-dir` supplies
+`templates/default.html5` — **pandoc's file name, measured**: a data
+directory holding `templates/html5.html` is ignored by pandoc, so it is
+ignored here.
+
 ### `--ascii`, `--id-prefix`, `--metadata-file`
 
 `./scripts/flags.sh` is now **184/184 byte-identical** to pandoc.

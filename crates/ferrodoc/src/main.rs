@@ -43,6 +43,10 @@ OPTIONS:
         --ascii             Escape every non-ASCII character (html only)
         --id-prefix PREFIX  Prefix every identifier and internal link
         --metadata-file FILE   Metadata as a flat `key: value` file
+        --resource-path DIR[:DIR]  Where to look for a picture the
+                            document names, after its own directory
+        --data-dir DIR      Where `templates/default.html5` and a
+                            `--template` named rather than pathed live
         --eol crlf|lf|native  What ends a line in text output
         --quiet             Say nothing on stderr but errors
         --fail-if-warnings  Exit 3 if anything warned
@@ -210,6 +214,8 @@ struct Options {
     page: PageFlags,
     /// The flags that reshape the document or its bytes.
     shaping: Shaping,
+    /// `--resource-path`, searched after the document's own directory.
+    resource_path: Vec<PathBuf>,
     extract_media: Option<PathBuf>,
     /// The layout asked for, or `None` for the writer's own — which is
     /// not the same for all of them; see `Format::wrapping`.
@@ -398,135 +404,169 @@ fn defaults_key(key: &str, value: &str, items: &[String]) -> Option<Vec<String>>
     }
 }
 
+/// Everything the argument loop accumulates, so that the flags can live
+/// in a function of their own.
+///
+/// This started as a dozen locals in `parse_args`. It stopped being one
+/// once the CLI had thirty flags: the loop is the *shape* of parsing —
+/// `--opt=value`, stdin, positional input — and the flag table is a
+/// table.
+#[derive(Default)]
+struct Parsed {
+    from: Option<Format>,
+    to: Option<Format>,
+    output: Option<PathBuf>,
+    input: Option<PathBuf>,
+    stdin_requested: bool,
+    framing: Framing,
+    page: PageFlags,
+    shaping: Shaping,
+    resource_path: Vec<PathBuf>,
+    data_dir: Option<PathBuf>,
+    extract_media: Option<PathBuf>,
+    wrap: Option<Wrap>,
+    columns: usize,
+    metadata: Vec<(String, Option<String>)>,
+}
+
+/// The three switches that frame the output document rather than change
+/// its content.
+#[derive(Default)]
+struct Framing {
+    standalone: bool,
+    toc: bool,
+    number_sections: bool,
+}
+
+/// One flag, or `Ok(false)` if it is not a flag this knows — which is how
+/// the caller tells a positional input from a typo.
+///
+/// `value` is the caller's, because whether a value is attached with `=`
+/// or is the next argument is the loop's business rather than the flag's.
+fn take_flag(
+    arg: &str,
+    value: &mut dyn FnMut(&str) -> Result<String, String>,
+    out: &mut Parsed,
+) -> Result<bool, String> {
+    match arg {
+        "-f" | "--from" => out.from = Some(format(&value(arg)?)?),
+        "-t" | "--to" => out.to = Some(format(&value(arg)?)?),
+        "-o" | "--output" => out.output = Some(PathBuf::from(value(arg)?)),
+        // `--quiet` and `--fail-if-warnings` are read before the loop
+        // starts — see `diagnostics`. `--verbose` adds `[INFO]` lines in
+        // pandoc and there is nothing here that would say one; refusing
+        // it would fail a command line pandoc runs, so its absence is a
+        // row in COMPATIBILITY.md instead.
+        "--quiet" | "--fail-if-warnings" | "--verbose" => {}
+        "-s" | "--standalone" => out.framing.standalone = true,
+        "--toc" | "--table-of-contents" => out.framing.toc = true,
+        "-N" | "--number-sections" => out.framing.number_sections = true,
+        "--strip-comments" => out.shaping.strip_comments = true,
+        "--ascii" => out.shaping.ascii = true,
+        "--shift-heading-level-by" | "--eol" => {
+            let given = value(arg)?;
+            shaping_option(arg, &given, &mut out.shaping)?;
+        }
+        // `DIR:DIR` on Unix, which is how a Makefile writes it.
+        "--resource-path" => {
+            out.resource_path.extend(value(arg)?.split(':').map(PathBuf::from));
+        }
+        "--data-dir" => out.data_dir = Some(PathBuf::from(value(arg)?)),
+        "-M" | "--metadata" => out.metadata.push(metadata_pair(value(arg)?)),
+        // The same flat `key: value` subset a `--defaults` file uses, and
+        // refusing an unreadable key by name for the same reason:
+        // metadata quietly dropped is a title that never appears.
+        "--metadata-file" => {
+            for (key, given) in metadata_file(&value(arg)?)? {
+                out.metadata.push((key, Some(given)));
+            }
+        }
+        "--extract-media" => out.extract_media = Some(PathBuf::from(value(arg)?)),
+        "--wrap" => out.wrap = Some(wrap_mode(&value(arg)?)?),
+        "--columns" => {
+            let raw = value(arg)?;
+            out.columns = raw
+                .parse::<usize>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| format!("--columns needs a positive number, not {raw:?}"))?;
+        }
+        name if page_flag(name) => {
+            let given = value(name)?;
+            page_option(name, given, &mut out.page)?;
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     let args = &expand_defaults(args, 0)?;
     diagnostics(args);
-    let mut from: Option<Format> = None;
-    let mut to: Option<Format> = None;
-    let mut output: Option<PathBuf> = None;
-    let mut input: Option<PathBuf> = None;
-    let mut stdin_requested = false;
-    let mut standalone = false;
-    let mut page = PageFlags::default();
-    let mut shaping = Shaping::default();
-    let mut extract_media: Option<PathBuf> = None;
-    // `preserve` is the default and `none` is the same thing for this
-    // writer, which never inserted a break of its own: both leave every
-    // line where the document put it. Only `auto` fills.
-    let mut wrap: Option<Wrap> = None;
-    let mut columns = 72usize;
-    let mut toc = false;
-    let mut number_sections = false;
-    let mut metadata: Vec<(String, Option<String>)> = Vec::new();
+    let mut out = Parsed { columns: 72, ..Parsed::default() };
 
     let mut i = 0;
     while i < args.len() {
         let (arg, attached) = split_attached(&args[i]);
+        // `-v` is the version and `-V` is a variable, which is pandoc's
+        // assignment and the opposite of what this had: `ferrodoc -s -V
+        // lang=fr` printed a version string and converted nothing.
+        if matches!(arg, "-h" | "--help" | "-v" | "--version") {
+            print!("{}", if arg.contains('h') { usage() } else { version() });
+            return Ok(None);
+        }
         let mut value = |name: &str| -> Result<String, String> {
             if let Some(attached) = attached.clone() {
                 return Ok(attached);
             }
             i += 1;
-            args.get(i)
-                .cloned()
-                .ok_or_else(|| format!("{name} needs a value"))
+            args.get(i).cloned().ok_or_else(|| format!("{name} needs a value"))
         };
-        match arg {
-            // `-v` is the version and `-V` is a variable, which is
-            // pandoc's assignment and the opposite of what this had:
-            // `ferrodoc -s -V lang=fr` printed a version string and
-            // converted nothing.
-            "-h" | "--help" | "-v" | "--version" => {
-                print!("{}", if arg.contains('h') { usage() } else { version() });
-                return Ok(None);
-            }
-            "-f" | "--from" => from = Some(format(&value(arg)?)?),
-            "-t" | "--to" => to = Some(format(&value(arg)?)?),
-            "-o" | "--output" => output = Some(PathBuf::from(value(arg)?)),
-            // `--quiet` and `--fail-if-warnings` were read before this
-            // loop started — see `diagnostics`. `--verbose` adds `[INFO]`
-            // lines in pandoc and there is nothing here that would say
-            // one; refusing it would fail a command line pandoc runs, so
-            // its absence is a row in COMPATIBILITY.md instead.
-            "--quiet" | "--fail-if-warnings" | "--verbose" => {}
-            "--strip-comments" => shaping.strip_comments = true,
-            "--ascii" => shaping.ascii = true,
-            "--shift-heading-level-by" | "--eol" => {
-                let given = value(arg)?;
-                shaping_option(arg, &given, &mut shaping)?;
-            }
-            "-s" | "--standalone" => standalone = true,
-            // `-c` is pandoc's short form and appears in real Makefiles
-            // more often than the long one.
-            // Everything that only shapes a standalone page, in one
-            // place: seven arms here took `parse_args` past its line
-            // budget and none of them says anything the others do not.
-            name if page_flag(name) => {
-                let given = value(name)?;
-                page_option(name, given, &mut page)?;
-            }
-            "--toc" | "--table-of-contents" => toc = true,
-            "-N" | "--number-sections" => number_sections = true,
-            "-M" | "--metadata" => metadata.push(metadata_pair(value(arg)?)),
-            // The same flat `key: value` subset a `--defaults` file uses,
-            // and refusing an unreadable key by name for the same reason:
-            // metadata quietly dropped is a title that never appears.
-            "--metadata-file" => {
-                let path = value(arg)?;
-                for (key, given) in metadata_file(&path)? {
-                    metadata.push((key, Some(given)));
+        if !take_flag(arg, &mut value, &mut out)? {
+            match arg {
+                // An explicit "-" means stdin, and cannot be combined
+                // with a named file — silently ignoring one of them would
+                // convert the wrong document.
+                "-" => {
+                    if out.input.is_some() {
+                        return Err("more than one input given".to_owned());
+                    }
+                    out.stdin_requested = true;
                 }
-            }
-            "--extract-media" => extract_media = Some(PathBuf::from(value(arg)?)),
-            "--wrap" => wrap = Some(wrap_mode(&value(arg)?)?),
-            "--columns" => {
-                let raw = value("--columns")?;
-                columns = raw
-                    .parse::<usize>()
-                    .ok()
-                    .filter(|n| *n > 0)
-                    .ok_or_else(|| format!("--columns needs a positive number, not {raw:?}"))?;
-            }
-            // An explicit "-" means stdin, and cannot be combined with a
-            // named file — silently ignoring one of them would convert the
-            // wrong document.
-            "-" => {
-                if input.is_some() {
-                    return Err("more than one input given".to_owned());
+                other if other.starts_with('-') && other.len() > 1 => {
+                    return Err(format!("unknown option {other} (try --help)"));
                 }
-                stdin_requested = true;
-            }
-            other if other.starts_with('-') && other.len() > 1 => {
-                return Err(format!("unknown option {other} (try --help)"));
-            }
-            other => {
-                if input.is_some() || stdin_requested {
-                    return Err("more than one input given".to_owned());
+                other => {
+                    if out.input.is_some() || out.stdin_requested {
+                        return Err("more than one input given".to_owned());
+                    }
+                    out.input = Some(PathBuf::from(other));
                 }
-                input = Some(PathBuf::from(other));
             }
         }
         i += 1;
     }
 
+    out.page.template = read_template(out.page.template.take(), out.data_dir.as_deref())?;
+
     // Formats not given explicitly come from the file extensions; that
     // resolution needs the input path, so it happens in `run`.
-    //
-    // `--columns` may appear either side of `--wrap`, so the width is
-    // read once both are known rather than as `--wrap` is parsed.
     Ok(Some(Options {
-        from,
-        to,
-        output,
-        input,
-        standalone,
-        page,
-        shaping,
-        extract_media,
-        wrap: wrap.map(|wrap| widened(wrap, columns)),
-        toc,
-        number_sections,
-        metadata,
+        from: out.from,
+        to: out.to,
+        output: out.output,
+        input: out.input,
+        standalone: out.framing.standalone,
+        page: out.page,
+        shaping: out.shaping,
+        resource_path: out.resource_path,
+        extract_media: out.extract_media,
+        // `--columns` is only read when `--wrap=auto` asked for it, and
+        // may have been given either side of it.
+        wrap: out.wrap.map(|wrap| widened(wrap, out.columns)),
+        toc: out.framing.toc,
+        number_sections: out.framing.number_sections,
+        metadata: out.metadata,
     }))
 }
 
@@ -540,6 +580,7 @@ fn run() -> Result<(), String> {
         standalone,
         page,
         shaping,
+        resource_path,
         extract_media,
         wrap,
         toc,
@@ -632,10 +673,10 @@ a heading in the body",
             // `--wrap=auto -o out.docx` dropped every embedded picture:
             // the wrapped path called the writer that takes no media.
             Some(wrap) => {
-                ferrodoc::render_wrapped_with_media(&doc, to, wrap, &resolve(&embedded, &base))
+                ferrodoc::render_wrapped_with_media(&doc, to, wrap, &resolve(&embedded, &base, &resource_path))
                     .map_err(|e| e.to_string())?
             }
-            None => ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base))
+            None => ferrodoc::render_with_media(&doc, to, &resolve(&embedded, &base, &resource_path))
                 .map_err(|e| e.to_string())?,
         }
     };
@@ -1024,16 +1065,46 @@ fn page_option(name: &str, given: String, page: &mut PageFlags) -> Result<(), St
             // `-V draft` with no value is `true`, as `-M draft` is.
             page.variables.push((key, value.unwrap_or_else(|| "true".to_owned())));
         }
-        // Verbatim: a template's trailing newline is its own, and
-        // trimming it the way an include is trimmed costs the page its
-        // last line.
-        "--template" => page.template = Some(slurp(&given)?),
+        // The *path*, read after parsing rather than here: `--data-dir`
+        // may come after `--template` on the command line, and it is
+        // where a template named rather than pathed is found.
+        "--template" => page.template = Some(given),
         "--id-prefix" => page.id_prefix = given,
         // `page_flag` is the list; the two cannot disagree without this
         // arm being reached.
         other => return Err(format!("{other} is not a page flag")),
     }
     Ok(())
+}
+
+/// Read the `--template`, looking in `--data-dir` for one named rather
+/// than pathed — and take the data directory's *default* template when
+/// there is one and no `--template` was given.
+///
+/// Pandoc's naming, measured: the override is `templates/default.html5`,
+/// not `templates/html5.html`. A data directory with the second in it is
+/// ignored by pandoc, so it is ignored here.
+fn read_template(
+    template: Option<String>,
+    data_dir: Option<&std::path::Path>,
+) -> Result<Option<String>, String> {
+    if let Some(named) = template {
+        // Verbatim: a template's trailing newline is its own, and
+        // trimming it the way an include is trimmed costs the page its
+        // last line.
+        if let Some(dir) = data_dir
+            && !std::path::Path::new(&named).is_file()
+        {
+            return slurp(&dir.join("templates").join(&named).to_string_lossy()).map(Some);
+        }
+        return slurp(&named).map(Some);
+    }
+    let Some(dir) = data_dir else { return Ok(None) };
+    let default = dir.join("templates").join("default.html5");
+    if default.is_file() {
+        return slurp(&default.to_string_lossy()).map(Some);
+    }
+    Ok(None)
 }
 
 /// The two flags that rewrite the finished bytes.
@@ -1265,12 +1336,18 @@ fn repoint_inlines(inlines: &mut [Inline], written: &std::collections::HashMap<S
 fn resolve<'a>(
     embedded: &'a ferrodoc::Media,
     base: &'a std::path::Path,
+    search: &'a [PathBuf],
 ) -> impl Fn(&str) -> Option<Vec<u8>> + 'a {
     move |url| {
-        embedded
-            .get(url)
-            .cloned()
-            .or_else(|| std::fs::read(base.join(url)).ok())
+        if let Some(bytes) = embedded.get(url) {
+            return Some(bytes.clone());
+        }
+        // The document's own directory first, then `--resource-path` in
+        // the order it was given — pandoc's order, and the reason the
+        // flag exists is a build that keeps its pictures somewhere else.
+        std::iter::once(base)
+            .chain(search.iter().map(PathBuf::as_path))
+            .find_map(|dir| std::fs::read(dir.join(url)).ok())
     }
 }
 
@@ -1526,15 +1603,33 @@ mod tests {
 
         let mut embedded = ferrodoc::Media::new();
         embedded.insert("pic.png".to_owned(), b"from the package".to_vec());
-        assert_eq!(resolve(&embedded, &dir)("pic.png").as_deref(), Some(&b"from the package"[..]));
+        let none: &[PathBuf] = &[];
+        assert_eq!(
+            resolve(&embedded, &dir, none)("pic.png").as_deref(),
+            Some(&b"from the package"[..])
+        );
 
         // ...and the disk is still the fallback for what the package
         // never held, which is how `![](x.png)` in markdown resolves.
+        let empty = ferrodoc::Media::new();
+        assert_eq!(resolve(&empty, &dir, none)("pic.png").as_deref(), Some(&b"from disk"[..]));
+        assert!(resolve(&empty, &dir, none)("absent.png").is_none());
+
+        // `--resource-path` is searched **after** the document's own
+        // directory, so a picture beside the document still wins.
+        let elsewhere = dir.join("pics");
+        std::fs::create_dir_all(&elsewhere).expect("a writable temp dir");
+        std::fs::write(elsewhere.join("pic.png"), b"from the path").expect("writable");
+        std::fs::write(elsewhere.join("only.png"), b"only here").expect("writable");
+        let search = vec![elsewhere.clone()];
         assert_eq!(
-            resolve(&ferrodoc::Media::new(), &dir)("pic.png").as_deref(),
+            resolve(&empty, &dir, &search)("pic.png").as_deref(),
             Some(&b"from disk"[..])
         );
-        assert!(resolve(&ferrodoc::Media::new(), &dir)("absent.png").is_none());
+        assert_eq!(
+            resolve(&empty, &dir, &search)("only.png").as_deref(),
+            Some(&b"only here"[..])
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

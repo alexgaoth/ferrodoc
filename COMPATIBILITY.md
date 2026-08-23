@@ -739,6 +739,18 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### `--resource-path` and `--data-dir`
+
+`--resource-path DIR:DIR` is searched **after** the document's own
+directory, which is pandoc's order — a picture beside the document still
+wins. Without it neither binary embeds a picture the document names but
+does not sit beside; with it both do.
+
+`--data-dir DIR` is where `templates/default.html5` overrides the default
+template, and where a `--template` named rather than pathed is found.
+**That file name is pandoc's and was measured**: a data directory holding
+`templates/html5.html` is ignored by pandoc, so it is ignored here too.
+
 ### `--ascii`, `--id-prefix`, `--metadata-file`
 
 All three in `./scripts/flags.sh`, byte for byte.

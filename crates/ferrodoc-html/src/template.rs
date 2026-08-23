@@ -204,7 +204,16 @@ fn scan(template: &str) -> Result<(Vec<Found>, String), String> {
             .all(|c| c.is_whitespace());
         found.push(Found {
             body,
-            indent: before_on_line.clone(),
+            // **Whitespace only.** A multi-line value is indented to the
+            // column its variable sits at, but only when nothing but
+            // spaces precede it: a template line reading
+            // `FROM DATA DIR: $body$` puts that phrase in front of every
+            // line of the document otherwise, which is what it did.
+            indent: if before_on_line.trim().is_empty() {
+                before_on_line.clone()
+            } else {
+                String::new()
+            },
             before: std::mem::take(&mut text),
             line,
             starts_line: before_on_line.trim().is_empty(),
@@ -450,6 +459,15 @@ mod tests {
         // with text in front of it. Both cases are pandoc's, probed.
         assert_eq!(out("A$if(x)$\nB\n$endif$C\n", &[]), "AC\n");
         assert_eq!(out("A$if(x)$\nB\n$endif$C\n", &[("x", Value::Flag)]), "AB\nC\n");
+    }
+
+    #[test]
+    fn text_before_a_variable_is_not_indentation() {
+        // `FROM DATA DIR: $body$` is a real template line, from a
+        // `--data-dir` fixture, and treating that phrase as indentation
+        // repeated it in front of every line of the document.
+        let value = Value::Text("a\nb".to_owned());
+        assert_eq!(out("X: $x$\n", &[("x", value)]), "X: a\nb\n");
     }
 
     #[test]
