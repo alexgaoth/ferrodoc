@@ -914,28 +914,54 @@ directly without asking its reader to survive anything.
 | writer | byte-identical to pandoc, `corpus/*.md` |
 |---|---|
 | `html` | **8/8** |
+| `latex` | **7/8** |
 | `plain` | 5/8 |
 | `gfm` | 3/8 |
 | `rst` | 2/8 |
 | `asciidoc` | 2/8 |
 | `markdown` | 1/8 |
-| `latex` | 0/8 |
 
-Reported and not gated, for the reason a floor chosen after seeing a
-score is not a floor. It says what the round trip cannot: the HTML writer
-is *exactly* pandoc's on this corpus, and the LaTeX writer — whose
-escaping is now byte-identical — is still furthest away, on
-`\texorpdfstring`, `\label`, `\pandocbounded` and the `---` ligatures.
+It says what the round trip cannot: the HTML writer is *exactly*
+pandoc's on this corpus, and so is the LaTeX writer on seven of eight
+documents — the writer that the fidelity gate, at 1/13, called the
+furthest away. **The two oracles disagree because they measure different
+things**, and the bytes are the stricter of the two: pandoc round-trips
+the same 1 of 13, so the fidelity number is a property of pandoc's LaTeX
+reader, not of this writer.
 
-An oracle that scores what we score cannot set a floor for us, so there
-is none: pandoc round-trips **1 of the same 13 documents**, which is our
-number exactly. What decides this writer instead: CI compiles every corpus document with
-`pdflatex -halt-on-error`, and each rule a round trip cannot observe has a
-literal-output test — `\tightlist`, the escaping of text and of code, and
-the `enumerate` styles.
+The LaTeX writer went from 0/8 to 7/8 on nine measured causes, each
+probed against the pinned binary rather than read out of the manual:
+the typographic replacements (`—` → `---`, `…` → `\ldots`, the curly
+quotes, and `\-`/`\,`/`\hspace{0pt}` for the invisible spaces), the
+`-\/-` ligature break, two-space indentation of `\item` content with a
+`verbatim` environment left flush, `\texorpdfstring` when the typeset
+heading and the PDF bookmark differ, a level-6 heading written as a
+paragraph, `\pandocbounded{\includegraphics[keepaspectratio,…]}`,
+`\url`/`\nolinkurl` for a link whose text is its target, a dropped raw
+block taking its blank line with it, and the space collapse around a
+dropped raw inline.
 
-**Escaping is byte-identical to pandoc's**, which is checkable directly
-because pandoc writes LaTeX from the same AST:
+**The one document that still differs is a deliberate divergence**, of
+the kind the roadmap names: match pandoc except where matching means
+copying something pandoc's own reader cannot read back. An ordered list
+starting at 3 is
+`\setcounter` then `\def\labelenumi` here and the other way round in
+pandoc, because **pandoc's reader takes the start value from the first
+directive it meets and stops looking** — so pandoc's own output reads
+back starting at 1:
+
+```sh
+printf '3) a\n\n4) b\n' > /tmp/l.md
+pandoc /tmp/l.md -f commonmark -t latex | pandoc -f latex -t json | grep -o '"c":\[\[1'   # start lost
+ferrodoc /tmp/l.md -f commonmark -t latex | pandoc -f latex -t json | grep -o '"c":\[\[3' # start kept
+```
+
+Both typeset identically; only the byte order differs. Matching pandoc
+here would mean copying a spelling its own reader misreads, which is the
+same test the three divergences above already failed.
+
+**Escaping is byte-identical to pandoc's**, checkable directly because
+pandoc writes LaTeX from the same AST:
 
 ```sh
 printf "A \`a  b\`, \`<p>\`, \`a|b\` and a < b with a 'quote'.\n" > /tmp/e.md
@@ -943,11 +969,9 @@ diff <(pandoc /tmp/e.md -f commonmark -t latex --wrap=none) \
      <(ferrodoc /tmp/e.md -f commonmark -t latex)   # no output
 ```
 
-Two differences remain and both render identically: pandoc turns `—`,
-`–` and `…` into the TeX ligatures `---`, `--` and `\ldots`, and its
-`\href`/heading forms differ (`\texorpdfstring`, `\label`). Inline code
-was `\verb` until 2026-08-22, which is illegal inside a command argument
-and stopped `pdflatex` on any heading containing a code span.
+Inline code was `\verb` until 2026-08-22, which is illegal inside a
+command argument and stopped `pdflatex` on any heading containing a code
+span.
 
 ### The write-only formats — judged by their toolchains, not by pandoc
 

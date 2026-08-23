@@ -7,11 +7,23 @@
   \rlap{\rule[0.5ex]{\wd0}{0.4pt}}\box0}}
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\makeatletter
+\newsavebox\pandoc@box
+\providecommand*\pandocbounded[1]{% scales image to fit in text height/width
+  \sbox\pandoc@box{#1}%
+  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi%
+  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+  \else\usebox{\pandoc@box}%
+  \fi%
+}
+\makeatother
 \usepackage{hyperref}
 \begin{document}
 \section{Field Handbook}\label{field-handbook}
 
-A realistic document, written the way people actually write them — and
+A realistic document, written the way people actually write them --- and
 deliberately including the awkward parts, because a sample that only shows
 easy cases tells you nothing.
 
@@ -24,7 +36,7 @@ is not boring, it is usually because something was silently dropped.
 \begin{quote}
 A conversion you cannot inspect is a conversion you cannot trust.
 
-— every migration post-mortem, eventually
+--- every migration post-mortem, eventually
 \end{quote}
 
 \subsection{Rollout schedule}\label{rollout-schedule}
@@ -47,19 +59,19 @@ Decommission & Ops & 2026-09-15 & not started \tabularnewline
 \def\labelenumi{\arabic{enumi}.}
 \tightlist
 \item
-Export everything from the old system.
+  Export everything from the old system.
 \item
-Convert it:
+  Convert it:
 
-\begin{itemize}
-\tightlist
+  \begin{itemize}
+  \tightlist
+  \item
+    \texttt{.docx} and \texttt{.odt} to markdown for the index
+  \item
+    markdown back to \texttt{.docx} for anyone who needs to edit in Word
+  \end{itemize}
 \item
-\texttt{.docx} and \texttt{.odt} to markdown for the index
-\item
-markdown back to \texttt{.docx} for anyone who needs to edit in Word
-\end{itemize}
-\item
-Spot-check 1 \% of the output by hand.
+  Spot-check 1 \% of the output by hand.
 \end{enumerate}
 
 \subsubsection{Checklist}\label{checklist}
@@ -67,11 +79,11 @@ Spot-check 1 \% of the output by hand.
 \begin{itemize}
 \tightlist
 \item
-☒ Inventory complete
+  ☒ Inventory complete
 \item
-☐ Pilot signed off
+  ☐ Pilot signed off
 \item
-☐ Rollback plan written
+  ☐ Rollback plan written
 \end{itemize}
 
 \subsection{Running a conversion}\label{running-a-conversion}
@@ -99,11 +111,11 @@ ferrodoc -f markdown -t html handbook.md
 
 \subsection{Awkward cases, on purpose}\label{awkward-cases-on-purpose}
 
-Inline code with special characters: \texttt{a\ \textbar{}\ b}, \texttt{\textless{}div\textgreater{}}, \texttt{--flag}, and a
+Inline code with special characters: \texttt{a\ \textbar{}\ b}, \texttt{\textless{}div\textgreater{}}, \texttt{-\/-flag}, and a
 literal backtick: \texttt{\textasciigrave{}}.
 
-Text with entities \& symbols — an em dash, "curly quotes", an
-ellipsis…, a non-breaking~space, and unicode: café, naïve, Ω, 日本語.
+Text with entities \& symbols --- an em dash, "curly quotes", an
+ellipsis\ldots, a non-breaking~space, and unicode: café, naïve, Ω, 日本語.
 
 \sout{Struck-through text} and text with a footnote.\footnote{Footnote bodies can contain \textbf{formatting} and a
 \href{https://example.com}{link}.}
@@ -112,21 +124,17 @@ Five inlines no writer test used to reach through this file: underlined
 text, small caps, a
 span carrying an id and a class, and
 H2O beside E=mc2. They are here because \texttt{docs/gates.md}
-claims \texttt{--samples} keeps them found, and until this paragraph existed no
-sample document contained one — the claim was wider than the corpus behind
+claims \texttt{-\/-samples} keeps them found, and until this paragraph existed no
+sample document contained one --- the claim was wider than the corpus behind
 it, which is the defect this file is supposed to catch.
 
 A link with a title: \href{https://example.com/spec}{the spec}.
-A bare autolink: \href{https://example.com/status}{https://example.com/status}. An email:
-\href{mailto:ops@example.com}{ops@example.com}.
+A bare autolink: \url{https://example.com/status}. An email:
+\href{mailto:ops@example.com}{\nolinkurl{ops@example.com}}.
 
-An image: \includegraphics[alt={the logo}]{logo.png}
-
-
+An image: \pandocbounded{\includegraphics[keepaspectratio,alt={the logo}]{logo.png}}
 
 Raw HTML block, which not every target format can hold.
-
-
 
 Nested quoting:
 
@@ -139,15 +147,15 @@ Inner quote, with a list:
 \begin{itemize}
 \tightlist
 \item
-one
+  one
 \item
-two
+  two
 \end{itemize}
 \end{quote}
 \end{quote}
 
 \subsection{Sign-off}\label{sign-off}
 
-Contact \href{mailto:ops@example.com}{ops@example.com} with questions. See the \texttt{LICENSE} file for
+Contact \href{mailto:ops@example.com}{\nolinkurl{ops@example.com}} with questions. See the \texttt{LICENSE} file for
 terms.
 \end{document}

@@ -46,7 +46,7 @@ use std::fmt::Write as _;
 /// own.
 pub fn write_latex(doc: &Pandoc) -> String {
     let mut out = String::new();
-    blocks(&doc.blocks, &mut out);
+    blocks(&doc.blocks, 0, &mut out);
     out.trim_end().to_owned() + "\n"
 }
 
@@ -98,6 +98,23 @@ const PREAMBLE: &str = concat!(
     // pandoc-produced document does not clash with the identical macro.
     "\\providecommand{\\tightlist}{%\n",
     "  \\setlength{\\itemsep}{0pt}\\setlength{\\parskip}{0pt}}\n",
+    // Every `\includegraphics` this writer emits is wrapped in
+    // `\pandocbounded`, so the preamble has to define it or a document
+    // with one picture stops compiling. This is pandoc's own definition,
+    // from `templates/common.latex`, and it needs only `graphicx` — which
+    // is loaded above for the picture itself.
+    "\\makeatletter\n",
+    "\\newsavebox\\pandoc@box\n",
+    "\\providecommand*\\pandocbounded[1]{% scales image to fit in text height/width\n",
+    "  \\sbox\\pandoc@box{#1}%\n",
+    "  \\Gscale@div\\@tempa{\\textheight}{\\dimexpr\\ht\\pandoc@box+\\dp\\pandoc@box\\relax}%\n",
+    "  \\Gscale@div\\@tempb{\\linewidth}{\\wd\\pandoc@box}%\n",
+    "  \\ifdim\\@tempb\\p@<\\@tempa\\p@\\let\\@tempa\\@tempb\\fi%\n",
+    "  \\ifdim\\@tempa\\p@<\\p@\\scalebox{\\@tempa}{\\usebox\\pandoc@box}%\n",
+    "  \\else\\usebox{\\pandoc@box}%\n",
+    "  \\fi%\n",
+    "}\n",
+    "\\makeatother\n",
     // Loaded last, as hyperref asks.
     "\\usepackage{hyperref}\n",
 );
@@ -118,21 +135,29 @@ const SECTIONS: &[&str] = &[
 /// The separation matters more than it looks: a blank line after an
 /// `\item` makes the item a separate paragraph, and pandoc then reads the
 /// whole list as `DefaultStyle` rather than the numbering it was given.
-fn blocks(list: &[Block], out: &mut String) {
+fn blocks(list: &[Block], depth: usize, out: &mut String) {
     let mut first = true;
     for block in list {
+        let mut text = String::new();
+        block_to(block, depth, &mut text);
+        let text = text.trim_end_matches('\n');
+        // A raw block in somebody else's format renders to nothing, and
+        // pandoc's separator goes with it: emitting the blank line anyway
+        // left `corpus/code-and-raw.md` with four trailing empty lines
+        // and a paragraph break where the document had none.
+        if text.is_empty() {
+            continue;
+        }
         if !first {
             out.push('\n');
         }
         first = false;
-        let mut text = String::new();
-        block_to(block, &mut text);
-        out.push_str(text.trim_end_matches('\n'));
+        out.push_str(text);
         out.push('\n');
     }
 }
 
-fn block_to(block: &Block, out: &mut String) {
+fn block_to(block: &Block, depth: usize, out: &mut String) {
     match block {
         Block::Plain(list) | Block::Para(list) => {
             inlines(list, out);
@@ -158,37 +183,15 @@ fn block_to(block: &Block, out: &mut String) {
         }
         Block::BlockQuote(inner) => {
             out.push_str("\\begin{quote}\n");
-            blocks(inner, out);
+            blocks(inner, depth, out);
             out.push_str("\\end{quote}\n");
         }
-        Block::OrderedList(attrs, items) => {
-            out.push_str("\\begin{enumerate}\n");
-            // `\setcounter` **before** `\def\labelenumi`, and the order
-            // is not cosmetic: pandoc's reader takes the start value from
-            // the first directive it meets and stops looking, so a list
-            // that says `\def` first begins at 1 whatever it asked for.
-            // Measured both ways round.
-            if attrs.start != 1 {
-                let _ = writeln!(out, "\\setcounter{{enumi}}{{{}}}", attrs.start - 1);
-            }
-            let _ = writeln!(
-                out,
-                "\\def\\labelenumi{{{}}}",
-                enumerate_style(attrs.style, attrs.delim)
-            );
-            tightlist(items, out);
-            for item in items {
-                out.push_str("\\item\n");
-                blocks(item, out);
-            }
-            out.push_str("\\end{enumerate}\n");
-        }
+        Block::OrderedList(attrs, items) => ordered_list_to(attrs, items, depth, out),
         Block::BulletList(items) => {
             out.push_str("\\begin{itemize}\n");
             tightlist(items, out);
             for item in items {
-                out.push_str("\\item\n");
-                blocks(item, out);
+                item_to(item, depth, out);
             }
             out.push_str("\\end{itemize}\n");
         }
@@ -199,16 +202,37 @@ fn block_to(block: &Block, out: &mut String) {
                 inlines(term, out);
                 out.push_str("]\n");
                 for definition in definitions {
-                    blocks(definition, out);
+                    blocks(definition, depth, out);
                 }
             }
             out.push_str("\\end{description}\n");
         }
         Block::Header(level, attr, list) => {
             let index = usize::try_from(*level).unwrap_or(1).saturating_sub(1);
-            let macro_name = SECTIONS.get(index).unwrap_or(&"subparagraph");
+            let mut rendered = String::new();
+            inlines(list, &mut rendered);
+            // Below `\subparagraph` LaTeX has nowhere to put a heading, and
+            // pandoc writes the text as an ordinary paragraph rather than
+            // pushing it into the deepest macro it has. Following it costs
+            // nothing: neither spelling carries the level.
+            let Some(macro_name) = SECTIONS.get(index) else {
+                out.push_str(&rendered);
+                out.push('\n');
+                return;
+            };
             let _ = write!(out, "\\{macro_name}{{");
-            inlines(list, out);
+            // `\texorpdfstring{typeset}{bookmark}` when the two differ.
+            // A PDF bookmark is plain text: `\emph` in one stops hyperref
+            // with "Token not allowed in a PDF string". Pandoc's own test
+            // is exactly this — the heading rendered, against the heading
+            // stringified and escaped — so a heading of nothing but words
+            // stays a bare argument.
+            let plain = escape(&stringify(list));
+            if plain == rendered {
+                out.push_str(&rendered);
+            } else {
+                let _ = write!(out, "\\texorpdfstring{{{rendered}}}{{{plain}}}");
+            }
             out.push('}');
             // The label is what makes a cross-reference resolve. Without
             // one the heading still reads back with the right identifier,
@@ -223,7 +247,7 @@ fn block_to(block: &Block, out: &mut String) {
         Block::Table(table) => table_to(table, out),
         Block::Figure(_, caption, inner) => {
             out.push_str("\\begin{figure}\n\\centering\n");
-            blocks(inner, out);
+            blocks(inner, depth, out);
             if !caption.blocks.is_empty() {
                 out.push_str("\\caption{");
                 caption_text(caption, out);
@@ -232,7 +256,7 @@ fn block_to(block: &Block, out: &mut String) {
             out.push_str("\\end{figure}\n");
         }
         // A div carries no LaTeX of its own; its content is the content.
-        Block::Div(_, inner) => blocks(inner, out),
+        Block::Div(_, inner) => blocks(inner, depth, out),
         // Raw content is another format's syntax — except LaTeX's own,
         // which is passed through as written. That is the whole point of
         // a raw block.
@@ -263,16 +287,105 @@ fn tightlist(items: &[Vec<Block>], out: &mut String) {
     }
 }
 
+/// One `\item`, with its content indented two spaces the way pandoc's
+/// writer indents it — recursively, so a list inside a list is four.
+///
+/// A blank line stays empty: indenting it would put trailing whitespace
+/// where pandoc has none, and the bytes are the test.
+fn item_to(item: &[Block], depth: usize, out: &mut String) {
+    out.push_str("\\item\n");
+    let mut text = String::new();
+    blocks(item, depth, &mut text);
+    // A `verbatim` environment is flush left however deep it sits: its
+    // content is literal, so two spaces of item indentation would be two
+    // spaces of code. Pandoc renders it with `flush`, which is the same
+    // rule stated in its own layout language.
+    let mut literal = false;
+    for line in text.lines() {
+        if line == "\\begin{verbatim}" {
+            literal = true;
+        }
+        if literal || line.is_empty() {
+            let _ = writeln!(out, "{line}");
+        } else {
+            let _ = writeln!(out, "  {line}");
+        }
+        if line == "\\end{verbatim}" {
+            literal = false;
+        }
+    }
+}
+
+/// `\begin{enumerate}` with the counter its nesting depth calls for.
+fn ordered_list_to(
+    attrs: &ferrodoc_ast::ListAttributes,
+    items: &[Vec<Block>],
+    depth: usize,
+    out: &mut String,
+) {
+    out.push_str("\\begin{enumerate}\n");
+    // LaTeX has one counter per nesting level and pandoc names it by
+    // depth — `enumi`, `enumii`, `enumiii` — counting only the enclosing
+    // `enumerate`s, so a bullet list in between does not advance it.
+    // Measured; a list two deep that said `enumi` renumbered its parent.
+    let counter = format!("enum{}", roman(depth + 1));
+    // `\setcounter` **before** `\def\label…`, and the order is not
+    // cosmetic: pandoc's reader takes the start value from the first
+    // directive it meets and stops looking, so a list that says `\def`
+    // first begins at 1 whatever it asked for. Measured both ways round.
+    // **This is the one place this writer deliberately differs from
+    // pandoc's bytes** — pandoc writes `\def` first and its own reader
+    // then loses the start value. `COMPATIBILITY.md` records it.
+    if attrs.start != 1 {
+        let _ = writeln!(out, "\\setcounter{{{counter}}}{{{}}}", attrs.start - 1);
+    }
+    let _ = writeln!(
+        out,
+        "\\def\\label{counter}{{{}}}",
+        enumerate_style(attrs.style, attrs.delim, &counter)
+    );
+    tightlist(items, out);
+    for item in items {
+        item_to(item, depth + 1, out);
+    }
+    out.push_str("\\end{enumerate}\n");
+}
+
+/// A nesting depth as the lowercase roman numeral LaTeX spells its
+/// counters with: `enumi`, `enumii`, … Pandoc keeps going past `enumiv`,
+/// which LaTeX does not define — following it is the byte-identical
+/// answer and the deeper list was already outside what `article` sets.
+fn roman(mut n: usize) -> String {
+    const NUMERALS: [(usize, &str); 7] =
+        [(100, "c"), (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v")];
+    let mut out = String::new();
+    for (value, numeral) in NUMERALS {
+        while n >= value {
+            out.push_str(numeral);
+            n -= value;
+        }
+    }
+    if n == 4 {
+        out.push_str("iv");
+    } else {
+        for _ in 0..n {
+            out.push('i');
+        }
+    }
+    out
+}
+
 /// `DefaultStyle` for a bare `enumerate`, so a `Decimal` list that says
 /// nothing comes back as a different list.
-fn enumerate_style(style: ListNumberStyle, delim: ListNumberDelim) -> String {
-    let counter = match style {
-        ListNumberStyle::LowerAlpha => "\\alph{enumi}",
-        ListNumberStyle::UpperAlpha => "\\Alph{enumi}",
-        ListNumberStyle::LowerRoman => "\\roman{enumi}",
-        ListNumberStyle::UpperRoman => "\\Roman{enumi}",
-        _ => "\\arabic{enumi}",
+fn enumerate_style(style: ListNumberStyle, delim: ListNumberDelim, name: &str) -> String {
+    let macro_name = match style {
+        ListNumberStyle::LowerAlpha => "alph",
+        ListNumberStyle::UpperAlpha => "Alph",
+        ListNumberStyle::LowerRoman => "roman",
+        ListNumberStyle::UpperRoman => "Roman",
+        _ => "arabic",
     };
+    let counter = format!("\\{macro_name}{{{name}}}");
     match delim {
         ListNumberDelim::TwoParens => format!("({counter})"),
         ListNumberDelim::OneParen => format!("{counter})"),
@@ -323,7 +436,7 @@ fn cell_text(cell: &Cell) -> String {
     for block in &cell.blocks {
         match block {
             Block::Plain(list) | Block::Para(list) => inlines(list, &mut out),
-            other => block_to(other, &mut out),
+            other => block_to(other, 0, &mut out),
         }
     }
     // A cell is one line: a newline inside `&`-separated content ends the
@@ -335,14 +448,33 @@ fn caption_text(caption: &Caption, out: &mut String) {
     for block in &caption.blocks {
         match block {
             Block::Plain(list) | Block::Para(list) => inlines(list, out),
-            other => block_to(other, out),
+            other => block_to(other, 0, out),
         }
     }
 }
 
+/// Render a run of inlines, collapsing the space a dropped inline leaves
+/// behind.
+///
+/// Pandoc builds its output as a `Doc` in which two breaking spaces with
+/// nothing between them are one space, and a raw inline in another format
+/// renders to nothing — so `plus <br/> and` is `plus and` there and was
+/// `plus  and` here. The flag is what the `Doc` does implicitly: an empty
+/// render does not clear it, so the two spaces around it meet.
 fn inlines(list: &[Inline], out: &mut String) {
+    let mut after_break = false;
     for inline in list {
-        inline_to(inline, out);
+        let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
+        if breaking && after_break {
+            continue;
+        }
+        let mut piece = String::new();
+        inline_to(inline, &mut piece);
+        if piece.is_empty() {
+            continue;
+        }
+        out.push_str(&piece);
+        after_break = breaking;
     }
 }
 
@@ -395,9 +527,24 @@ fn inline_to(inline: &Inline, out: &mut String) {
             // A URL is not escaped the way text is — `\href`'s first
             // argument is verbatim-ish, and escaping `~` or `%` there
             // breaks the link rather than the typesetting.
-            let _ = write!(out, "\\href{{{}}}{{", escape_url(&target.url));
-            inlines(inner, out);
-            out.push('}');
+            let url = escape_url(&target.url);
+            // A link whose text *is* its target is what an autolink
+            // becomes, and pandoc has two shorter spellings for it:
+            // `\url` sets the address in the URL font and lets it break,
+            // and `\nolinkurl` does the same inside a `mailto:` without
+            // making the address a second link. `\href{u}{u}` renders the
+            // address in body text with no break points, so this is a
+            // typesetting difference as well as a byte one.
+            let text = stringify(inner);
+            if text == target.url {
+                let _ = write!(out, "\\url{{{url}}}");
+            } else if target.url.strip_prefix("mailto:") == Some(text.as_str()) {
+                let _ = write!(out, "\\href{{{url}}}{{\\nolinkurl{{{}}}}}", escape_url(&text));
+            } else {
+                let _ = write!(out, "\\href{{{url}}}{{");
+                inlines(inner, out);
+                out.push('}');
+            }
         }
         Inline::Image(_, alt, target) => {
             // The alt text goes in the `alt=` option: it is the only place
@@ -405,22 +552,61 @@ fn inline_to(inline: &Inline, out: &mut String) {
             // simply gone.
             let mut text = String::new();
             inlines(alt, &mut text);
-            if text.is_empty() {
-                let _ = write!(out, "\\includegraphics{{{}}}", escape_url(&target.url));
+            // `\pandocbounded` is pandoc's, defined in its default
+            // template and in [`PREAMBLE`] here: it scales a picture down
+            // to the text block when it would overflow and leaves it alone
+            // when it fits. Without it a photograph runs off the page,
+            // which is what every image in the corpus did.
+            let options = if text.is_empty() {
+                "keepaspectratio".to_owned()
             } else {
-                let _ = write!(
-                    out,
-                    "\\includegraphics[alt={{{text}}}]{{{}}}",
-                    escape_url(&target.url)
-                );
-            }
+                format!("keepaspectratio,alt={{{text}}}")
+            };
+            let _ = write!(
+                out,
+                "\\pandocbounded{{\\includegraphics[{options}]{{{}}}}}",
+                escape_url(&target.url)
+            );
         }
         Inline::Note(blocks_in_note) => {
             out.push_str("\\footnote{");
             let mut text = String::new();
-            blocks(blocks_in_note, &mut text);
+            blocks(blocks_in_note, 0, &mut text);
             out.push_str(text.trim());
             out.push('}');
+        }
+    }
+}
+
+/// The plain text of an inline sequence, as pandoc's `stringify` produces
+/// it — every break a space, raw content and footnotes contributing
+/// nothing. Used for the PDF-bookmark half of `\texorpdfstring`.
+fn stringify(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    stringify_into(inlines, &mut out);
+    out
+}
+
+fn stringify_into(inlines: &[Inline], out: &mut String) {
+    for inline in inlines {
+        match inline {
+            Inline::Str(text) | Inline::Code(_, text) | Inline::Math(_, text) => {
+                out.push_str(text);
+            }
+            Inline::Space | Inline::SoftBreak | Inline::LineBreak => out.push(' '),
+            Inline::RawInline(..) | Inline::Note(_) => {}
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => stringify_into(inner, out),
         }
     }
 }
@@ -442,13 +628,26 @@ fn inline_to(inline: &Inline, out: &mut String) {
 /// end of a run; this always writes `{}`, which renders identically.
 /// `COMPATIBILITY.md` records it.
 fn escape(text: &str) -> String {
+    escape_run(text, true)
+}
+
+/// The body of [`escape`], shared with [`verbatim`], which passes `false`.
+///
+/// `typographic` is the one difference between the two contexts and it is
+/// measured, not assumed: pandoc turns `—` into `---` and `…` into
+/// `\ldots` in running text and leaves both **as themselves** inside
+/// `\texttt`, while the space-like characters (`\u{a0}`, `\u{202f}`,
+/// `\u{ad}`, `\u{200b}`) are escaped in either place.
+fn escape_run(text: &str, typographic: bool) -> String {
     let mut out = String::with_capacity(text.len());
     let mut open_word = false;
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        let next = chars.peek().copied();
         if open_word {
             out.push_str(terminator(ch));
         }
-        open_word = escape_char(ch, &mut out);
+        open_word = escape_char_in(ch, next, typographic, &mut out);
     }
     if open_word {
         out.push_str("{}");
@@ -483,8 +682,57 @@ fn terminator(next: char) -> &'static str {
 /// control word, which [`escape`] then terminates. Shared with
 /// [`verbatim`], which adds two rules of its own rather than keeping a
 /// second copy of these.
-fn escape_char(ch: char, out: &mut String) -> bool {
+/// One character, with what follows it and whether the typographic
+/// replacements apply. See [`escape_run`] for why the two contexts differ.
+///
+/// `next` exists for one rule: pandoc breaks the `--` and `---` ligatures
+/// by writing `-\/-`, so a hyphen followed by a hyphen carries an
+/// italic correction. Without it `\texttt{--wrap}` set as `\texttt{–wrap}`
+/// and the flag in a README changed name.
+fn escape_char_in(ch: char, next: Option<char>, typographic: bool, out: &mut String) -> bool {
+    if typographic {
+        // Probed one codepoint at a time against the pinned binary; the
+        // set is exactly this, and `–`/`—` are *not* re-processed by the
+        // hyphen rule below — pandoc writes `---`, not `-\/-\/-`.
+        let replacement = match ch {
+            '\u{2013}' => Some("--"),
+            '\u{2014}' => Some("---"),
+            '\u{2018}' => Some("`"),
+            '\u{2019}' => Some("'"),
+            '\u{201c}' => Some("``"),
+            '\u{201d}' => Some("''"),
+            _ => None,
+        };
+        if let Some(text) = replacement {
+            out.push_str(text);
+            return false;
+        }
+        if ch == '\u{2026}' {
+            out.push_str("\\ldots");
+            return true;
+        }
+    }
     match ch {
+        '-' => {
+            out.push('-');
+            if next == Some('-') {
+                out.push_str("\\/");
+            }
+            false
+        }
+        // Space-like characters LaTeX has no glyph for, in either context.
+        '\u{202f}' => {
+            out.push_str("\\,");
+            false
+        }
+        '\u{ad}' => {
+            out.push_str("\\-");
+            false
+        }
+        '\u{200b}' => {
+            out.push_str("\\hspace{0pt}");
+            false
+        }
         '#' | '$' | '%' | '&' | '_' | '{' | '}' => {
             out.push('\\');
             out.push(ch);
@@ -584,7 +832,8 @@ fn escape_url(url: &str) -> String {
 fn verbatim(code: &str) -> String {
     let mut out = String::with_capacity(code.len() + 8);
     out.push_str("\\texttt{");
-    for ch in code.chars() {
+    let mut chars = code.chars().peekable();
+    while let Some(ch) = chars.next() {
         match ch {
             ' ' => out.push_str("\\ "),
             '`' => out.push_str("\\textasciigrave{}"),
@@ -593,7 +842,7 @@ fn verbatim(code: &str) -> String {
             // writes `\textless{}p` where running text has
             // `\textless p`. Probed, not assumed.
             ch => {
-                if escape_char(ch, &mut out) {
+                if escape_char_in(ch, chars.peek().copied(), false, &mut out) {
                     out.push_str("{}");
                 }
             }
@@ -615,7 +864,7 @@ fn meta_text(value: &ferrodoc_ast::MetaValue) -> String {
         }
         MetaValue::MetaBlocks(list) => {
             let mut out = String::new();
-            blocks(list, &mut out);
+            blocks(list, 0, &mut out);
             out.trim().to_owned()
         }
         // Several authors are `\and`-separated, which is what `\author`
@@ -779,7 +1028,13 @@ mod tests {
             vec![Inline::Code(Box::default(), "code".into())],
         )]));
         assert!(!heading.contains("\\verb"), "{heading}");
-        assert!(heading.contains("\\subsubsection{\\texttt{code}}"), "{heading}");
+        // `\texorpdfstring` because the typeset heading and the PDF
+        // bookmark differ once a code span is in it — the bookmark is
+        // plain text and `\texttt` in one stops `hyperref`.
+        assert!(
+            heading.contains("\\subsubsection{\\texorpdfstring{\\texttt{code}}{code}}"),
+            "{heading}"
+        );
     }
 
     #[test]
