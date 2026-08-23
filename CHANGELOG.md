@@ -8,7 +8,15 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
-## Unreleased
+## 0.2.0
+
+The ten library crates went to crates.io on 2026-08-23; `ferrodoc-epub`
+and the `ferrodoc` facade followed the same day, after the registry's
+new-crate rate limit. Everything below is in that release.
+
+The command-line sections come last because they landed between the two
+publishes — every crate already on the registry was byte-identical at
+both, so the `v0.2.0` tag is what every published 0.2.0 was built from.
 
 ### `--wrap` means what pandoc means by it (roadmap card D4.3)
 
@@ -94,12 +102,6 @@ as its own comment had promised.
 - `dropin/` and `scripts/dropin.sh`: 48 real pandoc command lines, run
   through both binaries and compared byte for byte. Both changes above
   were found by it.
-
-## 0.2.0
-
-Not yet on the registries. `cargo add ferrodoc`, `pip install ferrodoc`
-and `npm install ferrodoc` resolve to nothing until the release described
-in [`docs/releasing.md`](docs/releasing.md) is cut.
 
 ### Breaking changes — Rust
 
