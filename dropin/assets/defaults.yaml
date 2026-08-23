@@ -1,0 +1,7 @@
+# A defaults file in the shape the harvested ones take: the flags a
+# repository would otherwise repeat on every invocation.
+from: markdown
+to: html
+standalone: true
+wrap: preserve
+table-of-contents: false

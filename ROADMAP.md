@@ -105,7 +105,8 @@ That is checkable, and 1.0 is not reachable until it is checked.
 ### The measurement that decides it: the drop-in corpus
 
 Today's gates score *ASTs and single conversions*. They cannot answer "would
-this user notice". `scripts/dropin.sh` (to be built in 0.4) does:
+this user notice". `scripts/dropin.sh` does, and **its number today is
+`0/48`**:
 
 - a corpus of **real command lines** — the invocations that appear in
   Makefiles, CI jobs and scripts, not synthetic ones;
@@ -115,7 +116,9 @@ this user notice". `scripts/dropin.sh` (to be built in 0.4) does:
   classified as *fixable*, *deliberate*, or *out of surface*.
 
 That number is the 1.0 release criterion. It replaces "feels compatible"
-with a percentage that can fall.
+with a percentage that can fall — and starting it at zero is the point:
+every other score in this repository was above 90% before anyone asked
+this question.
 
 ---
 
@@ -161,6 +164,26 @@ installing.
 | **R3.2 — migration notes** | Write the 0.1 → 0.2 note: every changed public symbol in Rust, C, Python and TypeScript, with the before/after signature. | `git diff v0.1.0..HEAD` over the public surface names nothing the note omits. `write_html_standalone` and `render_html_standalone` both appear. | New API design. Deprecation shims. |
 | **R3.3 — gate the claim surface** | Give every number published in `README.md` and `COMPATIBILITY.md` a command, and make CI run them. Start with the ones that have already gone stale: gate counts, bundle size, the 72× figure. | A script re-derives each published figure and fails when one drifts; it is wired into `verify.sh` and CI. | Changing any figure. Adding new claims. |
 | **R3.4 — registry release** *(owner)* | Publish crates.io first, then the GitHub release, which triggers PyPI and npm. Record the immutable tag and release URL. | On a clean Linux, macOS and Windows machine, `pip install ferrodoc`, `npm install ferrodoc` and `cargo add ferrodoc` each resolve and convert one document. Building is not installing. | Any converter change made to enlarge the release. |
+
+#### Where this stands, 2026-08-22
+
+**R3.1, R3.2 and R3.3 are done.** R3.4 is the owner's.
+
+An unplanned card came first, because rule 1 of this file outranks
+everything below it: **`main` had been red since 2026-08-20**, in four
+jobs, none of which reproduced locally on its own — `\verb` inside a
+LaTeX command argument, a Windows path compared against its JSON
+spelling, a gate whose binary nothing built, and a sphinx refusal that
+pandoc's own output earns identically. All four are fixed.
+
+R3.1 found the blocker the version bump created: **the wheel cannot be
+built until crates.io has 0.2.0**, because `bindings/python` resolves
+`ferrodoc` from the registry. `docs/releasing.md` is the checklist,
+written from the rehearsal rather than from memory.
+
+R3.3 found **nine published figures that had stopped being true**, every
+one of them a corpus that grew, and README bundle sizes 1.4% out.
+`scripts/claims.sh` now re-derives them and CI runs it.
 
 > **R3.4 needs credentials and cannot be delegated.** Rotate the two tokens
 > that were pasted into a chat transcript before using them, add the PyPI
@@ -222,6 +245,43 @@ mean shipping eight of them with no way to say whether they helped.
 decisions with code attached and should not be started until the number
 exists to judge them by. D4.5 through D4.8 are independent of each other and
 can be taken in any order, or in parallel by two people.
+
+#### Where this stands, 2026-08-22
+
+**D4.1 and D4.2 are done, and the number is `0/48`.**
+
+`dropin/` holds 48 real invocations — collected by GitHub code search
+over Makefiles, CI files and shell scripts, 327 distinct lines collapsing
+to 34 flag signatures, each row carrying the repository it came from and
+what was altered to make it runnable here. `scripts/dropin.sh` runs both
+binaries and compares every byte either wrote, stdout, output files and
+stderr, and `verify.sh` prints the number. It is a *measurement* while it
+is zero, because a floor of zero holds nothing; **it becomes a gate the
+day it is not zero.**
+
+Three findings, and each of them changes what 0.4 should do:
+
+1. **Fifteen of the 48 fail on a flag ferrodoc does not have**, and the
+   distribution is not what the card list assumed. In 327 real
+   invocations: `--defaults` 36, `--template` 37, `--css` 23,
+   `--toc-depth` 14, `--metadata-file` 12, `--variable` 7. And
+   `--eol`, `--ascii`, `--strip-comments`, `--id-prefix` and
+   `--shift-heading-level-by` — the whole of card **D4.8** — appear
+   **zero** times. **D4.8 should be dropped to the bottom and D4.7
+   widened**: `--css` and `--include-in-header` are already implemented
+   or trivial, `--toc-depth` is a one-line extension of a flag that
+   exists, and `--template` is a 0.5 item that a fifth of real command
+   lines need.
+2. **`-t html5` is refused as an unknown format.** Pandoc has spelled it
+   `html5` for a decade. That is card D4.5's cheapest possible win.
+3. **The misses that are not about flags come down to three global
+   decisions**, and `scripts/dropin.sh --attribute` names which one each
+   row needs: pandoc's default syntax highlighting (0.7), pandoc's
+   72-column fill (D4.3), and `-f markdown` meaning pandoc's dialect,
+   whose heading identifiers appear in every HTML conversion (D4.4).
+   The rest need the standalone page shape, which is 0.5. **So the
+   drop-in number is gated by 0.5 and 0.7 as much as by 0.4** — worth
+   knowing before the version ladder is treated as an order of work.
 
 ### 0.5 — Templates, variables and standalone parity
 

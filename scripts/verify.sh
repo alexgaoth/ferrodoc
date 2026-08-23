@@ -225,6 +225,15 @@ if [ "$want_gates" = 1 ]; then
 fi
 
 if [ "$want_gates" = 1 ]; then
+    echo "== drop-in"
+    # The only number here that answers "would a user notice". Every gate
+    # above scores an AST or one conversion with flags the gate chose;
+    # this runs 48 command lines people actually wrote and compares the
+    # bytes. It is a measurement rather than a gate because it is at 0/48
+    # and a floor of zero holds nothing — **it becomes a gate the day it
+    # is not zero.** See dropin/README.md.
+    measure "real command lines" ./scripts/dropin.sh
+
     echo "== published figures"
     # Every score above is published somewhere a reader will believe it.
     # This holds the two together, at no cost: the run has already

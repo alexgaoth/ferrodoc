@@ -1,0 +1,5 @@
+/* The stylesheet three of the harvested command lines pass with --css or
+   -c. Deliberately tiny: what is being compared is where the writer puts
+   the link, not what the rules say. */
+body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; }
+code { background: #f4f4f4; }
