@@ -4,12 +4,12 @@ Terms with *underline*, <sub>subscript</sub> and <sup>superscript</sup>.
 
 ## Schedule
 
-|  |  |  |
-| ---- | ---- | ---- |
-| Item | Due | Owner |
-| Design | Q1 | A. Patel |
-| Combined phase | R. Okonkwo |  |
-| Delivery | Q3 | A. Patel |
+|                |            |          |
+|----------------|------------|----------|
+| Item           | Due        | Owner    |
+| Design         | Q1         | A. Patel |
+| Combined phase | R. Okonkwo |          |
+| Delivery       | Q3         | A. Patel |
 
 ## Definitions
 

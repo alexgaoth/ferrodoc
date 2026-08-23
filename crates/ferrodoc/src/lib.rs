@@ -1286,8 +1286,10 @@ mod tests {
         let source = b"| Region | Q1 |\n|--------|---:|\n| North  | 120 |\n";
         let docx = convert(source, Format::Gfm, Format::Docx).expect("writable");
         let gfm = String::from_utf8(convert(&docx, Format::Docx, Format::Gfm).unwrap()).unwrap();
-        assert!(gfm.contains("| Region | Q1 |"), "{gfm}");
-        assert!(gfm.contains("| North | 120 |"), "{gfm}");
+        // Padded to the column's width, right-aligned where the table
+        // said so — the shape pandoc's own writer produces.
+        assert!(gfm.contains("| Region |  Q1 |"), "{gfm}");
+        assert!(gfm.contains("| North  | 120 |"), "{gfm}");
         let md = String::from_utf8(convert(&docx, Format::Docx, Format::Markdown).unwrap()).unwrap();
         assert!(!md.contains('|'), "{md}");
     }

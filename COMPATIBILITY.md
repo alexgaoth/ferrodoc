@@ -916,7 +916,7 @@ directly without asking its reader to survive anything.
 | `html` | **12/12** |
 | `latex` | 7/12 |
 | `plain` | 7/12 |
-| `gfm` | 5/12 |
+| `gfm` | 6/12 |
 | `rst` | 2/12 |
 | `asciidoc` | 2/12 |
 | `markdown` | 2/12 |

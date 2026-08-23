@@ -17,12 +17,12 @@ something was silently dropped.
 
 ## Rollout schedule
 
-| Phase | Owner | Starts | Status |
-| ---- | ---- | ---: | ---- |
-| Inventory | Priya | 2026-01-06 | done |
-| Pilot | Sam | 2026-02-17 | in progress |
-| Migration | Ops | 2026-04-01 | not started |
-| Decommission | Ops | 2026-09-15 | not started |
+| Phase        | Owner |     Starts | Status      |
+|--------------|-------|-----------:|-------------|
+| Inventory    | Priya | 2026-01-06 | done        |
+| Pilot        | Sam   | 2026-02-17 | in progress |
+| Migration    | Ops   | 2026-04-01 | not started |
+| Decommission | Ops   | 2026-09-15 | not started |
 
 ## What each team has to do
 

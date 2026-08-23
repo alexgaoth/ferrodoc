@@ -1,24 +1,5 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-23 15:57:18.654376242 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-23 15:57:18.366376431 -0700
-@@ -17,12 +17,12 @@
- 
- ## Rollout schedule
- 
--| Phase        | Owner |     Starts | Status      |
--|--------------|-------|-----------:|-------------|
--| Inventory    | Priya | 2026-01-06 | done        |
--| Pilot        | Sam   | 2026-02-17 | in progress |
--| Migration    | Ops   | 2026-04-01 | not started |
--| Decommission | Ops   | 2026-09-15 | not started |
-+| Phase | Owner | Starts | Status |
-+| ---- | ---- | ---: | ---- |
-+| Inventory | Priya | 2026-01-06 | done |
-+| Pilot | Sam | 2026-02-17 | in progress |
-+| Migration | Ops | 2026-04-01 | not started |
-+| Decommission | Ops | 2026-09-15 | not started |
- 
- ## What each team has to do
- 
+--- samples/05-html-to-markdown/pandoc.md	2026-08-23 16:11:00.062860653 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-23 16:10:59.943860708 -0700
 @@ -88,12 +88,8 @@
  
  An image: ![the logo](logo.png "Project logo")

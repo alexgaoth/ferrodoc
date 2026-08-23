@@ -117,9 +117,6 @@ struct Writer {
     /// blockquote does not count: its `> ` prefix makes four more spaces
     /// unambiguous, where a list item's own indentation does not.
     depth: usize,
-    /// Whether the previous sibling block was a list. Four spaces after
-    /// one are that list's continuation, not a code block.
-    after_list: bool,
 }
 
 /// Marks a space a line may be broken at. Chosen because no reader here
@@ -163,9 +160,9 @@ impl Writer {
                     _ => {}
                 }
             }
-            self.after_list =
+            let after_list =
                 matches!(previous, Some(Block::BulletList(_) | Block::OrderedList(..)));
-            self.block(out, block, prefix);
+            self.block(out, block, prefix, after_list);
             previous = Some(block);
         }
     }
@@ -206,10 +203,17 @@ impl Writer {
     /// indentation, four spaces **after a list** continue it, and an
     /// indented block cannot hold a blank first line or say whether its
     /// content ended with a newline.
-    fn code_block(&mut self, out: &mut String, attr: &ferrodoc_ast::Attr, text: &str, prefix: &str) {
+    fn code_block(
+        &mut self,
+        out: &mut String,
+        attr: &ferrodoc_ast::Attr,
+        text: &str,
+        prefix: &str,
+        after_list: bool,
+    ) {
         let indentable = attr == &ferrodoc_ast::Attr::default()
             && self.depth == 0
-            && !self.after_list
+            && !after_list
             && !text.is_empty()
             && !text.starts_with('\n')
             && !text.ends_with('\n');
@@ -245,7 +249,7 @@ impl Writer {
     
     }
 
-    fn block(&mut self, out: &mut String, block: &Block, prefix: &str) {
+    fn block(&mut self, out: &mut String, block: &Block, prefix: &str, after_list: bool) {
         match block {
             Block::Plain(inlines) | Block::Para(inlines) => {
                 let text = self.inlines(inlines);
@@ -255,7 +259,7 @@ impl Writer {
                 let text = self.inlines(inlines);
                 header(out, prefix, *level, &text);
             }
-            Block::CodeBlock(attr, text) => self.code_block(out, attr, text, prefix),
+            Block::CodeBlock(attr, text) => self.code_block(out, attr, text, prefix, after_list),
             Block::BlockQuote(blocks) => {
                 if blocks.is_empty() {
                     // A quote with no content is still a quote; writing
@@ -397,22 +401,51 @@ impl Writer {
         // The header row decides the column count, so it must exist even
         // when the table has no head: an empty one still reads back as a
         // table of the right shape.
-        let cells = header.map(|row| self.cells(row, columns)).unwrap_or_default();
-        push_line(out, prefix, &pipe_row(&cells, columns));
+        let mut lines: Vec<Vec<String>> = Vec::new();
+        lines.push(header.map(|row| self.cells(row, columns)).unwrap_or_default());
+        for row in body {
+            lines.push(self.cells(row, columns));
+        }
+
+        // **Pandoc pads every column to its widest cell**, with a floor of
+        // three, and the rule line fills the same width. A table written
+        // unpadded reads back identically, which is why no round trip ever
+        // saw this and why `corpus/gfm/tables.gfm` differed on every row.
+        let width = |index: usize| {
+            lines
+                .iter()
+                .filter_map(|cells| cells.get(index))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+                .max(3)
+        };
+        let widths: Vec<usize> = (0..columns).map(width).collect();
+
         let rule: Vec<String> = table
             .colspecs
             .iter()
-            .map(|spec| match spec.alignment {
-                Alignment::AlignLeft => ":---".to_owned(),
-                Alignment::AlignCenter => ":---:".to_owned(),
-                Alignment::AlignRight => "---:".to_owned(),
-                Alignment::AlignDefault => "----".to_owned(),
+            .zip(&widths)
+            .map(|(spec, width)| {
+                // The colons sit inside the column's own width, so a
+                // left-aligned column of three is `:---` and not `:---:`.
+                let dashes = |n: usize| "-".repeat(width + 2 - n);
+                match spec.alignment {
+                    Alignment::AlignLeft => format!(":{}", dashes(1)),
+                    Alignment::AlignCenter => format!(":{}:", dashes(2)),
+                    Alignment::AlignRight => format!("{}:", dashes(1)),
+                    Alignment::AlignDefault => dashes(0),
+                }
             })
             .collect();
-        push_line(out, prefix, &pipe_row(&rule, columns));
-        for row in body {
-            let cells = self.cells(row, columns);
-            push_line(out, prefix, &pipe_row(&cells, columns));
+
+        let alignments: Vec<Alignment> =
+            table.colspecs.iter().map(|spec| spec.alignment).collect();
+        for (index, cells) in lines.iter().enumerate() {
+            push_line(out, prefix, &pipe_row(cells, &widths, &alignments));
+            if index == 0 {
+                push_line(out, prefix, &format!("|{}|", rule.join("|")));
+            }
         }
         if !table.caption.blocks.is_empty() {
             push_line(out, prefix, "");
@@ -427,7 +460,7 @@ impl Writer {
             let mut text = String::new();
             for block in &cell.blocks {
                 let mut piece = String::new();
-                self.block(&mut piece, block, "");
+                self.block(&mut piece, block, "", false);
                 let piece = piece.trim_end_matches('\n');
                 if !text.is_empty() && !piece.is_empty() {
                     text.push(' ');
@@ -527,8 +560,7 @@ impl Writer {
             self.depth += 1;
             if tight {
                 for block in item {
-                    self.after_list = false;
-                    self.block(&mut body, block, inner);
+                    self.block(&mut body, block, inner, false);
                 }
             } else {
                 self.blocks(&mut body, item, inner);
@@ -728,6 +760,14 @@ impl Writer {
                 write_math(out, *kind, text);
             }
             Inline::Link(_, inner, target) => {
+                // The autolink escapes are spent inside `[…]` too, where
+                // pandoc leaves them off. A link cannot nest, so this
+                // looks like waste — but **pandoc's own reader linkifies
+                // inside link text**: it reads its own
+                // `[www.example.com](http://www.example.com)` back as a
+                // `Link` wrapped around a `Link`. `corpus/gfm/
+                // extensions.gfm` is the document, and the escape is what
+                // keeps `diff-gfm-md` at 100.
                 let text = self.inlines(inner);
                 if write_autolink(out, inner, target) {
                     return;
@@ -792,10 +832,17 @@ fn without_task_marker(item: &[Block]) -> Vec<Block> {
 /// A pipe-table row, padded with empty cells or truncated to exactly
 /// `columns` of them — the delimiter row sets the width and a row that
 /// disagrees would not be part of the table.
-fn pipe_row(cells: &[String], columns: usize) -> String {
+fn pipe_row(cells: &[String], widths: &[usize], alignments: &[Alignment]) -> String {
     let mut line = String::from("|");
-    for index in 0..columns {
-        let _ = write!(line, " {} |", cells.get(index).map_or("", String::as_str));
+    for (index, width) in widths.iter().enumerate() {
+        let cell = cells.get(index).map_or("", String::as_str);
+        let slack = width.saturating_sub(cell.chars().count());
+        let (before, after) = match alignments.get(index) {
+            Some(Alignment::AlignRight) => (slack, 0),
+            Some(Alignment::AlignCenter) => (slack / 2, slack - slack / 2),
+            _ => (0, slack),
+        };
+        let _ = write!(line, " {}{cell}{} |", " ".repeat(before), " ".repeat(after));
     }
     line
 }
@@ -1595,7 +1642,7 @@ mod tests {
         // document says.
         assert_eq!(
             gfm_of("| a |\n|---|\n| p\\|q |\n"),
-            "| a |\n| ---- |\n| p\\|q |\n"
+            "| a    |\n|------|\n| p\\|q |\n"
         );
     }
 
@@ -1609,7 +1656,7 @@ mod tests {
             Block::Table(Box::new(one_by_one())),
         ]])]);
         let written = write_gfm(&doc);
-        assert_eq!(written, "- item\n\n  | a |\n  | ---- |\n");
+        assert_eq!(written, "- item\n\n  | a   |\n  |-----|\n");
         assert!(matches!(
             crate::read_gfm(&written).unwrap().blocks[0],
             Block::BulletList(ref items) if matches!(items[0][1], Block::Table(_))
@@ -1682,7 +1729,7 @@ mod tests {
         let doc = Pandoc::new(vec![table]);
         assert_eq!(
             write_gfm(&doc),
-            "|  |  |  |\n| ---- | ---- | ---- |\n| wide |  | one two |\n\nCap\n"
+            "|      |     |         |\n|------|-----|---------|\n| wide |     | one two |\n\nCap\n"
         );
         // CommonMark has no table syntax, so the same document degrades to
         // its cell contents there — that is the loss GFM mode exists for.

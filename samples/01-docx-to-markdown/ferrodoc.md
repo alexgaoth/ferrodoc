@@ -22,10 +22,10 @@ Revenue grew **18%** against a *flat* market, and the pipeline carried into the 
 
 See [the appendix](https://example.com/appendix) for detail.
 
-|  |  |
-| :---: | :---: |
+|        |        |
+|:------:|:------:|
 | Region | Growth |
-| EMEA | 12% |
-| APAC | 24% |
+|  EMEA  |  12%   |
+|  APAC  |  24%   |
 
 > We should double down on the enterprise motion.

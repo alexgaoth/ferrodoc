@@ -1,21 +1,6 @@
---- samples/03-odt-to-markdown/pandoc.md	2026-08-23 15:57:18.170376560 -0700
-+++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-23 15:57:18.127376588 -0700
-@@ -4,16 +4,16 @@
- 
- ## Schedule
- 
--|                |            |          |
--|----------------|------------|----------|
--| Item           | Due        | Owner    |
--| Design         | Q1         | A. Patel |
--| Combined phase | R. Okonkwo |          |
--| Delivery       | Q3         | A. Patel |
-+|  |  |  |
-+| ---- | ---- | ---- |
-+| Item | Due | Owner |
-+| Design | Q1 | A. Patel |
-+| Combined phase | R. Okonkwo |  |
-+| Delivery | Q3 | A. Patel |
+--- samples/03-odt-to-markdown/pandoc.md	2026-08-23 16:10:59.830860759 -0700
++++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-23 16:10:59.804860771 -0700
+@@ -13,7 +13,7 @@
  
  ## Definitions
  
