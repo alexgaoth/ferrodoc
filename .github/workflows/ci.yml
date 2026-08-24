@@ -128,8 +128,10 @@ jobs:
         run: ./scripts/verify.sh --limits
 
   # Every size README publishes, re-derived. The bundle sizes and the
-  # 60%/61% trimmed ratios had drifted 1.4% before this existed, because
-  # nothing re-measured them after the code that made them true changed.
+  # trimmed ratios had drifted 1.4% before this existed, because nothing
+  # re-measured them after the code that made them true changed — and the
+  # headline row said 4.6 MB against a 6.9 MB binary until it was gated
+  # too, which is the same failure one level up.
   sizes:
     name: the published sizes
     runs-on: ubuntu-latest
@@ -139,6 +141,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      # The headline table compares this binary with pandoc's, so both
+      # sides have to be on the machine that checks the claim.
+      - name: Install pandoc ${{ env.PANDOC_VERSION }}
+        run: |
+          curl -fsSL -o pandoc.deb \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          sudo dpkg -i pandoc.deb
+          pandoc --version | head -1
       - name: byte counts and trimmed ratios
         run: ./scripts/claims.sh --sizes
 

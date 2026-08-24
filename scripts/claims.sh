@@ -219,6 +219,28 @@ within() {
     fi
 }
 
+# Report one figure that is allowed to differ by a percentage, for the
+# claims that are measured rather than fixed. Fractions are compared, so
+# `awk` does the arithmetic that bash cannot.
+near() {
+    local what="$1" derived="$2" said="$3" limit="$4"
+    checked=$((checked + 1))
+    if [ -z "$said" ]; then
+        printf '  MISSING  %-29s README.md publishes no figure\n' "$what"
+        failures=$((failures + 1))
+        return
+    fi
+    local off
+    off=$(awk -v a="$derived" -v b="$said" 'BEGIN { d = a - b; if (d < 0) d = -d; printf "%.2f", b == 0 ? 100 : d * 100 / b }')
+    if awk -v o="$off" -v l="$limit" 'BEGIN { exit !(o <= l) }'; then
+        printf '  %-38s %11s  (README says %s, %s%% off)\n' "$what" "$derived" "$said" "$off"
+    else
+        printf '  DRIFTED  %-29s %11s  (README says %s, %s%% off, limit %s%%)\n' \
+            "$what" "$derived" "$said" "$off" "$limit"
+        failures=$((failures + 1))
+    fi
+}
+
 check_sizes() {
     echo "  building four artefacts..."
     cargo build --quiet --release -p ferrodoc
@@ -255,14 +277,36 @@ check_sizes() {
     # sides of the comparison are measured: pandoc's binary is on `PATH`
     # here, so the ratio is derived rather than remembered.
     local pandoc_bytes megabytes pandoc_mb ratio disk
-    pandoc_bytes=$(stat -Lc%s "$(command -v pandoc)")
+    local pandoc_path
+    pandoc_path=$(command -v pandoc) || {
+        printf '  MISSING  %-29s pandoc is not on PATH to measure\n' "the disk row"
+        failures=$((failures + 1)); checked=$((checked + 1))
+        return
+    }
+    pandoc_bytes=$(stat -Lc%s "$pandoc_path")
     megabytes=$(awk -v b="$cli" 'BEGIN { printf "%.1f", b / 1000000 }')
     pandoc_mb=$(awk -v b="$pandoc_bytes" 'BEGIN { printf "%.1f", b / 1000000 }')
     ratio=$(awk -v a="$pandoc_bytes" -v b="$cli" 'BEGIN { printf "%.0f", a / b }')
     disk='| **Binary / dependency on disk** |'
-    published "**$megabytes MB**" README.md "$disk"
-    published "| $pandoc_mb MB |" README.md "$disk"
-    published "**${ratio}× smaller**" README.md "$disk"
+    local row said_ours said_pandoc said_ratio
+    row=$(grep -F -- "$disk" README.md || true)
+    if [ -z "$row" ]; then
+        printf '  MISSING  %-29s README.md has no disk row\n' "the disk row"
+        failures=$((failures + 1)); checked=$((checked + 1))
+        return
+    fi
+    said_pandoc=$(printf '%s' "$row" | grep -oE '\| [0-9]+\.[0-9] MB \|' | tr -dc '0-9.')
+    said_ours=$(printf '%s' "$row" | grep -oE '\*\*[0-9]+\.[0-9] MB\*\*' | tr -dc '0-9.')
+    said_ratio=$(printf '%s' "$row" | grep -oE '\*\*[0-9]+× smaller\*\*' | tr -dc '0-9')
+    # A tenth of a megabyte is finer than the binary is reproducible: the
+    # same checkout builds 0.7% smaller on a CI runner than here, which is
+    # a fact about linkers. The same 5% bound as the byte counts.
+    near "disk, ferrodoc MB"  "$megabytes"    "$said_ours"   5
+    # Pandoc's binary is a **pinned release**, so its size moves only when
+    # the platform does; two percent catches a figure left behind by a
+    # pandoc upgrade, which five did not — 152.9 against 160.4 is 4.7%.
+    near "disk, pandoc MB"    "$pandoc_mb"    "$said_pandoc" 2
+    near "disk, the ratio"    "$ratio"        "$said_ratio"  5
 
     # No exact check on any byte count. The CLI is reproducible to the
     # byte in one checkout with one toolchain and **not across machines**:
