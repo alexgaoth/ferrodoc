@@ -33,7 +33,9 @@ test("a table survives markdown to docx and back", async () => {
   // The path the binding exists for, and the structure most easily lost.
   const docx = await convert(MARKDOWN, "gfm", "docx");
   const back = await convert(docx, "docx", "gfm");
-  assert.match(back.replaceAll("  ", " "), /\| a \| b \|/);
+  // Every run of whitespace to one space: a pipe table's cells are
+  // padded to their column, so `| a | b |` comes back `| a   | b   |`.
+  assert.match(back.replace(/[^\S\n]+/g, " "), /\| a \| b \|/);
   assert.match(back, /Title/);
 });
 
