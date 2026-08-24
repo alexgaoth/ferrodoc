@@ -674,7 +674,7 @@ a heading in the body",
         .and_then(|path| path.file_stem())
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let page = page.as_page(toc, &stem);
+    let page = page.as_page(toc, &stem, wrap);
     if reference.is_some() && !matches!(to, Format::Docx | Format::Odt) {
         // The library answers this with `NotWritable`, which reads as "it
         // is an input-only format" — true of nothing here and wrong about
@@ -1062,7 +1062,7 @@ impl PageFlags {
     /// As the library sees them. `pagetitle` is the input file's name,
     /// which is what pandoc puts in `<title>` when the document has no
     /// title and which only the caller knows.
-    fn as_page<'a>(&'a self, toc: bool, stem: &'a str) -> ferrodoc::Page<'a> {
+    fn as_page<'a>(&'a self, toc: bool, stem: &'a str, wrap: Option<Wrap>) -> ferrodoc::Page<'a> {
         ferrodoc::Page {
             css: self.css.clone(),
             toc,
@@ -1074,6 +1074,13 @@ impl PageFlags {
             template: self.template.as_deref(),
             id_prefix: self.id_prefix.clone(),
             pagetitle: Some(stem),
+            // A page's body fills like a fragment's; the template around
+            // it never does, because it is not the document.
+            wrap: match wrap {
+                Some(Wrap::Preserve) => ferrodoc::HtmlWrap::Preserve,
+                Some(Wrap::Auto(columns)) => ferrodoc::HtmlWrap::Fill(columns),
+                Some(Wrap::None) | None => ferrodoc::HtmlWrap::None,
+            },
         }
     }
 }

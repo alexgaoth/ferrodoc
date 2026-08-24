@@ -45,6 +45,33 @@ use ferrodoc_ast::{
 };
 use std::fmt::Write as _;
 
+/// Marks a place a line may be broken. Chosen because no reader here can
+/// produce one inside text: `CommonMark` replaces NUL with U+FFFD by
+/// specification, and XML — which DOCX, ODT and EPUB are — forbids both
+/// outright. Every one is turned into a space, a newline, or a line break
+/// before the string leaves this crate.
+const BREAK: char = '\u{0}';
+/// The same, for a `SoftBreak` — which `--wrap=preserve` keeps as a
+/// newline where an ordinary space stays a space.
+const SOFT: char = '\u{1}';
+/// Ends the text a break decision is allowed to look at, without being a
+/// break itself. What follows is appended whatever its width — an
+/// element's content, where the marks before it belong to its tag.
+const STOP: char = '\u{2}';
+
+/// How the writer lays lines out, as pandoc's `--wrap` means it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wrap {
+    /// Every soft break becomes a space and no line is broken.
+    #[default]
+    None,
+    /// A soft break stays a line break; nothing else is broken.
+    Preserve,
+    /// Fill to this many columns, breaking at spaces, soft breaks **and
+    /// between attributes** — which is where pandoc breaks a long tag.
+    Fill(usize),
+}
+
 /// Render a document as HTML, matching pandoc's HTML writer with
 /// `--wrap=none` and no syntax highlighting.
 pub fn write_html(doc: &Pandoc) -> String {
@@ -60,6 +87,16 @@ pub fn write_html(doc: &Pandoc) -> String {
 /// collide on `#fn1`, which is the exact failure `--id-prefix` exists to
 /// prevent.
 pub fn write_html_with_id_prefix(doc: &Pandoc, id_prefix: &str) -> String {
+    write_html_wrapped(doc, id_prefix, Wrap::None)
+}
+
+/// The same, laid out the way `--wrap` asks for.
+///
+/// The writer always marks its break opportunities and this decides what
+/// becomes of them, so nothing downstream has to be told which mode it is
+/// in. `Wrap::None` is what [`write_html`] does.
+#[must_use]
+pub fn write_html_wrapped(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> String {
     let mut out = String::new();
     let (blocks, notes) = take_notes(&doc.blocks, id_prefix);
     write_blocks(&mut out, &blocks);
@@ -72,7 +109,100 @@ pub fn write_html_with_id_prefix(doc: &Pandoc, id_prefix: &str) -> String {
         out.pop();
     }
     write_notes(&mut out, &notes, id_prefix);
-    out
+    lay_out(&out, wrap)
+}
+
+/// Turn the break marks into whatever the mode asks for.
+fn lay_out(text: &str, wrap: Wrap) -> String {
+    match wrap {
+        Wrap::None => text.replace([BREAK, SOFT], " ").replace(STOP, ""),
+        Wrap::Preserve => text.replace(BREAK, " ").replace(SOFT, "\n").replace(STOP, ""),
+        Wrap::Fill(columns) => {
+            let mut out = String::with_capacity(text.len());
+            for line in text.split('\n') {
+                fill(line, columns, &mut out);
+                out.push('\n');
+            }
+            // `split` on a trailing newline yields a final empty piece,
+            // which has just added a newline of its own.
+            out.pop();
+            out
+        }
+    }
+}
+
+/// The columns a string occupies, which is **not** its character count:
+/// a CJK ideograph or an emoji takes two and a few invisible characters
+/// take none. Pandoc counts the same way, so a document of Japanese
+/// filled at 72 wraps at the same words.
+///
+/// The table below was **measured**, not transcribed: every codepoint in
+/// the blocks that could plausibly be wide was put through
+/// `pandoc -t html --wrap=auto --columns=13` alone in a paragraph, and
+/// the ones that pushed the following word onto a second line are these.
+/// Outside the probed blocks — planes 4 and above — this says one, which
+/// is what pandoc says everywhere except a stretch of unassigned space.
+fn display_width(text: &str) -> usize {
+    text.chars().map(char_width).sum()
+}
+
+fn char_width(ch: char) -> usize {
+    match ch {
+        // Zero: the marks that occupy no column at all, and the break
+        // marks, which are not in the output.
+        '\u{200b}' | '\u{200d}' | '\u{fe0f}' | BREAK | SOFT | STOP => 0,
+        ch if WIDE.iter().any(|range| range.contains(&(ch as u32))) => 2,
+        _ => 1,
+    }
+}
+
+/// The codepoints pandoc counts as two columns. See [`display_width`].
+static WIDE: &[std::ops::RangeInclusive<u32>] = &[
+    0x1100..=0x115F, 0x231A..=0x231B, 0x2329..=0x232A, 0x23E9..=0x23EC, 0x23F0..=0x23F0,
+    0x23F3..=0x23F3, 0x25FD..=0x25FE, 0x2614..=0x2615, 0x2648..=0x2653, 0x267F..=0x267F,
+    0x2693..=0x2693, 0x26A1..=0x26A1, 0x26AA..=0x26AB, 0x26BD..=0x26BE, 0x26C4..=0x26C5,
+    0x26CE..=0x26CE, 0x26D4..=0x26D4, 0x26EA..=0x26EA, 0x26F2..=0x26F3, 0x26F5..=0x26F5,
+    0x26FA..=0x26FA, 0x26FD..=0x26FD, 0x2705..=0x2705, 0x270A..=0x270B, 0x2728..=0x2728,
+    0x274C..=0x274C, 0x274E..=0x274E, 0x2753..=0x2755, 0x2757..=0x2757, 0x2795..=0x2797,
+    0x27B0..=0x27B0, 0x27BF..=0x27BF, 0x2E80..=0x3029, 0x302E..=0x303E, 0x3040..=0x3096,
+    0x309B..=0x3247, 0x3250..=0x4DBF, 0x4E00..=0xA4CF, 0xA960..=0xA97F, 0xAC00..=0xD7AF,
+    0xF900..=0xFAFF, 0xFE10..=0xFE1F, 0xFE30..=0xFE6F, 0xFF01..=0xFF60, 0xFFE0..=0xFFE7,
+    0x1F004..=0x1F004, 0x1F0CF..=0x1F0D0, 0x1F18E..=0x1F18E, 0x1F191..=0x1F19A,
+    0x1F200..=0x1F320, 0x1F32D..=0x1F335, 0x1F337..=0x1F37C, 0x1F37E..=0x1F393,
+    0x1F3A0..=0x1F3CA, 0x1F3CF..=0x1F3D3, 0x1F3E0..=0x1F3F0, 0x1F3F4..=0x1F3F4,
+    0x1F3F8..=0x1F43E, 0x1F440..=0x1F440, 0x1F442..=0x1F4FC, 0x1F4FF..=0x1F53D,
+    0x1F54B..=0x1F54E, 0x1F550..=0x1F567, 0x1F57A..=0x1F57A, 0x1F595..=0x1F596,
+    0x1F5A4..=0x1F5A4, 0x1F5FB..=0x1F64F, 0x1F680..=0x1F6C5, 0x1F6CC..=0x1F6CC,
+    0x1F6D0..=0x1F6D2, 0x1F6D5..=0x1F6DF, 0x1F6EB..=0x1F6EF, 0x1F6F4..=0x1F6FF,
+    0x1F7E0..=0x1F7FF, 0x1F90C..=0x1F93A, 0x1F93C..=0x1F945, 0x1F947..=0x1F9FF,
+    0x1FA70..=0x1FAFF, 0x20000..=0x3FFFD
+];
+
+/// Greedy fill: take words while they fit, break at the last mark that
+/// did. A word longer than the width goes on its own line and overruns —
+/// breaking inside it would invent a break the text does not have.
+///
+/// The decision measures only as far as the first [`STOP`] in the word,
+/// which is where an element's tag ends and its content begins; the whole
+/// word is appended either way and the column counts all of it.
+fn fill(line: &str, columns: usize, out: &mut String) {
+    let mut width = 0;
+    let mut first = true;
+    for word in line.split([BREAK, SOFT]) {
+        let measured = display_width(word.split(STOP).next().unwrap_or(word));
+        let whole = display_width(word);
+        if first {
+            first = false;
+            width = whole;
+        } else if width + 1 + measured <= columns {
+            out.push(' ');
+            width += 1 + whole;
+        } else {
+            out.push('\n');
+            width = whole;
+        }
+        out.extend(word.chars().filter(|c| *c != STOP));
+    }
 }
 
 /// How deep the contents go, matching **pandoc's `--toc-depth` default**
@@ -180,6 +310,18 @@ pub fn write_toc(doc: &Pandoc) -> String {
 
 /// The same, to a chosen depth — pandoc's `--toc-depth`.
 pub fn write_toc_to_depth(doc: &Pandoc, depth: i64) -> String {
+    write_toc_wrapped(doc, depth, Wrap::None)
+}
+
+/// The same, laid out the way `--wrap` asks for. The contents fill like
+/// any other text: pandoc's `-s --wrap=auto` wraps a long entry.
+#[must_use]
+pub fn write_toc_wrapped(doc: &Pandoc, depth: i64, wrap: Wrap) -> String {
+    lay_out(&toc_marked(doc, depth), wrap)
+}
+
+/// The contents with the break marks still in them.
+fn toc_marked(doc: &Pandoc, depth: i64) -> String {
     let mut entries = Vec::new();
     collect_toc(&doc.blocks, depth, &mut entries);
     if entries.is_empty() {
@@ -207,7 +349,13 @@ pub fn write_toc_to_depth(doc: &Pandoc, depth: i64) -> String {
 /// wraps for itself. Emitting the wrapper here as well is how `-s --toc`
 /// produced two of them.
 pub fn toc_list_to_depth(doc: &Pandoc, depth: i64, id_prefix: &str) -> String {
-    let nav = write_toc_to_depth(doc, depth);
+    toc_list_wrapped(doc, depth, id_prefix, Wrap::None)
+}
+
+/// The same, laid out the way `--wrap` asks for.
+#[must_use]
+pub fn toc_list_wrapped(doc: &Pandoc, depth: i64, id_prefix: &str, wrap: Wrap) -> String {
+    let nav = toc_marked(doc, depth);
     // The entry ids carry the prefix **before** the `toc-`, which is
     // pandoc's spelling: `id="p-toc-x"` beside `href="#p-x"`. The tree's
     // identifiers already carry it by the time this runs, so the prefix
@@ -220,10 +368,11 @@ pub fn toc_list_to_depth(doc: &Pandoc, depth: i64, id_prefix: &str) -> String {
             &format!("\" id=\"{id_prefix}toc-"),
         )
     };
-    nav.strip_prefix("<nav id=\"TOC\" role=\"doc-toc\">\n")
+    let nav = nav
+        .strip_prefix("<nav id=\"TOC\" role=\"doc-toc\">\n")
         .and_then(|rest| rest.strip_suffix("\n</nav>\n"))
-        .map(str::to_owned)
-        .unwrap_or(nav)
+        .map_or(nav.clone(), str::to_owned);
+    lay_out(&nav, wrap)
 }
 
 struct TocNode {
@@ -383,9 +532,13 @@ fn replace_notes(list: &mut [Inline], prefix: &str, bodies: &mut Vec<Vec<Block>>
             let number = bodies.len();
             *inline = Inline::RawInline(
                 Box::new(ferrodoc_ast::Format("html".into())),
+                // The attribute gaps are break marks like any other:
+                // pandoc breaks a long reference between them, and this
+                // is raw HTML by the time the writer sees it.
                 format!(
-                    "<a href=\"#{prefix}fn{number}\" class=\"footnote-ref\" \
-                     id=\"{prefix}fnref{number}\" role=\"doc-noteref\"><sup>{number}</sup></a>"
+                    "<a{BREAK}href=\"#{prefix}fn{number}\"{BREAK}class=\"footnote-ref\"\
+                     {BREAK}id=\"{prefix}fnref{number}\"{BREAK}role=\"doc-noteref\">\
+                     <sup>{number}</sup></a>"
                 ),
             );
         }
@@ -478,16 +631,17 @@ fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str) {
     }
     let _ = writeln!(
         out,
-        "<section id=\"{prefix}footnotes\" class=\"footnotes footnotes-end-of-document\" \
-         role=\"doc-endnotes\">\n<hr />\n<ol>"
+        "<section{BREAK}id=\"{prefix}footnotes\"\
+         {BREAK}class=\"footnotes footnotes-end-of-document\"\
+         {BREAK}role=\"doc-endnotes\">\n<hr />\n<ol>"
     );
     for (index, body) in notes.iter().enumerate() {
         let number = index + 1;
         let back = format!(
-            "<a href=\"#{prefix}fnref{number}\" class=\"footnote-back\" \
-             role=\"doc-backlink\">\u{21a9}\u{fe0e}</a>"
+            "<a{BREAK}href=\"#{prefix}fnref{number}\"{BREAK}class=\"footnote-back\"\
+             {BREAK}role=\"doc-backlink\">\u{21a9}\u{fe0e}</a>"
         );
-        let _ = write!(out, "<li id=\"{prefix}fn{number}\">");
+        let _ = write!(out, "<li{BREAK}id=\"{prefix}fn{number}\">");
         let mut rendered = String::new();
         write_blocks(&mut rendered, body);
         let rendered = rendered.trim_end_matches('\n');
@@ -543,6 +697,16 @@ fn write_block(out: &mut String, block: &Block) {
             out.push_str("<pre");
             write_attr(out, attr);
             out.push_str("><code>");
+            // The **code itself** is one unbreakable piece, and its width
+            // does not enter the decision at the gap before it: pandoc
+            // measures a tag against the column and then appends the
+            // element's content whatever its width. The mark goes after
+            // `<code>`, which is still tag text — measured against 20
+            // columns, `<pre class="bash"><code>` breaks and
+            // `<pre class="bash">` alone does not. Without the mark at
+            // all, `<pre class="rust">` broke on any long code line,
+            // which pandoc never does.
+            out.push(STOP);
             escape_code_block(out, text);
             out.push_str("</code></pre>");
         }
@@ -566,7 +730,9 @@ fn write_block(out: &mut String, block: &Block) {
             // class however many of its items are task items. An empty list
             // takes the class, the same vacuous way pandoc's does.
             if items.iter().all(|item| item.first().and_then(task_box).is_some()) {
-                out.push_str("<ul class=\"task-list\">\n");
+                out.push_str("<ul");
+                out.push(BREAK);
+                out.push_str("class=\"task-list\">\n");
             } else {
                 out.push_str("<ul>\n");
             }
@@ -576,10 +742,10 @@ fn write_block(out: &mut String, block: &Block) {
         Block::OrderedList(attrs, items) => {
             out.push_str("<ol");
             if attrs.start != 1 {
-                let _ = write!(out, " start=\"{}\"", attrs.start);
+                let _ = write!(out, "{BREAK}start=\"{}\"", attrs.start);
             }
             if let Some(t) = list_type(attrs.style) {
-                let _ = write!(out, " type=\"{t}\"");
+                let _ = write!(out, "{BREAK}type=\"{t}\"");
             }
             out.push_str(">\n");
             write_list_items(out, items);
@@ -643,9 +809,12 @@ fn write_list_items(out: &mut String, items: &[Vec<Block>]) {
                 if para {
                     out.push_str("<p>");
                 }
-                out.push_str("<label><input type=\"checkbox\"");
+                out.push_str("<label><input");
+                out.push(BREAK);
+                out.push_str("type=\"checkbox\"");
                 if checked {
-                    out.push_str(" checked=\"\"");
+                    out.push(BREAK);
+                    out.push_str("checked=\"\"");
                 }
                 out.push_str(" />");
                 write_inlines(out, label);
@@ -711,7 +880,7 @@ fn write_table(out: &mut String, table: &Table) {
     // is truncated — 0.335 is a 33% column inside a 67% table.
     let total: f64 = table.colspecs.iter().filter_map(|c| c.width.fraction()).sum();
     if !table.colspecs.is_empty() && total > 0.0 && total < 1.0 {
-        let _ = write!(out, " style=\"width:{}%;\"", percent((total * 100.0).round()));
+        let _ = write!(out, "{BREAK}style=\"width:{}%;\"", percent((total * 100.0).round()));
     }
     out.push('>');
     if !table.caption.blocks.is_empty() {
@@ -774,10 +943,10 @@ fn write_table_row(out: &mut String, row: &Row, cell_tag: &str, colspecs: &[ColS
 fn write_table_cell(out: &mut String, cell: &Cell, tag: &str, colspec: Option<&ColSpec>) {
     let _ = write!(out, "\n<{tag}");
     if cell.row_span != 1 {
-        let _ = write!(out, " rowspan=\"{}\"", cell.row_span);
+        let _ = write!(out, "{BREAK}rowspan=\"{}\"", cell.row_span);
     }
     if cell.col_span != 1 {
-        let _ = write!(out, " colspan=\"{}\"", cell.col_span);
+        let _ = write!(out, "{BREAK}colspan=\"{}\"", cell.col_span);
     }
     // A cell's own alignment wins, and almost no cell has one: pandoc
     // keeps table alignment in the **column specs**, so a `|---:|` header
@@ -790,7 +959,7 @@ fn write_table_cell(out: &mut String, cell: &Cell, tag: &str, colspec: Option<&C
         explicit => explicit,
     };
     if let Some(align) = alignment_style(alignment) {
-        let _ = write!(out, " style=\"text-align: {align};\"");
+        let _ = write!(out, "{BREAK}style=\"text-align: {align};\"");
     }
     out.push('>');
     write_blocks_joined(out, &cell.blocks);
@@ -823,7 +992,8 @@ fn write_inlines(out: &mut String, inlines: &[Inline]) {
 fn write_inline(out: &mut String, inline: &Inline) {
     match inline {
         Inline::Str(s) => escape_text(out, s),
-        Inline::Space | Inline::SoftBreak => out.push(' '),
+        Inline::Space => out.push(BREAK),
+        Inline::SoftBreak => out.push(SOFT),
         Inline::LineBreak => out.push_str("<br />\n"),
         Inline::Emph(inner) => wrap_tag(out, "em", inner),
         Inline::Strong(inner) => wrap_tag(out, "strong", inner),
@@ -869,11 +1039,14 @@ fn write_inline(out: &mut String, inline: &Inline) {
             }
         }
         Inline::Link(attr, inner, target) => {
-            out.push_str("<a href=\"");
+            out.push_str("<a");
+            out.push(BREAK);
+            out.push_str("href=\"");
             escape_attribute(out, &target.url);
             out.push('"');
             if !target.title.is_empty() {
-                out.push_str(" title=\"");
+                out.push(BREAK);
+                out.push_str("title=\"");
                 escape_attribute(out, &target.title);
                 out.push('"');
             }
@@ -883,11 +1056,14 @@ fn write_inline(out: &mut String, inline: &Inline) {
             out.push_str("</a>");
         }
         Inline::Image(attr, alt, target) => {
-            out.push_str("<img src=\"");
+            out.push_str("<img");
+            out.push(BREAK);
+            out.push_str("src=\"");
             escape_attribute(out, &target.url);
             out.push('"');
             if !target.title.is_empty() {
-                out.push_str(" title=\"");
+                out.push(BREAK);
+                out.push_str("title=\"");
                 escape_attribute(out, &target.title);
                 out.push('"');
             }
@@ -895,7 +1071,8 @@ fn write_inline(out: &mut String, inline: &Inline) {
             // empty (`![](url)`); non-empty inlines that render to empty
             // text still produce alt="".
             if !alt.is_empty() {
-                out.push_str(" alt=\"");
+                out.push(BREAK);
+                out.push_str("alt=\"");
                 escape_attribute(out, &plain_text(alt));
                 out.push('"');
             }
@@ -949,7 +1126,8 @@ fn write_id(out: &mut String, attr: &Attr) {
     if attr.identifier.is_empty() {
         return;
     }
-    out.push_str(" id=\"");
+    out.push(BREAK);
+    out.push_str("id=\"");
     escape_attribute(out, &attr.identifier);
     out.push('"');
 }
@@ -958,13 +1136,14 @@ fn write_classes(out: &mut String, attr: &Attr) {
     if attr.classes.is_empty() {
         return;
     }
-    out.push_str(" class=\"");
+    out.push(BREAK);
+    out.push_str("class=\"");
     escape_attribute(out, &attr.classes.join(" "));
     out.push('"');
 }
 
 fn write_kv(out: &mut String, key: &str, value: &str) {
-    out.push(' ');
+    out.push(BREAK);
     // Pandoc's rule, probed on `-f json -t html`: a name HTML does not know
     // is written behind `data-` (`foo` becomes `data-foo`), and a name it
     // knows is written as it stands (`onclick`, `style`, `href`). This is

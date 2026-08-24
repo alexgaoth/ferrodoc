@@ -36,7 +36,7 @@ pub use ferrodoc_ast::Pandoc;
 use ferrodoc_ast::Block;
 /// What goes into a standalone HTML page besides the document.
 #[cfg(feature = "html")]
-pub use ferrodoc_html::Page;
+pub use ferrodoc_html::{Page, Wrap as HtmlWrap};
 
 use std::fmt;
 use std::fmt::Write as _;
@@ -215,9 +215,12 @@ impl Format {
     /// [`render_wrapped`] can honour.
     pub fn wrapping(self) -> Wrapping {
         match self {
-            // The markdown writers take a column count already.
-            Format::Markdown | Format::Gfm => Wrapping::Fills,
-            Format::Html | Format::Plain => Wrapping::Joined,
+            // The markdown writers take a column count already, and the
+            // HTML one does since 2026-08-24 — it marks its break
+            // opportunities as it writes, including **between a tag's
+            // attributes**, which is where pandoc breaks a long tag.
+            Format::Markdown | Format::Gfm | Format::Html => Wrapping::Fills,
+            Format::Plain => Wrapping::Joined,
             Format::Latex | Format::Rst | Format::Asciidoc => Wrapping::Preserved,
             // `pandoc --wrap=auto -t docx` is accepted and does nothing
             // there too, so ignoring it is the compatible answer.
@@ -669,6 +672,17 @@ pub fn render_wrapped_with_media(
         (Wrapping::Fills, Wrap::Auto(columns)) => Some(columns),
         _ => None,
     };
+    // HTML is the one filling writer with a `preserve` of its own: a soft
+    // break stays a line break there, where a space stays a space.
+    #[cfg(feature = "html")]
+    if to == Format::Html {
+        let wrap = match wrap {
+            Wrap::None => ferrodoc_html::Wrap::None,
+            Wrap::Preserve => ferrodoc_html::Wrap::Preserve,
+            Wrap::Auto(columns) => ferrodoc_html::Wrap::Fill(columns),
+        };
+        return Ok(ferrodoc_html::write_html_wrapped(doc, "", wrap).into_bytes());
+    }
     match (columns, to) {
         #[cfg(feature = "markdown")]
         (Some(columns), Format::Markdown) => {
@@ -1231,8 +1245,6 @@ mod tests {
         // A writer that cannot lay lines out that way says which one it
         // does rather than returning the layout it already had.
         for (to, refused) in [
-            (Format::Html, Wrap::Auto(72)),
-            (Format::Html, Wrap::Preserve),
             (Format::Plain, Wrap::Auto(72)),
             (Format::Latex, Wrap::None),
             (Format::Rst, Wrap::Auto(72)),
@@ -1243,8 +1255,13 @@ mod tests {
             assert!(message.contains(&to.to_string()), "{message}");
             assert!(matches!(error, Error::NotWrappable(..)), "{message}");
         }
-        // ...and the one it does do goes through.
+        // HTML does all three, since 2026-08-24: `auto` fills to the
+        // column, `preserve` keeps the document's own line breaks, and
+        // `none` joins them.
         assert_eq!(out(Format::Html, Wrap::None).unwrap(), "<p>one two</p>\n");
+        assert_eq!(out(Format::Html, Wrap::Preserve).unwrap(), "<p>one\ntwo</p>\n");
+        assert_eq!(out(Format::Html, Wrap::Auto(5)).unwrap(), "<p>one\ntwo</p>\n");
+        assert_eq!(out(Format::Html, Wrap::Auto(72)).unwrap(), "<p>one two</p>\n");
 
         // `pandoc --wrap=auto -t json` is accepted and does nothing;
         // refusing it would break a command line pandoc runs.

@@ -11,7 +11,7 @@
 //! comparing bytes, not from the manual.
 
 use crate::template::{Context, Value, render};
-use crate::{escape_text, meta_text, meta_texts, toc_list_to_depth, write_html_with_id_prefix};
+use crate::{Wrap, escape_text, meta_text, meta_texts, toc_list_wrapped, write_html_wrapped};
 use ferrodoc_ast::Pandoc;
 
 /// Pandoc's default HTML template, verbatim. See `templates/LICENSE`.
@@ -48,6 +48,9 @@ pub struct Page<'a> {
     /// What `<title>` says when the document has no title. Pandoc uses
     /// the **input file's name**, which only the caller knows.
     pub pagetitle: Option<&'a str>,
+    /// How the body and the contents lay their lines out. The template
+    /// itself is never filled — it is not the document.
+    pub wrap: Wrap,
 }
 
 impl Page<'_> {
@@ -128,7 +131,8 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
     // empty `<nav>`. Pandoc leaves the variable unset rather than setting
     // it to an empty list, so the template's `$if(toc)$` is false.
     if page.toc {
-        let contents = trimmed(&toc_list_to_depth(doc, page.toc_depth, &page.id_prefix));
+        let contents =
+            trimmed(&toc_list_wrapped(doc, page.toc_depth, &page.id_prefix, page.wrap));
         if !contents.is_empty() {
             // **Both names, and both holding the contents.** Pandoc's own
             // template tests `$if(toc)$` and interpolates
@@ -165,7 +169,7 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
 
     // The prefix reaches the body because the footnote identifiers are
     // invented while writing, not carried by the tree.
-    set("body", Value::Text(trimmed(&write_html_with_id_prefix(doc, &page.id_prefix))));
+    set("body", Value::Text(trimmed(&write_html_wrapped(doc, &page.id_prefix, page.wrap))));
 
     // `-V` last, because it wins. `pandoc -V lang=fr` overrides a
     // document that says otherwise, and a caller who passes one has said
