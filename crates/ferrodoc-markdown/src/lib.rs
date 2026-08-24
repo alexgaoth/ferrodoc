@@ -1369,7 +1369,12 @@ fn lists<'a>(
                         }
                     }
                     if let NodeValue::TaskItem(t) = item.data.borrow().value {
-                        prepend(&mut item_blocks, task_marker(t.symbol, nl.list_type), tight);
+                        let empty = item_blocks.iter().all(|block| {
+                            matches!(block, Block::Plain(inlines) | Block::Para(inlines)
+                                if inlines.is_empty())
+                        });
+                        let marker = task_marker(t.symbol, nl.list_type, dialect, empty);
+                        prepend(&mut item_blocks, marker, tight);
                     }
                     item_blocks
                 })
@@ -1602,17 +1607,38 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
 /// The `☐`/`☒` a task list item contributes, as pandoc's gfm reader writes
 /// it. Pandoc recognizes task items in bullet lists only, so an ordered
 /// list keeps the literal brackets comrak consumed.
-fn task_marker(symbol: Option<char>, list_type: ListType) -> Vec<Inline> {
-    match (list_type, symbol) {
-        (ListType::Bullet, None) => vec![Inline::Str("\u{2610}".to_owned()), Inline::Space],
-        (ListType::Bullet, Some(_)) => vec![Inline::Str("\u{2612}".to_owned()), Inline::Space],
-        (_, None) => vec![
+fn task_marker(
+    symbol: Option<char>,
+    list_type: ListType,
+    dialect: Dialect,
+    empty: bool,
+) -> Vec<Inline> {
+    // Which items get a box is **opposite** in the two dialects, on both
+    // counts, and each was measured against its own reader:
+    //
+    //                      `- [ ]`, no content    `1. [ ] x`, ordered
+    //   `gfm`                    box                    literal
+    //   pandoc's `markdown`      literal                box
+    //
+    // For pandoc's dialect the emptiness decides on its own — `1. [ ]`
+    // with nothing after it is literal in both.
+    let boxed = if dialect == Dialect::Pandoc {
+        !empty
+    } else {
+        list_type == ListType::Bullet
+    };
+    if boxed {
+        let symbol = if symbol.is_some() { "\u{2612}" } else { "\u{2610}" };
+        return vec![Inline::Str(symbol.to_owned()), Inline::Space];
+    }
+    match symbol {
+        None => vec![
             Inline::Str("[".to_owned()),
             Inline::Space,
             Inline::Str("]".to_owned()),
             Inline::Space,
         ],
-        (_, Some(c)) => vec![Inline::Str(format!("[{c}]")), Inline::Space],
+        Some(c) => vec![Inline::Str(format!("[{c}]")), Inline::Space],
     }
 }
 
@@ -2451,6 +2477,35 @@ mod tests {
         // leaves nothing is called `section`.
         assert_eq!(ids("# 1. x\n"), ["x"]);
         assert_eq!(ids("# 123\n"), ["section"]);
+    }
+
+    /// Which items get a box is opposite in the two dialects, on both
+    /// counts, and each side was measured against its own reader.
+    #[test]
+    fn the_two_dialects_disagree_about_task_items() {
+        let literal = serde_json::json!([
+            {"t": "Str", "c": "["}, {"t": "Space"}, {"t": "Str", "c": "]"},
+            {"t": "Space"}, {"t": "Str", "c": "a"}
+        ]);
+        let boxed = serde_json::json!([
+            {"t": "Str", "c": "\u{2610}"}, {"t": "Space"}, {"t": "Str", "c": "a"}
+        ]);
+        // An **ordered** list has task items in pandoc's markdown and
+        // none in `gfm`.
+        assert_eq!(pmd("1. [ ] a\n")[0]["c"][1][0][0]["c"], boxed);
+        assert_eq!(gfm("1. [ ] a\n")[0]["c"][1][0][0]["c"], literal);
+        // An **empty** one is the other way round.
+        assert_eq!(
+            pmd("- [ ]\n")[0]["c"][0][0]["c"],
+            serde_json::json!([{"t": "Str", "c": "["}, {"t": "Space"}, {"t": "Str", "c": "]"}])
+        );
+        assert_eq!(
+            gfm("- [ ]\n")[0]["c"][0][0]["c"],
+            serde_json::json!([{"t": "Str", "c": "\u{2610}"}])
+        );
+        // And a plain bullet task item is a box in both.
+        assert_eq!(pmd("- [ ] a\n")[0]["c"][0][0]["c"], boxed);
+        assert_eq!(gfm("- [ ] a\n")[0]["c"][0][0]["c"], boxed);
     }
 
     #[test]
