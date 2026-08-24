@@ -242,12 +242,27 @@ check_sizes() {
     trimmed_wasm=$(stat -c%s "$trimmed")
     trimmed_wasm_gz=$(gzipped "$trimmed")
 
-    within "CLI, every format"        "$cli"             6499664 5
-    within "CLI, markdown + html"     "$trimmed_cli"     3964400 5
-    within "wasm, every format"       "$wasm"            1855728 5
-    within "wasm gzipped"             "$wasm_gz"          683175 5
-    within "wasm, markdown + html"    "$trimmed_wasm"    1176179 5
-    within "wasm gzipped, trimmed"    "$trimmed_wasm_gz"  407537 5
+    within "CLI, every format"        "$cli"             6878440 5
+    within "CLI, markdown + html"     "$trimmed_cli"     4126744 5
+    within "wasm, every format"       "$wasm"            1907341 5
+    within "wasm gzipped"             "$wasm_gz"          703010 5
+    within "wasm, markdown + html"    "$trimmed_wasm"    1186745 5
+    within "wasm gzipped, trimmed"    "$trimmed_wasm_gz"  410922 5
+
+    # The headline table's own row, which nothing checked until
+    # 2026-08-24 and which said **4.6 MB** while the binary was 6.9 — it
+    # was written before four of the eleven format crates existed. Both
+    # sides of the comparison are measured: pandoc's binary is on `PATH`
+    # here, so the ratio is derived rather than remembered.
+    local pandoc_bytes megabytes pandoc_mb ratio disk
+    pandoc_bytes=$(stat -Lc%s "$(command -v pandoc)")
+    megabytes=$(awk -v b="$cli" 'BEGIN { printf "%.1f", b / 1000000 }')
+    pandoc_mb=$(awk -v b="$pandoc_bytes" 'BEGIN { printf "%.1f", b / 1000000 }')
+    ratio=$(awk -v a="$pandoc_bytes" -v b="$cli" 'BEGIN { printf "%.0f", a / b }')
+    disk='| **Binary / dependency on disk** |'
+    published "**$megabytes MB**" README.md "$disk"
+    published "| $pandoc_mb MB |" README.md "$disk"
+    published "**${ratio}× smaller**" README.md "$disk"
 
     # No exact check on any byte count. The CLI is reproducible to the
     # byte in one checkout with one toolchain and **not across machines**:

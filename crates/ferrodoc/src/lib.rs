@@ -1262,6 +1262,14 @@ mod tests {
 
         // A writer that cannot lay lines out that way says which one it
         // does rather than returning the layout it already had.
+        //
+        // Every format named past this point is feature-gated, and the
+        // **trimmed build is a different program**: without the gate this
+        // test asked a build compiled with only `markdown,html` for a
+        // plain-text conversion and got `NotCompiled`, which CI catches
+        // and `verify.sh` — which only checks that the trimmed build
+        // *compiles* — does not.
+        #[cfg(all(feature = "rst", feature = "asciidoc"))]
         for (to, refused) in [
             (Format::Rst, Wrap::Auto(72)),
             (Format::Asciidoc, Wrap::None),
@@ -1280,13 +1288,20 @@ mod tests {
         assert_eq!(out(Format::Html, Wrap::Auto(72)).unwrap(), "<p>one two</p>\n");
         // Plain fills too, since 2026-08-24; `preserve` it still refuses,
         // because pandoc's plain writer joins a soft break either way.
+        #[cfg(feature = "text")]
         assert_eq!(out(Format::Plain, Wrap::None).unwrap(), "one two\n");
+        #[cfg(feature = "text")]
         assert_eq!(out(Format::Plain, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "text")]
         assert_eq!(out(Format::Plain, Wrap::Auto(72)).unwrap(), "one two\n");
         // LaTeX does all three too. `preserve` is what it always did.
+        #[cfg(feature = "latex")]
         assert_eq!(out(Format::Latex, Wrap::None).unwrap(), "one two\n");
+        #[cfg(feature = "latex")]
         assert_eq!(out(Format::Latex, Wrap::Preserve).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "latex")]
         assert_eq!(out(Format::Latex, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "latex")]
         assert_eq!(out(Format::Latex, Wrap::Auto(72)).unwrap(), "one two\n");
 
         // `pandoc --wrap=auto -t json` is accepted and does nothing;

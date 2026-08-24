@@ -43,7 +43,7 @@ something you run, and it keeps mattering afterwards:
 | | pandoc | ferrodoc | |
 |---|---|---|---|
 | **10,000 DOCX → markdown** | 374 s | **5.2 s** | **72× faster** |
-| **Binary / dependency on disk** | 152.9 MB | **4.6 MB** | **33× smaller** |
+| **Binary / dependency on disk** | 160.4 MB | **6.9 MB** | **23× smaller** |
 | **Peak memory**, 10 KB document | 115 MB | **5.2 MB** | **22× less** |
 | **Malformed DOCX** (self-referential footnote) | hangs, killed at 60 s | **handled in 12 ms** | — |
 | **Same document written twice** | different bytes | **identical bytes** | — |
@@ -352,7 +352,7 @@ cargo build --release --target wasm32-unknown-unknown \
   `default = ["all"]`, so nothing changes for anyone who does not ask. A
   caller who converts markdown and HTML can leave the other nine out:
   `--no-default-features --features markdown,html` takes the wasm module to
-  **60%** of its gzipped size and the CLI binary to 61% of its own. The
+  **58%** of its gzipped size and the CLI binary to 60% of its own. The
   ratio is the claim and the byte count illustrates it: the CLI is
   reproducible to the byte in one checkout with one toolchain but 0.7%
   smaller on a CI runner, and the wasm module varies by about 0.03% with
