@@ -409,11 +409,18 @@ spec: **445/652**, up from 417, with **twenty-eight gained and none
 lost**, checked example by example against the trees the reader produced
 before. The corpus run went 6/20 to 9/20 and both floors rose.
 
+`implicit_figures`, then three that comrak already parses and whose
+attributes only had to be read — `link_attributes`,
+`inline_code_attributes` and `inline_footnotes` — take the corpus run to
+**10/20**.
+
 What is left is a list of named constructs rather than a decision:
-inline notes `^[…]`, bracketed spans `[text]{#id}`, attributes on an
-inline (`![a](x){#i .c}`), `native_divs`, block scalars in a metadata
-block, and fence info words. None of them is `smart`-sized; each is a
-card.
+bracketed spans `[text]{#id}`, `native_divs`, block scalars in a
+metadata block, a multi-word fence info string, `***x***` nesting the
+other way round from CommonMark, and what pandoc's markdown does with a
+GFM document. None of them is `smart`-sized; each is a card, and the
+last three need the *source* rather than the tree, which is the same
+wall `COMPATIBILITY.md` already records for `[http://x](http://x)`.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number

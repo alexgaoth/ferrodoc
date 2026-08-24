@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **9/20** over every markdown document, **445/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **445/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1346,15 +1346,24 @@ time the list is tightened. All five shapes measured.
 Measured over the CommonMark spec, `445/652` examples now read exactly as
 `pandoc -f markdown` reads them, up from 417 — **twenty-eight gained and
 none lost**, which is what a 652-example denominator is for. Over the
-corpus's own twenty markdown documents it is 9/20, up from 6/20.
+corpus's own twenty markdown documents it is 10/20, up from 6/20.
+
+Three more constructs are read because comrak parses them and the
+attributes it hangs on the node are now picked up: `link_attributes`
+(`[a](b){#i .c k=v}`, and the same after an image), `inline_code_attributes`
+(`` `code`{.rust} ``) and `inline_footnotes` (`a^[the note]`). An
+autolink's `uri`/`email` class shares that field, so it is given only
+where the source wrote no attributes of its own.
 
 **What the remaining twelve corpus documents need**, each named rather
-than described as "the dialect": inline notes `^[…]`, bracketed spans
-`[text]{#id}`, `native_divs` (a `<div>` is a `Div` there and a
-`RawBlock` here — `edge-cases.md`), a block scalar in a metadata block
-(`abstract: |`), fence info words, and the four `.gfm` documents, which
-are read by a dialect that is not GFM and so disagree about task lists,
-tables and footnotes by construction.
+than described as "the dialect": bracketed spans `[text]{#id}`,
+`native_divs` (a `<div>` is a `Div` there and a `RawBlock` here —
+`edge-cases.md`), a block scalar in a metadata block (`abstract: |`), a
+fence info string of several words (pandoc does not read one as a fence
+at all), `***x***` nesting `Strong` outside `Emph` where CommonMark
+nests the other way round, and the four `.gfm` documents, which are read
+by a dialect that is not GFM and disagree about pipes in code spans and
+about how a run of task items is cut into lists.
 
 ### `markdown` means CommonMark, not pandoc's markdown
 

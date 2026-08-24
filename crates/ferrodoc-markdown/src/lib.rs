@@ -184,6 +184,9 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
         options.extension.superscript = true;
         options.extension.subscript = true;
         options.extension.front_matter_delimiter = Some("---".to_owned());
+        options.extension.link_attributes = true;
+        options.extension.inline_code_attributes = true;
+        options.extension.inline_footnotes = true;
         // `smart` is pandoc's `markdown` and nobody else's: probed, `-f
         // gfm` and `-f commonmark` both leave `it's` as it stands. It
         // turns `--` into an en dash, `---` into an em dash, `...` into
@@ -1138,11 +1141,22 @@ fn merge_adjacent_emphasis(tokens: Vec<Inline>) -> Vec<Inline> {
 }
 
 fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialect: Dialect) {
-    match &node.data.borrow().value {
+    let data = node.data.borrow();
+    // `{#id .cls k=v}` after a link, an image or a code span, which only
+    // `pandoc_markdown` turns on. comrak parses it and hangs it here;
+    // the shape is the same one the heading arm reads.
+    let written = || {
+        data.attrs.as_ref().map_or_else(Attr::default, |attrs| Attr {
+            identifier: attrs.id.clone().unwrap_or_default(),
+            classes: attrs.classes.clone(),
+            attributes: attrs.pairs.clone(),
+        })
+    };
+    match &data.value {
         NodeValue::Text(t) => text_tokens(t, out),
         NodeValue::SoftBreak => out.push(Inline::SoftBreak),
         NodeValue::LineBreak => out.push(Inline::LineBreak),
-        NodeValue::Code(c) => out.push(Inline::Code(Box::default(), c.literal.clone())),
+        NodeValue::Code(c) => out.push(Inline::Code(Box::new(written()), c.literal.clone())),
         NodeValue::HtmlInline(h) => {
             out.push(Inline::RawInline(Box::new(Format("html".to_owned())), h.clone()));
         }
@@ -1157,8 +1171,12 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
         )),
         NodeValue::Link(l) => {
             let text = inlines(node.children(), defs, dialect);
+            let attr = match written() {
+                given if given == Attr::default() => autolink_class(dialect, &text, &l.url),
+                given => given,
+            };
             out.push(Inline::Link(
-                Box::new(autolink_class(dialect, &text, &l.url)),
+                Box::new(attr),
                 text,
                 Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
             ));
@@ -1173,7 +1191,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
             });
         }
         NodeValue::Image(l) => out.push(Inline::Image(
-            Box::default(),
+            Box::new(written()),
             inlines(node.children(), defs, dialect),
             Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
         )),
@@ -1661,6 +1679,61 @@ mod tests {
         assert_eq!(
             gfm("![a](s.png)\n"),
             serde_json::json!([{"t": "Para", "c": [image("a")]}])
+        );
+    }
+
+    /// `link_attributes`, `inline_code_attributes` and `inline_footnotes`
+    /// — three more constructs `pandoc -f markdown` reads and plain
+    /// `commonmark` does not. comrak parses each; what is new is reading the
+    /// attributes it hangs on the node.
+    #[test]
+    fn attributes_and_inline_notes_are_read() {
+        assert_eq!(
+            pmd("[a](b){#i .c k=v}\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Link", "c": [
+                ["i", ["c"], [["k", "v"]]], [{"t": "Str", "c": "a"}], ["b", ""]
+            ]}]}])
+        );
+        assert_eq!(
+            pmd("`code`{.rust}\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Code", "c": [["", ["rust"], []], "code"]}
+            ]}])
+        );
+        // An image's identifier still moves to the figure around it.
+        assert_eq!(
+            pmd("![a](x){#i .c}\n"),
+            serde_json::json!([{"t": "Figure", "c": [
+                ["i", [], []],
+                [null, [{"t": "Plain", "c": [{"t": "Str", "c": "a"}]}]],
+                [{"t": "Plain", "c": [{"t": "Image", "c": [
+                    ["", ["c"], []], [{"t": "Str", "c": "a"}], ["x", ""]
+                ]}]}]
+            ]}])
+        );
+        // An autolink still takes its class, which is the same field.
+        assert_eq!(
+            pmd("<http://x.example>\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Link", "c": [
+                ["", ["uri"], []],
+                [{"t": "Str", "c": "http://x.example"}],
+                ["http://x.example", ""]
+            ]}]}])
+        );
+        assert_eq!(
+            pmd("a^[note]\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "a"},
+                {"t": "Note", "c": [{"t": "Para", "c": [{"t": "Str", "c": "note"}]}]}
+            ]}])
+        );
+        // None of it is `gfm`.
+        assert_eq!(
+            gfm("`code`{.rust}\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Code", "c": [["", [], []], "code"]},
+                {"t": "Str", "c": "{.rust}"}
+            ]}])
         );
     }
 
