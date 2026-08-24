@@ -1469,8 +1469,14 @@ fn paragraph<'a>(
     Block::Para(content)
 }
 
-/// Whether this node's own container is a list item or a definition,
-/// where tightness rather than the next line decides `Plain` or `Para`.
+/// Whether this node's own container reads its content as a document of
+/// its own, so the line after the paragraph is not the paragraph's
+/// business.
+///
+/// A list item and a definition settle `Plain` versus `Para` by the
+/// list's tightness. A **footnote definition** ends where the next one
+/// begins, so `[^1]: a` with `[^2]: b` on the line under it closes at a
+/// `Para` — reading the next source line there made it a `Plain`.
 fn in_item<'a>(node: &'a AstNode<'a>) -> bool {
     node.parent().is_some_and(|parent| {
         matches!(
@@ -1479,6 +1485,7 @@ fn in_item<'a>(node: &'a AstNode<'a>) -> bool {
                 | NodeValue::TaskItem(_)
                 | NodeValue::DescriptionTerm
                 | NodeValue::DescriptionDetails
+                | NodeValue::FootnoteDefinition(_)
         )
     })
 }
@@ -2820,6 +2827,13 @@ mod tests {
                 [{"t": "Str", "c": "http://x.example"}],
                 ["http://x.example", ""]
             ]}]}])
+        );
+        // A footnote definition closes where the next one opens, so its
+        // last paragraph is a `Para` — reading the next source line made
+        // it a `Plain`.
+        assert_eq!(
+            pmd("a[^1] b[^2]\n\n[^1]: one\n[^2]: two\n")[0]["c"][1]["c"][0]["t"],
+            "Para"
         );
         assert_eq!(
             pmd("a^[note]\n"),
