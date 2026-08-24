@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **8/20** over every markdown document, **429/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **9/20** over every markdown document, **445/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1335,15 +1335,21 @@ rather than assumed:
   way it leans, and the quotation does not keep the space before it:
   `"b and then "c"` is one quotation of `b and then` and a stray mark.
 
-Measured over the CommonMark spec, `429/652` examples now read exactly as
-`pandoc -f markdown` reads them, up from 417 — **twelve gained and none
-lost**, which is what a 652-example denominator is for. Over the
-corpus's own twenty markdown documents it is 8/20, up from 6/20.
+**`implicit_figures` is read too**: a paragraph that is nothing but one
+image *with alt text* is a `Figure`, and the alt text is its caption. The
+image keeps its classes and attributes and gives up only its identifier,
+which moves to the figure. It happens where a paragraph is built, which
+is why a table cell is unaffected and a tight list item is not: the cell
+never goes through a paragraph, and the item's is already a figure by the
+time the list is tightened. All five shapes measured.
+
+Measured over the CommonMark spec, `445/652` examples now read exactly as
+`pandoc -f markdown` reads them, up from 417 — **twenty-eight gained and
+none lost**, which is what a 652-example denominator is for. Over the
+corpus's own twenty markdown documents it is 9/20, up from 6/20.
 
 **What the remaining twelve corpus documents need**, each named rather
-than described as "the dialect": `implicit_figures` (an image alone in a
-paragraph is a `Figure` there and a `Para` here — `images.md`,
-`notes-and-images.md`), inline notes `^[…]`, bracketed spans
+than described as "the dialect": inline notes `^[…]`, bracketed spans
 `[text]{#id}`, `native_divs` (a `<div>` is a `Div` there and a
 `RawBlock` here — `edge-cases.md`), a block scalar in a metadata block
 (`abstract: |`), fence info words, and the four `.gfm` documents, which

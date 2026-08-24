@@ -212,6 +212,32 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
     Ok(document)
 }
 
+/// `implicit_figures`: a paragraph that is nothing but one image with
+/// alt text is a `Figure`, and the alt text is its caption.
+///
+/// Measured on `pandoc -f markdown -t json`, five shapes. The image
+/// **keeps its classes and its attributes** and gives up only its
+/// identifier, which moves to the figure; an image with **empty** alt is
+/// left a paragraph however it is written; and an image beside anything
+/// else — a word, a second image, even emphasis around it — is not one.
+/// It happens where a paragraph is built, which is why a table cell is
+/// not affected and a tight list item is: the cell never goes through a
+/// paragraph, and the item's has already become a figure by the time the
+/// list is tightened.
+fn implicit_figure(attr: &Attr, alt: &[Inline], target: &Target) -> Block {
+    let figure = Attr { identifier: attr.identifier.clone(), ..Attr::default() };
+    let image = Inline::Image(
+        Box::new(Attr { identifier: String::new(), ..attr.clone() }),
+        alt.to_vec(),
+        Box::new(target.clone()),
+    );
+    Block::Figure(
+        figure,
+        Caption { short: None, blocks: vec![Block::Plain(alt.to_vec())] },
+        vec![Block::Plain(vec![image])],
+    )
+}
+
 /// The class `pandoc -f markdown` gives `<http://x>` and `<a@b.example>`.
 ///
 /// Probed on `see <http://x.example> and <a@b.example>`: `-f markdown`
@@ -570,26 +596,41 @@ fn is_loose<'a>(items: &[&'a AstNode<'a>], src: &Src) -> bool {
         })
 }
 
+/// One paragraph: two shapes that are not one, and the ordinary case.
+fn paragraph<'a>(
+    node: &'a AstNode<'a>,
+    src: &Src,
+    data: &comrak::nodes::Ast,
+    defs: &Notes,
+    dialect: Dialect,
+) -> Block {
+    let content = inlines(node.children(), defs, dialect);
+    // Comrak quirk: a paragraph of link reference definitions whose
+    // last line is a dash-run comes out as a literal `---` paragraph;
+    // pandoc consumes the definitions and reads the dashes as a
+    // thematic break. Detect via the paragraph's first source line
+    // (a reference definition starts with `[`), which also excludes
+    // lookalikes such as escaped or entity-encoded dashes.
+    if let [Inline::Str(dashes)] = content.as_slice()
+        && dashes.len() >= 3
+        && dashes.bytes().all(|byte| byte == b'-')
+        && first_nonmarker_char(src.line(data.sourcepos.start.line)) == Some('[')
+    {
+        return Block::HorizontalRule;
+    }
+    if dialect == Dialect::Pandoc
+        && let [Inline::Image(attr, alt, target)] = content.as_slice()
+        && !alt.is_empty()
+    {
+        return implicit_figure(attr, alt, target);
+    }
+    Block::Para(content)
+}
+
 fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dialect: Dialect) -> Option<Block> {
     let data = node.data.borrow();
     match &data.value {
-        NodeValue::Paragraph => {
-            let content = inlines(node.children(), defs, dialect);
-            // Comrak quirk: a paragraph of link reference definitions whose
-            // last line is a dash-run comes out as a literal `---` paragraph;
-            // pandoc consumes the definitions and reads the dashes as a
-            // thematic break. Detect via the paragraph's first source line
-            // (a reference definition starts with `[`), which also excludes
-            // lookalikes such as escaped or entity-encoded dashes.
-            if let [Inline::Str(s)] = content.as_slice()
-                && s.len() >= 3
-                && s.bytes().all(|b| b == b'-')
-                && first_nonmarker_char(src.line(data.sourcepos.start.line)) == Some('[')
-            {
-                return Some(Block::HorizontalRule);
-            }
-            Some(Block::Para(content))
-        }
+        NodeValue::Paragraph => Some(paragraph(node, src, &data, defs, dialect)),
         NodeValue::Heading(h) => Some(Block::Header(
             i64::from(h.level),
             // `{#id .cls key=val}` off the end of the heading line, which
@@ -1577,6 +1618,49 @@ mod tests {
         assert_eq!(
             doc("don't a--b\n"),
             serde_json::json!([{"t": "Para", "c": [str_("don't"), space, str_("a--b")]}])
+        );
+    }
+
+    /// `implicit_figures`, five shapes off `pandoc -f markdown -t json`.
+    #[test]
+    fn an_image_alone_in_a_paragraph_is_a_figure() {
+        let image = |alt: &str| serde_json::json!({"t": "Image", "c": [
+            ["", [], []], [{"t": "Str", "c": alt}], ["s.png", ""]
+        ]});
+        let figure = |alt: &str| serde_json::json!({"t": "Figure", "c": [
+            ["", [], []],
+            [null, [{"t": "Plain", "c": [{"t": "Str", "c": alt}]}]],
+            [{"t": "Plain", "c": [image(alt)]}]
+        ]});
+
+        assert_eq!(pmd("![a](s.png)\n"), serde_json::json!([figure("a")]));
+        // A tight list item's paragraph has already become a figure by
+        // the time the list is tightened.
+        assert_eq!(
+            pmd("- ![a](s.png)\n"),
+            serde_json::json!([{"t": "BulletList", "c": [[figure("a")]]}])
+        );
+        // Empty alt text is not a caption, so it stays a paragraph.
+        assert_eq!(
+            pmd("![](s.png)\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Image", "c": [["", [], []], [], ["s.png", ""]]}
+            ]}])
+        );
+        // An image beside anything else is not one either, emphasis
+        // around it included.
+        assert_eq!(
+            pmd("![a](s.png) ![b](s.png)\n"),
+            serde_json::json!([{"t": "Para", "c": [image("a"), {"t": "Space"}, image("b")]}])
+        );
+        assert_eq!(
+            pmd("**![a](s.png)**\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Strong", "c": [image("a")]}]}])
+        );
+        // Not `gfm`, and not `commonmark`.
+        assert_eq!(
+            gfm("![a](s.png)\n"),
+            serde_json::json!([{"t": "Para", "c": [image("a")]}])
         );
     }
 

@@ -399,18 +399,21 @@ stopped the other nineteen being measured at all.
 is read now: dashes, the ellipsis, the apostrophe, and — the half comrak
 does not do — a *pair* of quotes as a `Quoted` element.
 `COMPATIBILITY.md` carries the three pairing rules and the probe behind
-each.
+each. `implicit_figures` followed it, which is five more measured shapes
+and the second-largest name on the list.
 
 **Twenty documents cannot say how far a dialect is**, which is the corpus
 blind spot in its usual costume, so `diff-pandoc-md` now reads a
 `spec.json` as well and `verify.sh` gates the reader over the CommonMark
-spec: **429/652**, up from 417, with **twelve gained and none lost**. The
-corpus run went 6/20 to 8/20 and both floors rose.
+spec: **445/652**, up from 417, with **twenty-eight gained and none
+lost**, checked example by example against the trees the reader produced
+before. The corpus run went 6/20 to 9/20 and both floors rose.
 
 What is left is a list of named constructs rather than a decision:
-`implicit_figures`, inline notes `^[…]`, bracketed spans `[text]{#id}`,
-`native_divs`, block scalars in a metadata block, and fence info words.
-None of them is `smart`-sized; each is a card.
+inline notes `^[…]`, bracketed spans `[text]{#id}`, attributes on an
+inline (`![a](x){#i .c}`), `native_divs`, block scalars in a metadata
+block, and fence info words. None of them is `smart`-sized; each is a
+card.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number
