@@ -914,7 +914,7 @@ directly without asking its reader to survive anything.
 | writer | byte-identical to pandoc |
 |---|---|
 | `html` | **12/12** |
-| `latex` | 7/12 |
+| `latex` | 11/12 |
 | `plain` | 7/12 |
 | `gfm` | 6/12 |
 | `rst` | **12/12** |

@@ -3,7 +3,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage{graphicx}
 \usepackage{longtable,booktabs}
-\providecommand{\sout}[1]{{\leavevmode\setbox0=\hbox{#1}%
+\providecommand{\st}[1]{{\leavevmode\setbox0=\hbox{#1}%
   \rlap{\rule[0.5ex]{\wd0}{0.4pt}}\box0}}
 \providecommand{\tightlist}{%
   \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
@@ -41,17 +41,20 @@ A conversion you cannot inspect is a conversion you cannot trust.
 
 \subsection{Rollout schedule}\label{rollout-schedule}
 
-\begin{longtable}[]{@{}llll@{}}
-\toprule
-Phase & Owner & Starts & Status \tabularnewline
-\midrule
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}llrl@{}}
+\toprule\noalign{}
+Phase & Owner & Starts & Status \\
+\midrule\noalign{}
 \endhead
-Inventory & Priya & 2026-01-06 & done \tabularnewline
-Pilot & Sam & 2026-02-17 & in progress \tabularnewline
-Migration & Ops & 2026-04-01 & not started \tabularnewline
-Decommission & Ops & 2026-09-15 & not started \tabularnewline
-\bottomrule
+\bottomrule\noalign{}
+\endlastfoot
+Inventory & Priya & 2026-01-06 & done \\
+Pilot & Sam & 2026-02-17 & in progress \\
+Migration & Ops & 2026-04-01 & not started \\
+Decommission & Ops & 2026-09-15 & not started \\
 \end{longtable}
+}
 
 \subsection{What each team has to do}\label{what-each-team-has-to-do}
 
@@ -78,12 +81,12 @@ Decommission & Ops & 2026-09-15 & not started \tabularnewline
 
 \begin{itemize}
 \tightlist
-\item
-  ☒ Inventory complete
-\item
-  ☐ Pilot signed off
-\item
-  ☐ Rollback plan written
+\item[$\boxtimes$]
+  Inventory complete
+\item[$\square$]
+  Pilot signed off
+\item[$\square$]
+  Rollback plan written
 \end{itemize}
 
 \subsection{Running a conversion}\label{running-a-conversion}
@@ -117,8 +120,8 @@ literal backtick: \texttt{\textasciigrave{}}.
 Text with entities \& symbols --- an em dash, "curly quotes", an
 ellipsis\ldots, a non-breaking~space, and unicode: café, naïve, Ω, 日本語.
 
-\sout{Struck-through text} and text with a footnote.\footnote{Footnote bodies can contain \textbf{formatting} and a
-\href{https://example.com}{link}.}
+\st{Struck-through text} and text with a footnote.\footnote{Footnote bodies can contain \textbf{formatting} and a
+  \href{https://example.com}{link}.}
 
 Five inlines no writer test used to reach through this file: underlined
 text, small caps, a

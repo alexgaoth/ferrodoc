@@ -86,11 +86,11 @@ const PREAMBLE: &str = concat!(
     "\\usepackage[utf8]{inputenc}\n",
     "\\usepackage{graphicx}\n",
     "\\usepackage{longtable,booktabs}\n",
-    // `\sout` is `ulem`'s, and `ulem` is not in a base TeX. The name is
-    // kept because it is the one a fragment pasted into someone else's
-    // document will already have; `\providecommand` yields to theirs.
-    // Box the argument, overlay a rule its width, then print it.
-    "\\providecommand{\\sout}[1]{{\\leavevmode\\setbox0=\\hbox{#1}%\n",
+    // `\st` is `soul`'s, and `soul` is not in a base TeX. The name is
+    // pandoc's, so a fragment pasted into a pandoc-produced document
+    // already has it; `\providecommand` yields to theirs. Box the
+    // argument, overlay a rule its width, then print it.
+    "\\providecommand{\\st}[1]{{\\leavevmode\\setbox0=\\hbox{#1}%\n",
     "  \\rlap{\\rule[0.5ex]{\\wd0}{0.4pt}}\\box0}}\n",
     // `\tightlist` is pandoc's, and its reader needs it to tell a tight
     // list from a loose one: without it every `Plain` item comes back as
@@ -220,13 +220,38 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
                 out.push('\n');
                 return;
             };
-            let _ = write!(out, "\\{macro_name}{{");
+            // A **short title** for the running head, where the heading
+            // holds something that cannot go in one. Pandoc's rule,
+            // probed: a `Note` or an `Image` earns the optional argument
+            // and nothing else does — and the short title drops both,
+            // where `\texorpdfstring`'s plain half keeps an image's alt
+            // text. The two are not the same string.
+            if fragile(list) {
+                // The short title is **rendered**, not stringified:
+                // `\texttt{code} and \emph{emphasis}` keeps its markup
+                // there, and only the note or picture is left out.
+                let kept: Vec<Inline> = list
+                    .iter()
+                    .filter(|inline| !matches!(inline, Inline::Note(_) | Inline::Image(..)))
+                    .cloned()
+                    .collect();
+                let mut short = String::new();
+                inlines(&kept, &mut short);
+                let _ = write!(out, "\\{macro_name}[{short}]");
+            } else {
+                let _ = write!(out, "\\{macro_name}");
+            }
+            out.push('{');
             // `\texorpdfstring{typeset}{bookmark}` when the two differ.
             // A PDF bookmark is plain text: `\emph` in one stops hyperref
             // with "Token not allowed in a PDF string". Pandoc's own test
             // is exactly this — the heading rendered, against the heading
             // stringified and escaped — so a heading of nothing but words
             // stays a bare argument.
+            // A heading is a moving argument, so a fragile command in it
+            // needs `\protect` — `\pandocbounded` is one, and without the
+            // guard `hyperref` stops on the bookmark.
+            let rendered = rendered.replace("\\pandocbounded{", "\\protect\\pandocbounded{");
             let plain = escape(&stringify(list));
             if plain == rendered {
                 out.push_str(&rendered);
@@ -239,7 +264,7 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
             // because pandoc derives it from the text — but nothing in the
             // document can point at it.
             if !attr.identifier.is_empty() {
-                let _ = write!(out, "\\label{{{}}}", escape(&attr.identifier));
+                let _ = write!(out, "\\label{{{}}}", label(&attr.identifier));
             }
             out.push('\n');
         }
@@ -293,9 +318,13 @@ fn tightlist(items: &[Vec<Block>], out: &mut String) {
 /// A blank line stays empty: indenting it would put trailing whitespace
 /// where pandoc has none, and the bytes are the test.
 fn item_to(item: &[Block], depth: usize, out: &mut String) {
-    out.push_str("\\item\n");
+    // A task item's box reaches this writer as the `☐`/`☒` the GFM reader
+    // makes of it, and LaTeX's is the optional argument of `\item`.
+    // Written as text it set as a missing glyph in most fonts.
+    let (label, item) = task_box(item);
+    let _ = writeln!(out, "\\item{label}");
     let mut text = String::new();
-    blocks(item, depth, &mut text);
+    blocks(&item, depth, &mut text);
     // A `verbatim` environment is flush left however deep it sits: its
     // content is literal, so two spaces of item indentation would be two
     // spaces of code. Pandoc renders it with `flush`, which is the same
@@ -351,6 +380,29 @@ fn ordered_list_to(
     out.push_str("\\end{enumerate}\n");
 }
 
+/// The `\item` label a task box calls for, and the item with the box
+/// taken out of it. Empty label and the item unchanged when there is no
+/// box.
+fn task_box(item: &[Block]) -> (String, Vec<Block>) {
+    let Some(Block::Plain(list) | Block::Para(list)) = item.first() else {
+        return (String::new(), item.to_vec());
+    };
+    let Some((Inline::Str(mark), [Inline::Space, rest @ ..])) = list.split_first() else {
+        return (String::new(), item.to_vec());
+    };
+    let label = match mark.as_str() {
+        "\u{2610}" => "[$\\square$]",
+        "\u{2612}" => "[$\\boxtimes$]",
+        _ => return (String::new(), item.to_vec()),
+    };
+    let mut stripped = item.to_vec();
+    stripped[0] = match &item[0] {
+        Block::Para(_) => Block::Para(rest.to_vec()),
+        _ => Block::Plain(rest.to_vec()),
+    };
+    (label.to_owned(), stripped)
+}
+
 /// A nesting depth as the lowercase roman numeral LaTeX spells its
 /// counters with: `enumi`, `enumii`, … Pandoc keeps going past `enumiv`,
 /// which LaTeX does not define — following it is the byte-identical
@@ -396,18 +448,49 @@ fn enumerate_style(style: ListNumberStyle, delim: ListNumberDelim, name: &str) -
 
 fn table_to(table: &Table, out: &mut String) {
     let columns = table.colspecs.len().max(1);
-    let spec = "l".repeat(columns);
+    let spec: String = if table.colspecs.is_empty() {
+        "l".repeat(columns)
+    } else {
+        table
+            .colspecs
+            .iter()
+            .map(|colspec| match colspec.alignment {
+                ferrodoc_ast::Alignment::AlignRight => 'r',
+                ferrodoc_ast::Alignment::AlignCenter => 'c',
+                _ => 'l',
+            })
+            .collect()
+    };
+    // A `longtable` with no caption still advances LaTeX's table counter,
+    // so a document of uncaptioned tables numbers figures that are not
+    // there. Pandoc wraps it in a group that redefines `\LTcaptype`, and
+    // the comment is part of the bytes.
+    let captioned = !table.caption.blocks.is_empty();
+    if !captioned {
+        out.push_str("{\\def\\LTcaptype{none} % do not increment counter\n");
+    }
     // `longtable` rather than `tabular`: a table longer than a page is
     // ordinary in a converted document, and `tabular` silently runs off
     // the bottom of it.
     let _ = writeln!(out, "\\begin{{longtable}}[]{{@{{}}{spec}@{{}}}}");
-    out.push_str("\\toprule\n");
+    if captioned {
+        out.push_str("\\caption{");
+        caption_text(&table.caption, out);
+        out.push_str("}\\tabularnewline\n");
+    }
+    // **The head and the foot are declared before the body.** `\endhead`
+    // is what a `longtable` repeats at the top of each page and
+    // `\endlastfoot` at the bottom of the last, so the rules come first
+    // and the body rows follow. Written the other way round the rules are
+    // ordinary rows and the table has no repeating head at all.
+    out.push_str("\\toprule\\noalign{}\n");
     for row in &table.head.rows {
         row_to(row, columns, out);
     }
     if !table.head.rows.is_empty() {
-        out.push_str("\\midrule\n\\endhead\n");
+        out.push_str("\\midrule\\noalign{}\n");
     }
+    out.push_str("\\endhead\n\\bottomrule\\noalign{}\n\\endlastfoot\n");
     for body in &table.bodies {
         for row in body.head.iter().chain(&body.body) {
             row_to(row, columns, out);
@@ -416,19 +499,19 @@ fn table_to(table: &Table, out: &mut String) {
     for row in &table.foot.rows {
         row_to(row, columns, out);
     }
-    out.push_str("\\bottomrule\n");
-    if !table.caption.blocks.is_empty() {
-        out.push_str("\\caption{");
-        caption_text(&table.caption, out);
-        out.push_str("}\\tabularnewline\n");
-    }
     out.push_str("\\end{longtable}\n");
+    if !captioned {
+        out.push_str("}\n");
+    }
 }
 
 fn row_to(row: &Row, columns: usize, out: &mut String) {
     let mut cells: Vec<String> = row.cells.iter().map(cell_text).collect();
     cells.resize(columns, String::new());
-    let _ = writeln!(out, "{} \\tabularnewline", cells.join(" & "));
+    // `\\` and not `\tabularnewline`: both end a row, and pandoc writes
+    // the short one. The row is trimmed first, so an empty cell at either
+    // end leaves one space before the `\\` rather than two.
+    let _ = writeln!(out, "{} \\\\", cells.join(" & ").trim());
 }
 
 fn cell_text(cell: &Cell) -> String {
@@ -494,7 +577,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
         Inline::Underline(inner) => wrap("underline", inner, out),
         // `ulem`'s name, but the preamble defines it: LaTeX has no
         // strikeout of its own and `ulem` is not in a base TeX.
-        Inline::Strikeout(inner) => wrap("sout", inner, out),
+        Inline::Strikeout(inner) => wrap("st", inner, out),
         Inline::Superscript(inner) => wrap("textsuperscript", inner, out),
         Inline::Subscript(inner) => wrap("textsubscript", inner, out),
         Inline::SmallCaps(inner) => wrap("textsc", inner, out),
@@ -572,7 +655,18 @@ fn inline_to(inline: &Inline, out: &mut String) {
             out.push_str("\\footnote{");
             let mut text = String::new();
             blocks(blocks_in_note, 0, &mut text);
-            out.push_str(text.trim());
+            // Every line but the first is indented two, the way an
+            // `\item`'s content is: a footnote of more than one block is
+            // laid out as a block, not run together.
+            for (index, line) in text.trim().lines().enumerate() {
+                if index > 0 {
+                    out.push('\n');
+                    if !line.is_empty() {
+                        out.push_str("  ");
+                    }
+                }
+                out.push_str(line);
+            }
             out.push('}');
         }
     }
@@ -609,6 +703,46 @@ fn stringify_into(inlines: &[Inline], out: &mut String) {
             | Inline::Image(_, inner, _) => stringify_into(inner, out),
         }
     }
+}
+
+/// An identifier as a LaTeX label.
+///
+/// **Not [`escape`]:** a label is a name rather than text, so pandoc
+/// keeps the ASCII alphanumerics and `-_:.` and spells everything else
+/// `ux` plus its codepoint in hex. Escaping it as text turned
+/// `punctuation--symbols` into `punctuation-\/-symbols` — the ligature
+/// break — and left `ünïcode` as itself where pandoc writes `uxfcnuxef`.
+fn label(identifier: &str) -> String {
+    let mut out = String::with_capacity(identifier.len());
+    for ch in identifier.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':' | '.') {
+            out.push(ch);
+        } else {
+            let _ = write!(out, "ux{:x}", ch as u32);
+        }
+    }
+    out
+}
+
+/// Whether the heading holds something a running head cannot: a footnote
+/// or a picture. Either earns the optional short-title argument, and
+/// nothing else does — probed against the pinned binary.
+fn fragile(inlines: &[Inline]) -> bool {
+    inlines.iter().any(|inline| match inline {
+        Inline::Note(_) | Inline::Image(..) => true,
+        Inline::Emph(inner)
+        | Inline::Strong(inner)
+        | Inline::Strikeout(inner)
+        | Inline::Superscript(inner)
+        | Inline::Subscript(inner)
+        | Inline::SmallCaps(inner)
+        | Inline::Underline(inner)
+        | Inline::Span(_, inner)
+        | Inline::Quoted(_, inner)
+        | Inline::Cite(_, inner)
+        | Inline::Link(_, inner, _) => fragile(inner),
+        _ => false,
+    })
 }
 
 /// Escape the characters LaTeX gives a meaning to.
@@ -802,6 +936,11 @@ fn escape_url(url: &str) -> String {
     let mut out = String::with_capacity(url.len());
     for ch in url.chars() {
         match ch {
+            // Not legal in a URL at all: pandoc percent-encodes it, and
+            // the `%` that produces is then escaped like any other.
+            '|' | ' ' | '<' | '>' | '"' | '^' | '`' => {
+                let _ = write!(out, "\\%{:02X}", ch as u32);
+            }
             '%' | '#' | '{' | '}' => {
                 out.push('\\');
                 out.push(ch);
