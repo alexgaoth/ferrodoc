@@ -694,6 +694,52 @@ holds its floor.
 
 **Not this version:** `--listings`, KaTeX/MathJax/MathML output modes.
 
+#### This is a decision, not a card — measured 2026-08-24
+
+The wrapper is easy and the tokenizer is not, and the exit test hides
+which is which. **Only three of the spec's 652 examples hold a fence in a
+language pandoc knows** — two `ruby`, one `c`, each three lines long — so
+a tokenizer built to pass `diff-html` would be fitted to nine lines of
+code. That is the corpus blind spot in its purest form, and this
+repository has paid for it eight times.
+
+What is *not* in doubt, because it was read off the binary tag by tag:
+
+- the wrapper is `<div class="sourceCode" id="cbN">`, `<pre class="sourceCode
+  LANG-as-written">`, `<code class="sourceCode CANONICAL-LANG">`, one
+  `<span id="cbN-M"><a href="#cbN-M" aria-hidden="true" tabindex="-1"></a>`
+  per line. **`cbN` counts every code block**, highlighted or not, and an
+  explicit `{#id}` replaces it. `.numberLines` adds `numberSource` to the
+  `<pre>` and drops `aria-hidden`/`tabindex` from the anchors;
+- **a language pandoc does not know degrades to exactly what this writes
+  today** — `<pre class="aaa"><code>` — so nothing regresses for the
+  languages left out;
+- the token stream is skylighting's, and skylighting is KDE's syntax XML.
+  In C: `int`→`dt`, `struct`→`kw`, `if`/`return`→`cf`, `0x1f`→`bn`,
+  `1.5e3`→`fl`, the `f` of `1.5f`→`bu`, `#include `→`pp` with `<stdio.h>`
+  →`im`, escape runs inside a string→`sc`, and **adjacent operator
+  characters merge into one span** (`);`, `};`, `(;;)`). `#if 0` is all
+  `pp` while `#define X 1` splits off a `dv`. Those are not rules anyone
+  derives; they are one XML file's state machine.
+
+**So there are two options and they cost differently.**
+
+**(a) Vendor the syntax definitions** — KDE's XML, the same input
+skylighting reads — and write an interpreter for the subset those files
+use. Faithful by construction rather than by probing, and it is what
+pandoc does. Costs: a licence question (the templates precedent says
+vendoring is acceptable *with the notice beside it*), the interpreter,
+and the bundle size the card already warns about.
+
+**(b) Hand-written approximations per language.** Smaller and quicker, and
+**it will differ from pandoc in ways no corpus written here can honestly
+bound** — the failure mode is plausible-looking highlighting that is
+wrong, which is the worst kind this project has.
+
+The measurement says (a) or nothing. Either way the exit test needs a
+corpus of real code per language, not the spec's nine lines — otherwise
+the number means only that the fixtures were chosen to pass.
+
 ### 0.8 — The resource contract
 
 **Claim:** every surface enforces the same limits and reports the same typed

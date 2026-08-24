@@ -632,6 +632,22 @@ the `<![CDATA[…]]>` and `<style>` raw-text boundaries are a tokenizer
 disagreement on input that is merely unusual, and `<a/>` self-closing syntax
 sends the two parsers down different recovery paths.
 
+**An EPUB title page is dropped whole**, element and content, wherever
+`epub:type` lists `titlepage` — the value decides rather than the element,
+`titlepage` anywhere in the list counts, and the value keeps its case. A
+title page is the book's metadata set as a page and pandoc declines to read
+the title twice.
+
+**The wider count is `scripts/sweep-epub-xhtml.sh`, and it is 46 of 128.**
+`diff-html-read` walks eight `corpus/*.html`; the corpus EPUBs hold 128
+XHTML files written by pandoc's own writer, which is a far wider
+vocabulary. That sweep found the title-page rule and stood at 77 before it.
+What is left in it is **two named families and nothing else**: 34
+`nav.xhtml` on `<a … />`, which is XHTML — where that syntax closes the
+element — read as HTML, where it does not; and 11 chapters on the
+`doc-noteref` divergence this reader keeps on purpose, because resolving a
+note eagerly costs `diff-epub` two documents.
+
 Four deliberate divergences, all chosen on the same principle — *match
 pandoc wherever pandoc has a describable rule on well-formed input; diverge
 only where matching would mean reproducing a parse failure*:
