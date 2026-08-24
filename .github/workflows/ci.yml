@@ -313,7 +313,10 @@ jobs:
             #   quote, and docutils allows a transition nowhere but at the
             #   top level.
             # Anything else is a failure.
-            pandoc "$doc" -f commonmark -t rst --wrap=preserve > pandoc.rst
+            # Both at their defaults: `--wrap=auto` at 72 on either side
+            # since 2026-08-24, so naming a mode here would compare
+            # ferrodoc's default with something nobody asks for.
+            pandoc "$doc" -f commonmark -t rst > pandoc.rst
             if diff -q "$name.rst" pandoc.rst >/dev/null; then
               echo "sphinx refused $name; pandoc writes the same bytes, so this is the format"
             else
@@ -340,7 +343,7 @@ jobs:
             # asciidoctor says "section title out of sequence". Pandoc's
             # AsciiDoc for it is byte-identical to this writer's, which
             # is what makes it the document's limit rather than ours.
-            pandoc "$doc" -f commonmark -t asciidoc --wrap=preserve > pandoc.adoc
+            pandoc "$doc" -f commonmark -t asciidoc > pandoc.adoc
             if diff -q "$name.adoc" pandoc.adoc >/dev/null; then
               echo "asciidoctor refused $name; pandoc writes the same bytes, so this is the format"
             else
