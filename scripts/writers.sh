@@ -69,12 +69,12 @@ floor_for() {
         plain)    echo 12 ;;
         latex)    echo 11 ;;
         asciidoc) echo 11 ;;
-        gfm)      echo 6 ;;
+        gfm)      echo 7 ;;
         # `-t markdown` here is CommonMark and there is pandoc's own
         # dialect, so this row measures the dialect gap on the writer
         # side. It moves when `pandoc_markdown` does, not when the writer
         # does — see ROADMAP card D4.4.
-        markdown) echo 2 ;;
+        markdown) echo 3 ;;
         *)        echo 0 ;;
     esac
 }

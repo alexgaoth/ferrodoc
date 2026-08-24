@@ -102,6 +102,10 @@ fn render_with(doc: &Pandoc, gfm: bool, columns: Option<usize>) -> String {
 struct Writer {
     /// Footnote bodies, collected as they are referenced.
     notes: Vec<String>,
+    /// Whether the next block written is the first of a list item that
+    /// holds more than one block. Four spaces there are the marker's own
+    /// column, not a code fence.
+    item_start: bool,
     /// The bullet the next list uses. Two adjacent bullet lists would
     /// merge into one on re-reading; alternating the character splits
     /// them and, unlike a separator comment, adds no block.
@@ -125,6 +129,16 @@ struct Writer {
 /// outright. Every one is either broken at or turned back into a space
 /// before the string leaves [`push_wrapped`].
 const BREAK: char = '\0';
+
+/// Where in the document a block sits, for the two spellings that depend
+/// on it. An indented code block is four spaces from the *line*: after a
+/// list or a quote those four continue the container, and at the start of
+/// a list item they are the marker's own column.
+#[derive(Clone, Copy, Default)]
+struct Position {
+    after_container: bool,
+    first_in_item: bool,
+}
 
 impl Writer {
     /// Write blocks separated by blank lines, each line carrying `prefix`
@@ -160,9 +174,15 @@ impl Writer {
                     _ => {}
                 }
             }
-            let after_list =
-                matches!(previous, Some(Block::BulletList(_) | Block::OrderedList(..)));
-            self.block(out, block, prefix, after_list);
+            let at = Position {
+                after_container: matches!(
+                    previous,
+                    Some(Block::BulletList(_) | Block::OrderedList(..) | Block::BlockQuote(_))
+                ),
+                first_in_item: self.item_start,
+            };
+            self.item_start = false;
+            self.block(out, block, prefix, at);
             previous = Some(block);
         }
     }
@@ -204,16 +224,15 @@ impl Writer {
     /// indented block cannot hold a blank first line or say whether its
     /// content ended with a newline.
     fn code_block(
-        &mut self,
         out: &mut String,
         attr: &ferrodoc_ast::Attr,
         text: &str,
         prefix: &str,
-        after_list: bool,
+        at: Position,
     ) {
         let indentable = attr == &ferrodoc_ast::Attr::default()
-            && self.depth == 0
-            && !after_list
+            && !at.after_container
+            && !at.first_in_item
             && !text.is_empty()
             && !text.starts_with('\n')
             && !text.ends_with('\n');
@@ -249,7 +268,7 @@ impl Writer {
     
     }
 
-    fn block(&mut self, out: &mut String, block: &Block, prefix: &str, after_list: bool) {
+    fn block(&mut self, out: &mut String, block: &Block, prefix: &str, at: Position) {
         match block {
             Block::Plain(inlines) | Block::Para(inlines) => {
                 let text = self.inlines(inlines);
@@ -259,7 +278,7 @@ impl Writer {
                 let text = self.inlines(inlines);
                 header(out, prefix, *level, &text);
             }
-            Block::CodeBlock(attr, text) => self.code_block(out, attr, text, prefix, after_list),
+            Block::CodeBlock(attr, text) => Self::code_block(out, attr, text, prefix, at),
             Block::BlockQuote(blocks) => {
                 if blocks.is_empty() {
                     // A quote with no content is still a quote; writing
@@ -460,7 +479,7 @@ impl Writer {
             let mut text = String::new();
             for block in &cell.blocks {
                 let mut piece = String::new();
-                self.block(&mut piece, block, "", false);
+                self.block(&mut piece, block, "", Position::default());
                 let piece = piece.trim_end_matches('\n');
                 if !text.is_empty() && !piece.is_empty() {
                     text.push(' ');
@@ -558,13 +577,34 @@ impl Writer {
             let inner = if self.columns.is_some() { indent.as_str() } else { "" };
             let mut body = String::new();
             self.depth += 1;
+            // An item of **one** block has nothing after it to be
+            // confused with, so a code block there can be indented; an
+            // item with more blocks cannot, because the content after the
+            // marker's own column reads back a space wider than it was.
+            // `CommonMark` examples 273, 274 and 324 are the documents.
+            self.item_start = item.len() > 1;
             if tight {
+                let mut previous: Option<&Block> = None;
                 for block in item {
-                    self.block(&mut body, block, inner, false);
+                    let at = Position {
+                        after_container: matches!(
+                            previous,
+                            Some(
+                                Block::BulletList(_)
+                                    | Block::OrderedList(..)
+                                    | Block::BlockQuote(_)
+                            )
+                        ),
+                        first_in_item: self.item_start,
+                    };
+                    self.item_start = false;
+                    self.block(&mut body, block, inner, at);
+                    previous = Some(block);
                 }
             } else {
                 self.blocks(&mut body, item, inner);
             }
+            self.item_start = false;
             self.depth -= 1;
             let mut lines = body.trim_end_matches('\n').split('\n');
             if let Some(first) = lines.next() {

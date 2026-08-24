@@ -918,8 +918,8 @@ directly without asking its reader to survive anything.
 | `plain` | **12/12** | 12 |
 | `latex` | 11/12 | 11 |
 | `asciidoc` | 11/12 | 11 |
-| `gfm` | 6/12 | 6 |
-| `markdown` | 2/12 | 2 |
+| `gfm` | 7/12 | 7 |
+| `markdown` | 3/12 | 3 |
 
 Twelve documents: the eight in `corpus/` read as CommonMark, and the four
 in `corpus/gfm/` read as GFM. **The second four are there because the
