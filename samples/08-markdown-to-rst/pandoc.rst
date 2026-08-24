@@ -2,15 +2,16 @@ Field Handbook
 ==============
 
 A realistic document, written the way people actually write them — and
-deliberately including the awkward parts, because a sample that only shows
-easy cases tells you nothing.
+deliberately including the awkward parts, because a sample that only
+shows easy cases tells you nothing.
 
 Why this exists
 ---------------
 
-Teams hold documents in **Word**, *LibreOffice*, EPUB and markdown at the
-same time. Getting between those formats is supposed to be boring. When it
-is not boring, it is usually because something was silently dropped.
+Teams hold documents in **Word**, *LibreOffice*, EPUB and markdown at
+the same time. Getting between those formats is supposed to be boring.
+When it is not boring, it is usually because something was silently
+dropped.
 
    A conversion you cannot inspect is a conversion you cannot trust.
 
@@ -73,25 +74,23 @@ An indented code block, which is a different construct:
 Awkward cases, on purpose
 -------------------------
 
-Inline code with special characters: ``a | b``, ``<div>``, ``--flag``, and a
-literal backtick: :literal:`\``.
+Inline code with special characters: ``a | b``, ``<div>``, ``--flag``,
+and a literal backtick: :literal:`\``.
 
-Text with entities & symbols — an em dash, "curly quotes", an
-ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.
+Text with entities & symbols — an em dash, "curly quotes", an ellipsis…,
+a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
 [STRIKEOUT:Struck-through text] and text with a footnote. [1]_
 
 Five inlines no writer test used to reach through this file: underlined
-text, small caps, a
-span carrying an id and a class, and
-H2O beside E=mc2. They are here because ``docs/gates.md``
-claims ``--samples`` keeps them found, and until this paragraph existed no
-sample document contained one — the claim was wider than the corpus behind
-it, which is the defect this file is supposed to catch.
+text, small caps, a span carrying an id and a class, and H2O beside
+E=mc2. They are here because ``docs/gates.md`` claims ``--samples``
+keeps them found, and until this paragraph existed no sample document
+contained one — the claim was wider than the corpus behind it, which is
+the defect this file is supposed to catch.
 
-A link with a title: `the spec <https://example.com/spec>`__.
-A bare autolink: https://example.com/status. An email:
-ops@example.com.
+A link with a title: `the spec <https://example.com/spec>`__. A bare
+autolink: https://example.com/status. An email: ops@example.com.
 
 An image: |the logo|
 

@@ -1,5 +1,5 @@
---- samples/03-odt-to-markdown/pandoc.md	2026-08-23 16:10:59.830860759 -0700
-+++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-23 16:10:59.804860771 -0700
+--- samples/03-odt-to-markdown/pandoc.md	2026-08-23 20:52:16.252984123 -0700
++++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-23 20:52:16.219984095 -0700
 @@ -13,7 +13,7 @@
  
  ## Definitions
@@ -9,11 +9,3 @@
  
      1.  The first party
      2.  The second party
-@@ -22,6 +22,6 @@
- 
- fixed width
- 
--indented line
-+  indented line
- 
- Signed on the date first written above.

@@ -1,6 +1,7 @@
 # Quarterly Report
 
-Revenue grew **18%** against a *flat* market, and the pipeline carried into the next quarter.
+Revenue grew **18%** against a *flat* market, and the pipeline carried
+into the next quarter.
 
 ## Findings
 

@@ -1,15 +1,15 @@
 # Field Handbook
 
-A realistic document, written the way people actually write them —
-and deliberately including the awkward parts, because a sample that only
+A realistic document, written the way people actually write them — and
+deliberately including the awkward parts, because a sample that only
 shows easy cases tells you nothing.
 
 ## Why this exists
 
-Teams hold documents in **Word**, *LibreOffice*,
-EPUB and markdown at the same time. Getting between those formats is
-supposed to be boring. When it is not boring, it is usually because
-something was silently dropped.
+Teams hold documents in **Word**, *LibreOffice*, EPUB and markdown at
+the same time. Getting between those formats is supposed to be boring.
+When it is not boring, it is usually because something was silently
+dropped.
 
 > A conversion you cannot inspect is a conversion you cannot trust.
 >
@@ -28,16 +28,13 @@ something was silently dropped.
 
 1.  Export everything from the old system.
 2.  Convert it:
-    - `.docx` and `.odt` to markdown for the
-      index
-    - markdown back to `.docx` for anyone who needs to edit in
-      Word
+    - `.docx` and `.odt` to markdown for the index
+    - markdown back to `.docx` for anyone who needs to edit in Word
 3.  Spot-check 1 % of the output by hand.
 
 ### Checklist
 
-- [x] Inventory
-  complete
+- [x] Inventory complete
 - [ ] Pilot signed off
 - [ ] Rollback plan written
 
@@ -64,13 +61,11 @@ An indented code block, which is a different construct:
 
 ## Awkward cases, on purpose
 
-Inline code with special characters: `a | b`,
-`<div>`, `--flag`, and a literal backtick:
-`` ` ``.
+Inline code with special characters: `a | b`, `<div>`, `--flag`, and a
+literal backtick: `` ` ``.
 
-Text with entities & symbols — an em dash, "curly quotes", an
-ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
-日本語.
+Text with entities & symbols — an em dash, "curly quotes", an ellipsis…,
+a non-breaking space, and unicode: café, naïve, Ω, 日本語.
 
 ~~Struck-through text~~ and text with a footnote.[^1]
 
@@ -78,13 +73,14 @@ Five inlines no writer test used to reach through this file:
 <u>underlined text</u>, <span class="smallcaps">small caps</span>, a
 <span id="marked" class="note">span carrying an id and a class</span>,
 and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because
-`docs/gates.md` claims `--samples` keeps them
-found, and until this paragraph existed no sample document contained one
-— the claim was wider than the corpus behind it, which is the defect
-this file is supposed to catch.
+`docs/gates.md` claims `--samples` keeps them found, and until this
+paragraph existed no sample document contained one — the claim was wider
+than the corpus behind it, which is the defect this file is supposed to
+catch.
 
-A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An
-email: <ops@example.com>.
+A link with a title: [the spec](https://example.com/spec "Format spec").
+A bare autolink: <https://example.com/status>. An email:
+<ops@example.com>.
 
 An image: ![the logo](logo.png "Project logo")
 
@@ -105,8 +101,8 @@ Nested quoting:
 
 ## Sign-off
 
-Contact <ops@example.com> with
-questions. See the `LICENSE` file for terms.
+Contact <ops@example.com> with questions. See the `LICENSE` file for
+terms.
 
-[^1]: Footnote bodies can contain **formatting**
-    and a [link](https://example.com).
+[^1]: Footnote bodies can contain **formatting** and a
+    [link](https://example.com).

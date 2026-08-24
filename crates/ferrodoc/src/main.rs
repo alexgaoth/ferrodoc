@@ -23,13 +23,11 @@ OPTIONS:
     -s, --standalone        Wrap HTML in a page, or LaTeX in a whole document
     -c, --css <FILE>        Inline a stylesheet into that page
         --wrap <MODE>       auto | none | preserve, as pandoc means them:
-                            `auto` fills to --columns (pandoc's default),
-                            `none` puts each block on one line, `preserve`
-                            keeps the document's own breaks. A writer that
-                            cannot lay lines out that way says so rather
-                            than ignoring the flag: markdown and gfm do
-                            all three, html and plain are `none`, latex,
-                            rst and asciidoc are `preserve`.
+                            `auto` fills to --columns, `none` puts each
+                            block on one line, `preserve` keeps the
+                            document's own breaks. Every text writer does
+                            all three, and the default is `auto` — which
+                            is pandoc's [auto]
         --columns <N>       Fill width for --wrap=auto [72]
     -d, --defaults <FILE>   Read flags from a defaults file. Applied where
                             the flag appears, so a later option overrides
@@ -575,7 +573,14 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         extract_media: out.extract_media,
         // `--columns` is only read when `--wrap=auto` asked for it, and
         // may have been given either side of it.
-        wrap: out.wrap.map(|wrap| widened(wrap, out.columns)),
+        //
+        // **The default is `auto`, which is pandoc's.** It was each
+        // writer's own layout until 2026-08-24, and no two writers
+        // agreed: `html` and `plain` joined, the other five kept the
+        // document's lines. That was chosen so a migration diff would be
+        // readable, and it made every text conversion differ from the
+        // same conversion through pandoc.
+        wrap: Some(widened(out.wrap.unwrap_or(Wrap::Auto(0)), out.columns)),
         toc: out.framing.toc,
         number_sections: out.framing.number_sections,
         metadata: out.metadata,
@@ -719,7 +724,11 @@ fn render_fragment(
     // identifiers too, and those are invented by the writer rather than
     // carried by the tree.
     if to == Format::Html && !page.id_prefix.is_empty() {
-        return Ok(ferrodoc::render_html_with_id_prefix(doc, &page.id_prefix));
+        return Ok(ferrodoc::render_html_with_id_prefix(
+            doc,
+            &page.id_prefix,
+            wrap.unwrap_or(ferrodoc::Wrap::Auto(72)),
+        ));
     }
     match wrap {
         // The resolver goes to both arms now. It did not, so

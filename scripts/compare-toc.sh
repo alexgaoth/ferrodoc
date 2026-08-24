@@ -10,8 +10,10 @@
 #   ./scripts/compare-toc.sh            # every document, prints a score
 #   ./scripts/compare-toc.sh -v         # and the first differing document
 #
-# Pandoc is given `--wrap=none` because its default reflows at column 72,
-# and comparing against that would measure who guessed the same column.
+# Both are given `--wrap=none`, so that a difference in the contents is
+# a difference in the contents rather than in where two fills chose to
+# break. Both default to `auto` at 72 since 2026-08-24 and would agree
+# either way; naming the mode keeps this measuring one thing.
 set -u
 cd "$(dirname "$0")/.."
 
@@ -31,9 +33,9 @@ while IFS= read -r doc; do
     [ "$(grep -cE '^#{1,6} ' "$doc")" -ge 2 ] || continue
     total=$((total + 1))
 
-    ours_toc=$("$FERRODOC" -f gfm -t html -s --toc "$doc" | nav)
+    ours_toc=$("$FERRODOC" -f gfm -t html -s --toc --wrap=none "$doc" | nav)
     theirs_toc=$( ( ulimit -v 6000000; pandoc -f gfm -t html -s --toc --wrap=none "$doc" ) | nav)
-    ours_num=$("$FERRODOC" -f gfm -t html --number-sections "$doc" | headings)
+    ours_num=$("$FERRODOC" -f gfm -t html --number-sections --wrap=none "$doc" | headings)
     theirs_num=$( ( ulimit -v 6000000; pandoc -f gfm -t html --number-sections --wrap=none \
         --syntax-highlighting=none "$doc" ) | headings)
 

@@ -32,12 +32,16 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 A=dropin/assets
 
-# The three flags handed to pandoc are the ones README already records:
-# ferrodoc's HTML writer joins soft breaks (`--wrap=none`), does not
-# highlight code (0.7), and reads `.md` as CommonMark rather than pandoc's
-# dialect (card D4.4). Everything else is the page, which is what this
-# measures.
-HANDED="--wrap=none --syntax-highlighting=none -f commonmark"
+# The two flags handed to pandoc are the ones README already records:
+# ferrodoc does not highlight code (0.7) and reads `.md` as CommonMark
+# rather than pandoc's dialect (card D4.4). Everything else is the page,
+# which is what this measures.
+#
+# **`--wrap=none` used to be a third**, because ferrodoc's HTML writer
+# joined soft breaks and pandoc filled to 72. Both default to `auto` at
+# 72 since 2026-08-24, so the comparison is now made at the layout a user
+# actually gets rather than at one chosen to make the two agree.
+HANDED="--syntax-highlighting=none -f commonmark"
 
 same=0 total=0
 while IFS= read -r flags; do

@@ -20,14 +20,13 @@
 #   -f commonmark            ferrodoc reads `.md` as CommonMark; pandoc's
 #                            own `markdown` is a different dialect and
 #                            adds heading identifiers (ROADMAP card D4.4)
-#   --wrap=...               ferrodoc leaves lines where the document put
-#                            them; pandoc fills to 72 (card D4.3). Which
-#                            setting matches depends on the writer, and
-#                            the choice here is the one `samples/` already
-#                            makes for the same format: `none` for HTML
-#                            and plain, where ferrodoc emits no breaks of
-#                            its own, `preserve` for the writers that
-#                            carry the document's own lines through
+#   --wrap=...               handed to **both** binaries. Every writer
+#                            lays lines out all three ways since
+#                            2026-08-24, and the default on both sides is
+#                            now pandoc's `auto` at 72 — so this is a
+#                            choice of what to compare rather than a
+#                            workaround: `none` and `preserve` are the
+#                            modes these numbers have always been taken at
 #   --syntax-highlighting=none  pandoc colours code by default (0.7)
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -106,7 +105,7 @@ for format in html markdown gfm latex rst asciidoc plain; do
             ( ulimit -v 6000000
               pandoc "$doc" -f "$from" -t "$format" --wrap="$wrap" \
                   --syntax-highlighting=none ) > "$work/p" 2>/dev/null
-            "$FERRODOC" "$doc" -f "$from" -t "$format" > "$work/f" 2>/dev/null
+            "$FERRODOC" "$doc" -f "$from" -t "$format" --wrap="$wrap" > "$work/f" 2>/dev/null
             if diff -q "$work/p" "$work/f" >/dev/null; then
                 same=$((same + 1))
             elif [ "$verbose" = 1 ]; then

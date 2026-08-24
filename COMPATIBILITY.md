@@ -1163,21 +1163,25 @@ differential gate exists:
 | construct | rule |
 |---|---|
 | block quote | indented 2 spaces, compounding per level |
-| code block | indented 4 spaces |
+| code block | indented 4 spaces at the top level, and not inside a list item or a quote, where the container's own indentation sets it apart |
 | ordered list | marker column as wide as the widest marker plus a space, never under 4 — `1.  ` and `10. ` |
 | list spacing | a `Para` in any item makes the whole list loose; otherwise no blank lines |
 | table | 2-space margin, each column the widest cell plus 2, a dashed rule under the head, `AlignRight` padded left |
 | footnote | `[N]` at the reference, bodies as `[N] …` at the end |
 | strikeout | keeps `~~`, because without them the text says the opposite |
 | image | alt text in `[brackets]`, or it reads as prose the document never had |
-| horizontal rule | 72 dashes |
+| horizontal rule | dashes to `--columns` |
 
-Two things are **not** matched, stated rather than hidden:
+One thing is **not** matched, stated rather than hidden: pandoc renders
+`Math` as Unicode — `$x^2$` becomes `x²` — where this writes the TeX.
 
-- pandoc renders `Math` as Unicode — `$x^2$` becomes `x²` — where this
-  writes the TeX;
-- pandoc fills to `--columns`; this never wraps, which is the same
-  `--wrap=preserve` default described above.
+The second used to be the fill, and is not any more: this writer is
+byte-identical to pandoc's `--wrap=auto` on all twelve documents at 20,
+40, 72 and 100 columns. Four rules were needed and none of them is the
+prefix: a **list marker** and a **footnote label** each shorten the line,
+the second only its first line; a **table cell** is not filled at all,
+though a footnote referenced from one is; and a **heading** is never
+filled.
 
 ### The HTML reader's edge cases — five fixed, and a sweep that found more
 
@@ -1355,32 +1359,46 @@ stderr. The test is pandoc's own, probed: the first line is exactly `---`,
 the line after it is not blank, and a later line is exactly `---` or
 `...`. `stdout` and the exit code are untouched.
 
-### `--wrap` — the default differs from pandoc's, deliberately
+### `--wrap` — pandoc's, since 2026-08-24
 
-**Pandoc fills text output to 72 columns by default; ferrodoc leaves every
-line where the document put it.** That is `--wrap=preserve` against
-pandoc's `--wrap=auto`, and it is the one CLI default that differs.
+**Every text writer lays lines out all three ways, and the default is
+`auto` at 72 columns, which is pandoc's.** It was `preserve` for five
+writers and `none` for two until then — not a decision but seven writers
+written separately — and the flip is what card D4.3 was waiting for.
 
-The reason is what a migration looks like. Converting a corpus with both
-tools and diffing is how anyone checks a swap, and filling by default makes
-*every paragraph of every document* differ on line breaks alone — burying
-whatever real difference the diff was run to find. Leaving the text alone
-makes the diff readable, and the fill is one flag away.
+The gap it closed was the largest single cause in the drop-in corpus:
+`scripts/dropin.sh --attribute` put **23 of 44 misses** on the fill alone,
+and the number doubled from 4/48 to 8/48 the day the default changed.
+Eight of the fifteen `samples/` are byte-identical to pandoc now, at both
+binaries' defaults, where four were before — and `samples/generate.sh` no
+longer runs pandoc twice and keeps the closer output, which is a
+workaround it needed for exactly this.
 
-`--wrap=auto` (with `--columns N`, default 72) matches pandoc. Measured in
-isolation, because scoring it over whole documents would score this
-project's other divergences at the same time: of the 79 DOCX and ODT corpus
-documents, **10** already produce byte-identical GFM to
-`pandoc --wrap=none`. On those 10 — the subset where wrapping is the only
-variable — `ferrodoc --wrap=auto --columns 72` is **10/10 identical** to
-`pandoc -t gfm` at its default.
+Each writer is byte-identical to pandoc's fill over the twelve documents
+in `corpus/` and `corpus/gfm/`, at 20, 40, 72 and 100 columns:
 
-A line breaks only where a `Space` or `SoftBreak` stood in the tree, never
-inside a code span, a link destination or a link title, which are written
-rather than read from the document. A heading is never filled (pandoc
-leaves a 151-column heading at 151), a pipe table row is never filled, and
-a word wider than the column overruns rather than being cut. A list marker
-and a quote's `> ` count toward the width, as they do for pandoc.
+| writer | identical, four widths | what still differs |
+|---|---|---|
+| `html` | **60/60** (five widths) | — |
+| `plain` | **48/48** | — |
+| `rst` | 44/48 | four documents at 20 columns |
+| `asciidoc` | 43/48 | the deliberate multiblock footnote, and one table at 20 |
+| `latex` | 40/48 | the deliberate `\setcounter` order, and footnote nesting below 72 |
+
+A line breaks only where a `Space` or `SoftBreak` stood in the tree, and
+each writer adds the places its own syntax allows: HTML breaks **between
+a tag's attributes**, LaTeX inside a `\footnote{…}` but not inside
+`alt={…}`, RST between the pieces of a split emphasis but never inside
+one. A heading is never filled in `plain`, `rst` or `asciidoc` — it is in
+HTML and LaTeX, which is measured rather than assumed — a word wider than
+the column overruns rather than being cut, and a list marker or a quote's
+prefix counts toward the width.
+
+**Columns are display columns.** A CJK ideograph and an emoji take two,
+and `\u{200b}`, `\u{200d}` and `\u{fe0f}` take none. The table in the
+HTML writer was measured, not transcribed: every codepoint in the blocks
+that could plausibly be wide went through `pandoc --wrap=auto
+--columns=13` alone in a paragraph.
 
 ### `--extract-media` — file for file with pandoc
 

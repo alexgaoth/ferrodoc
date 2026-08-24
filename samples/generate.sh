@@ -62,7 +62,6 @@ cp corpus/swatch.png "$inputs/logo.png"
 pandoc "$inputs/handbook.md" -f gfm -t html -s -o "$inputs/page.html"
 
 rows=()
-wrap_used=
 
 # One conversion, both engines, kept side by side.
 #   case <folder> <input> <-f from> <-t to> <extension> [extra ferrodoc args...]
@@ -72,29 +71,18 @@ case_() {
     mkdir -p "$dir"
     ( cd "$inputs" && "$root/$bin" "$(basename "$input")" -f "$from" -t "$to" "$@" \
         -o "$root/$dir/ferrodoc.$ext" ) 2>"$dir/ferrodoc.stderr"
-    # ferrodoc has no line-wrapping option: it never reflows. Pandoc
-    # reflows at column 72 by default, which rewrites nearly every line of
-    # every text sample and buries the differences that are about content.
-    # So pandoc is run both ways and the closer output is kept — the flag
-    # that won is recorded in RESULTS.md rather than chosen quietly.
-    local best= bestcount=-1 mode
-    for mode in none preserve; do
-        ( cd "$inputs" && pandoc "$(basename "$input")" -f "$from" -t "$to" \
-            --wrap="$mode" "$@" -o "$root/$dir/pandoc.$mode.$ext" ) 2>"$dir/pandoc.stderr"
-        local count
-        count=$(diff "$dir/pandoc.$mode.$ext" "$dir/ferrodoc.$ext" 2>/dev/null |
-            grep -cE '^[<>]')
-        if [ "$bestcount" -lt 0 ] || [ "$count" -lt "$bestcount" ]; then
-            bestcount=$count; best=$mode
-        fi
-    done
-    mv "$dir/pandoc.$best.$ext" "$dir/pandoc.$ext"
-    for mode in none preserve; do rm -f "$dir/pandoc.$mode.$ext"; done
-    wrap_used="--wrap=$best"
+    # **Both at their defaults.** Until 2026-08-24 ferrodoc never
+    # reflowed and pandoc filled to 72, which rewrote nearly every line of
+    # every text sample and buried the differences that are about
+    # content — so this ran pandoc both ways and kept the closer output,
+    # recording which flag had won. Both default to `auto` at 72 now, so
+    # the comparison is the one a user actually makes.
+    ( cd "$inputs" && pandoc "$(basename "$input")" -f "$from" -t "$to" \
+        "$@" -o "$root/$dir/pandoc.$ext" ) 2>"$dir/pandoc.stderr"
     for f in "$dir/ferrodoc.stderr" "$dir/pandoc.stderr"; do
         [ -s "$f" ] || rm -f "$f"
     done
-    verdict "$name" "$dir/ferrodoc.$ext" "$dir/pandoc.$ext" "$dir" "$to ($wrap_used)"
+    verdict "$name" "$dir/ferrodoc.$ext" "$dir/pandoc.$ext" "$dir" "$to"
 }
 
 # A binary target cannot be read, so what is compared is what the rest of

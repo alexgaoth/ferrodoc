@@ -278,9 +278,39 @@ the layout it already had.
 **So the remaining work is filling, not deciding.** The default becomes
 `auto` at the version where `html`, `plain`, `latex`, `rst` and
 `asciidoc` can fill to a column — one card each, and the HTML one is the
-one worth doing first because it is most of the drop-in corpus. Until
-then every wrapped output is counted as *fixable* by `dropin.sh`, which
-is the honest classification: it is going to be fixed.
+one worth doing first because it is most of the drop-in corpus.
+
+#### Done, 2026-08-24 — **the default is `auto`**
+
+All five fill, one commit each, in that order. Each is byte-identical to
+pandoc over the twelve documents in `corpus/` and `corpus/gfm/` at
+several column widths: html 60/60 at five widths, plain 48/48, rst 44/48,
+asciidoc 43/48, latex 40/48 — and every remaining miss is either a
+recorded deliberate divergence or a narrow width no default uses.
+
+The mechanism is the same everywhere and worth stating once: **the writer
+marks its break opportunities as it writes and one function decides what
+becomes of them**, so nothing downstream is told which mode it is in.
+What differs per writer is where the marks go, and that is where the
+measuring went:
+
+- HTML breaks **between a tag's attributes**, needs a mark that ends what
+  a break decision may look at (a code block's content is appended
+  whatever its width), and counts **display columns** — a table of 78
+  ranges, measured codepoint by codepoint rather than transcribed;
+- LaTeX needs a **region** mark: a `\footnote{…}` indents its wrapped
+  lines by two and returns to the paragraph's column after the brace,
+  which nothing in the finished text says;
+- RST continues a wrapped item **under its content** and cannot split
+  inline markup; AsciiDoc continues **flush with the marker** and can.
+  The two are opposite, and each was found by the other's rule failing.
+
+`dropin.sh` went **4/48 to 8/48** the day the default flipped, and the
+fill left its attribution entirely: what `--attribute` blamed on 23 of 44
+misses is gone, leaving the dialect (18) and highlighting (9).
+`samples/` went from four byte-identical to **eight of fifteen**, and
+`samples/generate.sh` no longer runs pandoc twice and keeps the closer
+output — a workaround it needed for exactly this.
 
 #### 0.5 — a licence fact that decides how far `-s` can go
 
@@ -312,26 +342,25 @@ name standalone HTML as an exception the way it names citations.
 
 #### What the drop-in number is waiting on now
 
-Updated 2026-08-23, after the writers were brought to pandoc's bytes.
-**`4/48`, with no refusals at all**, and — the number that matters more —
-`scripts/dropin.sh --attribute` now attributes **25 of the 44 misses** to
-one or more of exactly three global decisions:
+Updated 2026-08-24, after the writers were brought to pandoc's bytes and
+the wrap default flipped. **`8/48`, with no refusals at all**, and —
+the number that matters more — `scripts/dropin.sh --attribute` puts
+**21 of the 40 misses** on one of two remaining global decisions:
 
 | decision | rows it alone would fix |
 |---|---|
-| pandoc's 72-column fill (D4.3) | 23 |
+| ~~pandoc's 72-column fill (D4.3)~~ | **done** — it was 23 |
 | `-f markdown` meaning pandoc's dialect (D4.4) | 18 |
 | syntax highlighting (0.7) | 9 |
 
-Most rows need more than one of them, which is why the column sums past
-25. The remaining 19 need something none of the three explains, and that
-bucket has shrunk from 26. The writer work is what moved it: every one
-of those rows was differing on a *spelling* as well, and now differs on
-one thing instead of three.
+Some rows need both, which is why the column sums past 21. The remaining
+19 need something neither explains, and that bucket has not moved since
+the writer work — which is the useful signal: it is a **third** cause
+rather than more of the first two, and nobody has looked at what it is.
 
-So the order that follows from the measurement is unchanged in shape and
-sharper in detail: **the three decisions, in the order of the table**.
-None of them is a flag any more; each is a body of work with a card.
+So the order that follows from the measurement is: **the dialect, then
+highlighting, then read the nineteen**. Neither of the two is a flag any
+more; each is a body of work with a card.
 
 #### D4.4 — decided: `markdown` does not alias `pandoc_markdown`, yet
 

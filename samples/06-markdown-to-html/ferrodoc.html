@@ -1,7 +1,12 @@
 <h1 id="field-handbook">Field Handbook</h1>
-<p>A realistic document, written the way people actually write them — and deliberately including the awkward parts, because a sample that only shows easy cases tells you nothing.</p>
+<p>A realistic document, written the way people actually write them —
+and deliberately including the awkward parts, because a sample that only
+shows easy cases tells you nothing.</p>
 <h2 id="why-this-exists">Why this exists</h2>
-<p>Teams hold documents in <strong>Word</strong>, <em>LibreOffice</em>, EPUB and markdown at the same time. Getting between those formats is supposed to be boring. When it is not boring, it is usually because something was silently dropped.</p>
+<p>Teams hold documents in <strong>Word</strong>, <em>LibreOffice</em>,
+EPUB and markdown at the same time. Getting between those formats is
+supposed to be boring. When it is not boring, it is usually because
+something was silently dropped.</p>
 <blockquote>
 <p>A conversion you cannot inspect is a conversion you cannot trust.</p>
 <p>— every migration post-mortem, eventually</p>
@@ -48,14 +53,17 @@
 <li>Export everything from the old system.</li>
 <li>Convert it:
 <ul>
-<li><code>.docx</code> and <code>.odt</code> to markdown for the index</li>
-<li>markdown back to <code>.docx</code> for anyone who needs to edit in Word</li>
+<li><code>.docx</code> and <code>.odt</code> to markdown for the
+index</li>
+<li>markdown back to <code>.docx</code> for anyone who needs to edit in
+Word</li>
 </ul></li>
 <li>Spot-check 1 % of the output by hand.</li>
 </ol>
 <h3 id="checklist">Checklist</h3>
 <ul class="task-list">
-<li><label><input type="checkbox" checked="" />Inventory complete</label></li>
+<li><label><input type="checkbox" checked="" />Inventory
+complete</label></li>
 <li><label><input type="checkbox" />Pilot signed off</label></li>
 <li><label><input type="checkbox" />Rollback plan written</label></li>
 </ul>
@@ -70,12 +78,29 @@ with open(&quot;report.docx&quot;, &quot;rb&quot;) as f:
 <p>An indented code block, which is a different construct:</p>
 <pre><code>ferrodoc -f markdown -t html handbook.md</code></pre>
 <h2 id="awkward-cases-on-purpose">Awkward cases, on purpose</h2>
-<p>Inline code with special characters: <code>a | b</code>, <code>&lt;div&gt;</code>, <code>--flag</code>, and a literal backtick: <code>`</code>.</p>
-<p>Text with entities &amp; symbols — an em dash, "curly quotes", an ellipsis…, a non-breaking space, and unicode: café, naïve, Ω, 日本語.</p>
-<p><del>Struck-through text</del> and text with a footnote.<a href="#fn1" class="footnote-ref" id="fnref1" role="doc-noteref"><sup>1</sup></a></p>
-<p>Five inlines no writer test used to reach through this file: <u>underlined text</u>, <span class="smallcaps">small caps</span>, a <span id="marked" class="note">span carrying an id and a class</span>, and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because <code>docs/gates.md</code> claims <code>--samples</code> keeps them found, and until this paragraph existed no sample document contained one — the claim was wider than the corpus behind it, which is the defect this file is supposed to catch.</p>
-<p>A link with a title: <a href="https://example.com/spec" title="Format spec">the spec</a>. A bare autolink: <a href="https://example.com/status">https://example.com/status</a>. An email: <a href="mailto:ops@example.com">ops@example.com</a>.</p>
-<p>An image: <img src="logo.png" title="Project logo" alt="the logo" /></p>
+<p>Inline code with special characters: <code>a | b</code>,
+<code>&lt;div&gt;</code>, <code>--flag</code>, and a literal backtick:
+<code>`</code>.</p>
+<p>Text with entities &amp; symbols — an em dash, "curly quotes", an
+ellipsis…, a non-breaking space, and unicode: café, naïve, Ω,
+日本語.</p>
+<p><del>Struck-through text</del> and text with a footnote.<a
+href="#fn1" class="footnote-ref" id="fnref1"
+role="doc-noteref"><sup>1</sup></a></p>
+<p>Five inlines no writer test used to reach through this file:
+<u>underlined text</u>, <span class="smallcaps">small caps</span>, a
+<span id="marked" class="note">span carrying an id and a class</span>,
+and H<sub>2</sub>O beside E=mc<sup>2</sup>. They are here because
+<code>docs/gates.md</code> claims <code>--samples</code> keeps them
+found, and until this paragraph existed no sample document contained one
+— the claim was wider than the corpus behind it, which is the defect
+this file is supposed to catch.</p>
+<p>A link with a title: <a href="https://example.com/spec"
+title="Format spec">the spec</a>. A bare autolink: <a
+href="https://example.com/status">https://example.com/status</a>. An
+email: <a href="mailto:ops@example.com">ops@example.com</a>.</p>
+<p>An image: <img src="logo.png" title="Project logo"
+alt="the logo" /></p>
 <div class="callout">
 
 <p>Raw HTML block, which not every target format can hold.</p>
@@ -93,10 +118,14 @@ with open(&quot;report.docx&quot;, &quot;rb&quot;) as f:
 </blockquote>
 </blockquote>
 <h2 id="sign-off">Sign-off</h2>
-<p>Contact <a href="mailto:ops@example.com">ops@example.com</a> with questions. See the <code>LICENSE</code> file for terms.</p>
-<section id="footnotes" class="footnotes footnotes-end-of-document" role="doc-endnotes">
+<p>Contact <a href="mailto:ops@example.com">ops@example.com</a> with
+questions. See the <code>LICENSE</code> file for terms.</p>
+<section id="footnotes" class="footnotes footnotes-end-of-document"
+role="doc-endnotes">
 <hr />
 <ol>
-<li id="fn1"><p>Footnote bodies can contain <strong>formatting</strong> and a <a href="https://example.com">link</a>.<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li>
+<li id="fn1"><p>Footnote bodies can contain <strong>formatting</strong>
+and a <a href="https://example.com">link</a>.<a href="#fnref1"
+class="footnote-back" role="doc-backlink">↩︎</a></p></li>
 </ol>
 </section>

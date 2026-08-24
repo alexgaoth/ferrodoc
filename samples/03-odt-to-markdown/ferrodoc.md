@@ -22,6 +22,6 @@ Terms with *underline*, <sub>subscript</sub> and <sup>superscript</sup>.
 
 fixed width
 
-  indented line
+indented line
 
 Signed on the date first written above.
