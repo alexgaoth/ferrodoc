@@ -71,6 +71,8 @@ gate_claims() {
 "pandoc-markdown	ours	COMPATIBILITY.md	\`diff-pandoc-md\` | pandoc-markdown reader" \
 "pandoc-markdown (all markdown)	ours	README.md	pandoc-markdown reader" \
 "pandoc-markdown (all markdown)	ours	COMPATIBILITY.md	\`diff-pandoc-md\` | pandoc-markdown reader" \
+"pandoc-markdown (spec)	ours	README.md	pandoc-markdown reader" \
+"pandoc-markdown (spec)	ours	COMPATIBILITY.md	\`diff-pandoc-md\` | pandoc-markdown reader" \
 "toc and numbering	ours	COMPATIBILITY.md	./scripts/compare-toc.sh" \
 "DOCX reader	ours	COMPATIBILITY.md	\`diff-docx\` | DOCX reader" \
 "DOCX reader	ours	README.md	corpus documents produce identical ASTs, and" \

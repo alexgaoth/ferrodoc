@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **6/20** over every markdown document |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **8/20** over every markdown document, **429/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1251,7 +1251,7 @@ Two divergences, both deliberate:
       printf '%s' "$html" | pandoc   -f html -t json
       printf '%s' "$html" | ferrodoc -f html -t json
 
-### `pandoc_markdown` — pandoc's dialect, and the four shapes it still misses
+### `pandoc_markdown` — pandoc's dialect, and the shapes it still misses
 
 `-f pandoc_markdown` reads what `pandoc -f markdown` reads and
 `-f markdown` here does not: a **YAML metadata block**, **header
@@ -1318,6 +1318,37 @@ value semantics are matched: a scalar is parsed **as markdown inlines**
 **Extension syntax is refused by name.** `-f markdown+footnotes` is an
 error listing what the three dialects read, rather than a flag that looks
 accepted and changes nothing.
+
+**`smart` is read, and it is this dialect's alone** — probed, `-f gfm`
+and `-f commonmark` both leave `it's` as it stands. `--` is an en dash,
+`---` an em dash, `...` an ellipsis, an apostrophe is `’`, and a *pair*
+of quotes is a `Quoted` element rather than two characters. The pairing
+is the half comrak does not do, and three of its rules were measured
+rather than assumed:
+
+* a pair does not cross a container — `"opens *and closes" inside*` is
+  two literal marks in pandoc, so the pairing runs over one sibling list;
+* an opening mark with a space after it is a **closing** one: `a " b " c`
+  is two closing marks and no quotation. comrak decides from the
+  character before, pandoc from the character after;
+* inside an open quotation the next mark of that kind ends it whichever
+  way it leans, and the quotation does not keep the space before it:
+  `"b and then "c"` is one quotation of `b and then` and a stray mark.
+
+Measured over the CommonMark spec, `429/652` examples now read exactly as
+`pandoc -f markdown` reads them, up from 417 — **twelve gained and none
+lost**, which is what a 652-example denominator is for. Over the
+corpus's own twenty markdown documents it is 8/20, up from 6/20.
+
+**What the remaining twelve corpus documents need**, each named rather
+than described as "the dialect": `implicit_figures` (an image alone in a
+paragraph is a `Figure` there and a `Para` here — `images.md`,
+`notes-and-images.md`), inline notes `^[…]`, bracketed spans
+`[text]{#id}`, `native_divs` (a `<div>` is a `Div` there and a
+`RawBlock` here — `edge-cases.md`), a block scalar in a metadata block
+(`abstract: |`), fence info words, and the four `.gfm` documents, which
+are read by a dialect that is not GFM and so disagree about task lists,
+tables and footnotes by construction.
 
 ### `markdown` means CommonMark, not pandoc's markdown
 

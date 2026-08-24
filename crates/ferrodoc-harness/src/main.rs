@@ -131,10 +131,15 @@ fn diff_spec(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result
     let [spec_path] = paths else {
         bail!("diff-spec expects exactly one spec.json path");
     };
+    run_cases(&spec_cases(spec_path)?, verbose, fail_under)
+}
+
+/// The markdown of every example in a `spec.json`, as cases.
+fn spec_cases(spec_path: &str) -> Result<Vec<Case>> {
     let raw = std::fs::read_to_string(spec_path)
         .with_context(|| format!("reading {spec_path}"))?;
     let examples: Vec<Value> = serde_json::from_str(&raw).context("parsing spec.json")?;
-    let cases: Vec<Case> = examples
+    examples
         .iter()
         .map(|ex| {
             let number = ex["example"].as_i64().unwrap_or(0);
@@ -147,8 +152,7 @@ fn diff_spec(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result
                     .to_owned(),
             })
         })
-        .collect::<Result<_>>()?;
-    run_cases(&cases, verbose, fail_under)
+        .collect()
 }
 
 fn run_cases(cases: &[Case], verbose: bool, fail_under: Option<f64>) -> Result<()> {
@@ -413,14 +417,20 @@ fn collect_by_extension(path: &Path, extension: &str, cases: &mut Vec<Case>) -> 
 fn diff_pandoc_md(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result<()> {
     let mut cases = Vec::new();
     for p in paths {
+        // A `spec.json` is 651 examples rather than one document, and
+        // 651 is the denominator this claim wants: twenty documents
+        // cannot say how far a *dialect* is, and the corpus blind spot
+        // has cost this project eight bugs already.
+        if Path::new(p).extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
+            cases.extend(spec_cases(p)?);
+            continue;
+        }
         // Every markdown document, not only the `.pmd` fixtures written
         // for this reader. Three hand-authored files read 3/3, which is
-        // what a corpus of one's own constructs always reads; the same
-        // reader over every markdown document in `corpus/` reads 6/20.
-        // The narrow run is still gated at 100 separately — see
-        // `verify.sh` — because a hand-authored fixture that starts
-        // failing is a regression, and the wide one is what says how far
-        // this dialect actually is.
+        // what a corpus of one's own constructs always reads. The narrow
+        // run is still gated at 100 separately — see `verify.sh` —
+        // because a hand-authored fixture that starts failing is a
+        // regression, and the wide ones say how far this dialect is.
         for extension in ["pmd", "md", "gfm"] {
             collect_by_extension(Path::new(p), extension, &mut cases)?;
         }
