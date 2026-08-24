@@ -1463,7 +1463,7 @@ markdown. A plain `- [ ] a` is a box in both.
 `` ` a` `` is `a` where CommonMark says ` a`, and `` ` ` `` is empty. A
 non-breaking space inside one is content, not padding.
 
-**What the 156 remaining spec examples are**, by the spec's own sections,
+**What the 154 remaining spec examples are**, by the spec's own sections,
 because the shape of that list is the finding:
 
 | failing | section |
@@ -1472,9 +1472,19 @@ because the shape of that list is the finding:
 | 26/90 | Links |
 | 15/27 | Setext headings |
 | 9/26 | Lists |
-| 8/27, 7/29 | link reference definitions, fenced code |
+| 8/27 | link reference definitions |
 | 7/20, 7/25 | Raw HTML, block quotes |
-| 6/18, 6/19, 6/44 | ATX headings, autolinks, HTML blocks |
+| 6/18, 6/19, 6/44, 5/29 | ATX headings, autolinks, HTML blocks, fenced code |
+
+**Nothing left in that table is one rule.** Each bucket was sampled
+example by example, and the causes are distinct: the largest coherent one
+is pandoc's setext heading, which wants a **one-line** paragraph and an
+unindented underline (`Foo\nBar\n---` is a paragraph there and a heading
+here) and is worth about five; the blank-line-before-a-block rule — a
+heading, list or quote cannot interrupt a paragraph — is worth about
+four; `***x***` nests `Strong` outside `Emph` where CommonMark nests the
+other way, and telling that from `*__x__*` needs the source rather than
+the tree, for two. The rest are one apiece.
 
 **This is the parser rather than the dialect, and no card closes it.**
 Emphasis flanking, link destinations with spaces or newlines, setext

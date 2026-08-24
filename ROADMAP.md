@@ -466,17 +466,25 @@ and each with its own test:
 | a code span is trimmed | 10/20 | 496 |
 | bracketed spans `[t]{#id}` | 11/20 | 496 |
 | metadata block scalars (was a **refusal**) | 12/20 | 496 |
+| fence attributes, task items, footnote `Para` | 13/20 | 496 |
+| an unclosed fence and an unclosed comment are text | **14/20** | **498** |
 
 **Not one example regressed**, at any step: every change was checked
 example by example against the trees the reader produced before it.
 
-What is left is the parser, and the section table above says so. The
-next honest question is not "which card next" but **whether 76% is the
-ceiling worth living with** — because the four sections that hold the
-remaining 156 are emphasis flanking, link destinations, setext
-underlines and the blank-line-before-a-block rule, and comrak is a
-`CommonMark` parser. Answering it means either accepting the ceiling or
-writing a second reader, and that is a decision, not a card.
+What is left is the parser, and the section table above says so. **Every
+bucket was then sampled example by example, and none of them is one
+rule**: the largest coherent cause left is pandoc's setext heading —
+which wants a one-line paragraph and an unindented underline — and it is
+worth about five examples; the blank-line-before-a-block rule is worth
+about four; `***x***` nesting the other way is worth two and needs the
+source rather than the tree. The rest are one apiece.
+
+So the next honest question is not "which card next" but **whether 76% is
+the ceiling worth living with** — because comrak is a `CommonMark`
+parser and these are pandoc's parser. Answering it means either accepting
+the ceiling or writing a second reader, and that is a decision, not a
+card.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number
