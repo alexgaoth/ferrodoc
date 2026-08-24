@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **11/20** over every markdown document, **496/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **12/20** over every markdown document, **496/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1306,9 +1306,9 @@ The first classes them `uri` and `email`; the second classes neither, which
 is why this belongs to one dialect and stays out of `gfm`.
 
 **A YAML block outside the subset is refused, not guessed.** `key: scalar`,
-`key:` with `- item` lines, `#` comments and blank lines are read; nested
-maps, block scalars (`|`, `>`), flow collections and anchors are an error
-naming the line. A metadata block is the one construct where reading it
+`key:` with `- item` lines, **block scalars** (`|`, `>`, with any
+chomping indicator), `#` comments and blank lines are read; nested maps,
+flow collections and anchors are an error naming the line. A metadata block is the one construct where reading it
 nearly right is worse than refusing it — the values become the document's
 title and authors, and a wrong one is invisible in the output. Pandoc's
 value semantics are matched: a scalar is parsed **as markdown inlines**
@@ -1414,6 +1414,13 @@ No gate had seen it because no corpus heading held punctuation between
 two words, and every HTML conversion of a pandoc-markdown document
 carries these.
 
+**A block scalar in a metadata block is read** — `abstract: |` and the
+folded `>`, with any chomping indicator. Pandoc gives one `MetaBlocks`,
+the text read as markdown rather than as inlines, *unless* the indicator
+strips the trailing newline (`|-`), where it gives `MetaInlines`; all
+four measured. This used to be a refusal, which is the worst outcome
+available: the whole document stopped converting over one metadata key.
+
 **Bracketed spans are read**: `[text]{#id .cls k=v}` is a `Span`, and
 `[text]{.smallcaps}` a `SmallCaps` — that class alone, and among others
 a `SmallCaps` inside the span. An attribute list with anything malformed
@@ -1449,8 +1456,7 @@ feature at all. That is the ceiling this reader is approaching, and it is
 why the number to watch is the shape of the table rather than the total.
 
 **What the remaining ten corpus documents need**, each named rather
-than described as "the dialect": a block scalar in a metadata block
-(`abstract: |`), a
+than described as "the dialect": a
 fence info string of several words (pandoc does not read one as a fence
 at all), `***x***` nesting `Strong` outside `Emph` where CommonMark
 nests the other way round, and the four `.gfm` documents, which are read

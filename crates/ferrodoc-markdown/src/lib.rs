@@ -1005,7 +1005,11 @@ fn front_matter<'a>(root: &'a AstNode<'a>) -> Result<Meta, Error> {
             continue;
         };
         let mut pending: Option<(String, Vec<MetaValue>)> = None;
-        for line in text.lines() {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut at = 0;
+        while at < lines.len() {
+            let line = lines[at];
+            at += 1;
             let trimmed = line.trim_end();
             // The delimiters comrak hands back with the block, and the
             // two things YAML ignores.
@@ -1036,7 +1040,20 @@ fn front_matter<'a>(root: &'a AstNode<'a>) -> Result<Meta, Error> {
             let value = value.trim();
             if value.is_empty() {
                 pending = Some((key.trim().to_owned(), Vec::new()));
-            } else if value.starts_with(['|', '>', '[', '{', '&', '*']) {
+            } else if let Some((folds, strips)) = block_scalar(value) {
+                // The lines under it are the ones indented past the key,
+                // and a blank line belongs to the block rather than
+                // ending it.
+                let start = at;
+                while at < lines.len()
+                    && (lines[at].trim().is_empty()
+                        || lines[at].starts_with(char::is_whitespace))
+                {
+                    at += 1;
+                }
+                let body = block_body(&lines[start..at], folds, strips);
+                meta.insert(key.trim().to_owned(), body);
+            } else if value.starts_with(['[', '{', '&', '*']) {
                 return Err(Error::Metadata(format!("{trimmed:?}")));
             } else {
                 meta.insert(key.trim().to_owned(), scalar(value));
@@ -1047,6 +1064,72 @@ fn front_matter<'a>(root: &'a AstNode<'a>) -> Result<Meta, Error> {
         }
     }
     Ok(meta)
+}
+
+/// Whether a value opens a block scalar, and whether it folds.
+///
+/// `|` keeps its line breaks and `>` folds them into spaces; a chomping
+/// indicator (`-`, `+`) changes only the trailing newlines, which the
+/// markdown parse ignores anyway. Anything else after the marker is a
+/// YAML feature this does not read, and is refused rather than guessed.
+fn block_scalar(value: &str) -> Option<(bool, bool)> {
+    let (marker, rest) = value.split_at(value.chars().next()?.len_utf8());
+    let folds = match marker {
+        "|" => false,
+        ">" => true,
+        _ => return None,
+    };
+    let rest = rest.trim_end();
+    rest.chars()
+        .all(|c| c == '-' || c == '+')
+        .then_some((folds, rest.contains('-')))
+}
+
+/// A block scalar's lines, as the metadata value pandoc reads from it.
+///
+/// Pandoc gives one `MetaBlocks` — the text read as markdown, not as
+/// inlines — so `abstract: |` holding two lines is one paragraph with a
+/// soft break in it, and the folded form is one paragraph without.
+/// **Unless the chomping indicator strips the trailing newline**: `|-`
+/// leaves a value that does not end in one, and pandoc reads that as
+/// `MetaInlines`. Measured on all four indicators.
+fn block_body(lines: &[&str], folds: bool, strips: bool) -> MetaValue {
+    let indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches(' ').len())
+        .min()
+        .unwrap_or(0);
+    let mut text = String::new();
+    for line in lines {
+        let line = if line.len() > indent { &line[indent..] } else { line.trim_start() };
+        // Folding joins a line to the one before it; a blank line still
+        // separates paragraphs.
+        let separator = if folds && !text.is_empty() && !line.trim().is_empty() {
+            if text.ends_with('\n') { "" } else { " " }
+        } else {
+            "\n"
+        };
+        if !text.is_empty() {
+            text.push_str(separator);
+        }
+        text.push_str(line.trim_end());
+    }
+    text.push('\n');
+    let mut blocks = fragment(&text, &Notes::new(), Dialect::Pandoc);
+    if !strips {
+        return MetaValue::MetaBlocks(blocks);
+    }
+    match blocks.pop() {
+        Some(Block::Para(inlines) | Block::Plain(inlines)) if blocks.is_empty() => {
+            MetaValue::MetaInlines(inlines)
+        }
+        Some(last) => {
+            blocks.push(last);
+            MetaValue::MetaBlocks(blocks)
+        }
+        None => MetaValue::MetaInlines(Vec::new()),
+    }
 }
 
 /// One YAML scalar as pandoc reads it: a bool, or markdown inlines.
@@ -2223,6 +2306,46 @@ mod tests {
         assert_eq!(ids("# a\u{a0}b\n"), ["a-b"]);
     }
 
+    /// A YAML block scalar, which used to be a refusal — and a refusal
+    /// is the worst outcome, because the whole document stops
+    /// converting. All four chomping indicators measured.
+    #[test]
+    fn a_block_scalar_is_read() {
+        let meta = |md: &str| {
+            serde_json::to_value(read_pandoc_markdown(md).expect("convertible"))
+                .unwrap()["meta"]
+                .clone()
+        };
+        // `|` keeps its line breaks and is `MetaBlocks`.
+        assert_eq!(
+            meta("---\nabstract: |\n  one\n  two\n---\n\nx\n")["abstract"],
+            serde_json::json!({"t": "MetaBlocks", "c": [{"t": "Para", "c": [
+                {"t": "Str", "c": "one"}, {"t": "SoftBreak"}, {"t": "Str", "c": "two"}
+            ]}]})
+        );
+        // `>` folds them into spaces.
+        assert_eq!(
+            meta("---\nk: >\n  one\n  two\n---\n\nx\n")["k"],
+            serde_json::json!({"t": "MetaBlocks", "c": [{"t": "Para", "c": [
+                {"t": "Str", "c": "one"}, {"t": "Space"}, {"t": "Str", "c": "two"}
+            ]}]})
+        );
+        // A stripping indicator leaves no trailing newline, and pandoc
+        // reads that as inlines rather than blocks.
+        assert_eq!(
+            meta("---\nk: |-\n  one\n---\n\nx\n")["k"],
+            serde_json::json!({"t": "MetaInlines", "c": [{"t": "Str", "c": "one"}]})
+        );
+        // A blank line inside one still separates paragraphs.
+        assert_eq!(
+            meta("---\nk: |\n  one\n\n  two\n---\n\nx\n")["k"]["c"]
+                .as_array()
+                .expect("blocks")
+                .len(),
+            2
+        );
+    }
+
     /// `[text]{#id}` is a `Span`, and only pandoc's dialect reads one.
     #[test]
     fn a_bracketed_span_is_a_span() {
@@ -2822,9 +2945,11 @@ mod tests {
     fn metadata_outside_the_subset_is_refused() {
         for source in [
             "---\nauthor:\n  name: Ann\n---\n\nx\n",   // a nested map
-            "---\nabstract: |\n  a block scalar\n---\n\nx\n",
             "---\ntags: [a, b]\n---\n\nx\n",             // a flow sequence
             "---\nanchor: &a value\n---\n\nx\n",
+            // A marker this does not read is still refused, and is not
+            // mistaken for a block scalar.
+            "---\nk: |2\n  indented\n---\n\nx\n",
         ] {
             assert!(
                 matches!(read_pandoc_markdown(source), Err(Error::Metadata(_))),
