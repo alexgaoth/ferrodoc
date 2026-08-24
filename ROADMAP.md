@@ -414,14 +414,17 @@ attributes only had to be read — `link_attributes`,
 `inline_code_attributes` and `inline_footnotes` — take the corpus run to
 **10/20**.
 
-**And reading the 207 remaining spec failures by section is what says
-what to do next.** `43 of 44` HTML-block examples fail, and they fail
-for one reason: pandoc's markdown writes **one `RawBlock` per tag** and
-reads what lies between them as markdown, where CommonMark keeps the
-block as a single opaque chunk. `native_divs` and `native_spans` sit on
-top of that. **That is the next card, and it is worth more than
-everything else on the list put together** — 43 spec examples and
-`edge-cases.md`, against seventeen for the largest of the rest.
+**The HTML-block card is done (2026-08-24), and it was worth what the
+measurement said.** Pandoc's markdown writes one `RawBlock` per
+block-level tag and reads what lies between two of them as markdown;
+`native_divs`, `native_spans`, the four verbatim elements and the
+`Plain`-versus-`Para` rule sit under it. Seven measured rules,
+`COMPATIBILITY.md` carries each with its probe. **HTML blocks went 43/44
+failing to 7/44 and the reader 445/652 to 488/652 — 43 gained, none
+lost**, checked example by example against the trees it produced before.
+
+There was no second shape available: pandoc's tree holds one raw block
+per tag, and the gate compares trees.
 
 The rest of the list is bracketed spans `[text]{#id}`, block scalars in
 a metadata block, a multi-word fence info string, `***x***` nesting the
@@ -430,13 +433,22 @@ GFM document. The last two need the *source* rather than the tree, which
 is the wall `COMPATIBILITY.md` already records for
 `[http://x](http://x)`.
 
-**What the section table also says is where the ceiling is.** Emphasis
-40/132, links 26/90, setext headings 16/27: those are not extensions,
-they are a different parser. Pandoc's markdown is not CommonMark plus a
-feature list, and no card closes that gap. So the exit test for D4.4 —
-"until the number is close to 100" — should be re-read as *close to 100
-on what a dialect can reach*, and the honest way to say that is the
+**What is left after the HTML card is the parser, and no card closes
+it.** Emphasis 40/132, links 26/90, setext headings 16/27, and pandoc's
+rule that a heading, a list or a block quote needs a blank line in front
+of it — `a\n# H` is one paragraph there and two blocks here. Pandoc's
+markdown is not CommonMark plus a feature list, and comrak is a
+CommonMark parser. So the exit test for D4.4 — "until the number is
+close to 100" — should be re-read as *close to 100 on what a dialect
+built this way can reach*, and the honest way to say that is the section
 table rather than the total.
+
+**Which makes the aliasing decision a different question than it was.**
+`markdown` still does not alias `pandoc_markdown`, and the reason is
+unchanged: 488/652 is not 100, and a silent change of meaning on a
+quarter of documents is worse than a flag someone types. What has
+changed is that the remaining quarter is now *named* — it is the four
+parser sections above, not an unread list.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number

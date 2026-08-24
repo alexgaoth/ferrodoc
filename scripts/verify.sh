@@ -173,7 +173,7 @@ if [ "$want_gates" = 1 ]; then
     # rather than twenty documents. Twenty cannot say how far a *dialect*
     # is — the corpus blind spot is the most expensive recurring defect
     # in this repository — and this run costs seven seconds.
-    gate "pandoc-markdown (spec)" $HARNESS diff-pandoc-md $SPEC --fail-under 68
+    gate "pandoc-markdown (spec)" $HARNESS diff-pandoc-md $SPEC --fail-under 74
     # `--toc` and `--number-sections` have no gate in the harness: the
     # rest of a standalone page is deliberately not pandoc's, so only
     # the `<nav>` block and the heading lines are comparable. The

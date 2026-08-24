@@ -142,6 +142,50 @@ impl Dialect {
     }
 }
 
+/// The comrak options one dialect is read with. Shared so a fragment —
+/// the markdown between two raw HTML tags — is read exactly as the
+/// document around it was.
+fn options_for(dialect: Dialect) -> Options<'static> {
+let mut options = Options::default();
+if dialect.is_extended() {
+    options.extension.table = true;
+    options.extension.strikethrough = true;
+    options.extension.tasklist = true;
+    // Probed: pandoc's `gfm` reader has `tex_math_dollars` on, so
+    // `$x$` is `Math InlineMath` and `$$x$$` is `Math DisplayMath`
+    // there — while `-f commonmark` leaves both as literal `Str`.
+    // `math_code` stays off: pandoc does not read `` `$x$` `` as math.
+    options.extension.math_dollars = true;
+    // Probed: `pandoc -f gfm` reads `[^1]` as `Note`, and GitHub renders
+    // it. `-f commonmark` does not, which is why this is inside the gfm
+    // branch — `diff-spec` and `diff-md` would drop if it leaked out.
+    options.extension.footnotes = true;
+}
+// Probed: `pandoc -f gfm` links a bare `example.com`; `pandoc -f
+// markdown` does not, so this one belongs to gfm alone.
+options.extension.autolink = dialect == Dialect::Gfm;
+if dialect == Dialect::Pandoc {
+    // Each of the four is a construct `-f markdown` reads and
+    // `-f commonmark` does not; each is probed in the crate's
+    // `CLAUDE.md` against `pandoc -f markdown -t json`.
+    options.extension.header_attributes = true;
+    options.extension.description_lists = true;
+    options.extension.superscript = true;
+    options.extension.subscript = true;
+    options.extension.front_matter_delimiter = Some("---".to_owned());
+    options.extension.link_attributes = true;
+    options.extension.inline_code_attributes = true;
+    options.extension.inline_footnotes = true;
+    // `smart` is pandoc's `markdown` and nobody else's: probed, `-f
+    // gfm` and `-f commonmark` both leave `it's` as it stands. It
+    // turns `--` into an en dash, `---` into an em dash, `...` into
+    // an ellipsis, and the quotes into curly ones — and a *pair* of
+    // those becomes a `Quoted` element, which `quoted` does.
+    options.parse.smart = true;
+}
+    options
+}
+
 fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
     let mut prepared: String = preprocess(input).into_owned();
     // comrak does not recognise an **empty** front-matter block, so
@@ -157,43 +201,7 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
     }
     let src = Src::new(&prepared);
     let arena = Arena::new();
-    let mut options = Options::default();
-    if dialect.is_extended() {
-        options.extension.table = true;
-        options.extension.strikethrough = true;
-        options.extension.tasklist = true;
-        // Probed: pandoc's `gfm` reader has `tex_math_dollars` on, so
-        // `$x$` is `Math InlineMath` and `$$x$$` is `Math DisplayMath`
-        // there — while `-f commonmark` leaves both as literal `Str`.
-        // `math_code` stays off: pandoc does not read `` `$x$` `` as math.
-        options.extension.math_dollars = true;
-        // Probed: `pandoc -f gfm` reads `[^1]` as `Note`, and GitHub renders
-        // it. `-f commonmark` does not, which is why this is inside the gfm
-        // branch — `diff-spec` and `diff-md` would drop if it leaked out.
-        options.extension.footnotes = true;
-    }
-    // Probed: `pandoc -f gfm` links a bare `example.com`; `pandoc -f
-    // markdown` does not, so this one belongs to gfm alone.
-    options.extension.autolink = dialect == Dialect::Gfm;
-    if dialect == Dialect::Pandoc {
-        // Each of the four is a construct `-f markdown` reads and
-        // `-f commonmark` does not; each is probed in the crate's
-        // `CLAUDE.md` against `pandoc -f markdown -t json`.
-        options.extension.header_attributes = true;
-        options.extension.description_lists = true;
-        options.extension.superscript = true;
-        options.extension.subscript = true;
-        options.extension.front_matter_delimiter = Some("---".to_owned());
-        options.extension.link_attributes = true;
-        options.extension.inline_code_attributes = true;
-        options.extension.inline_footnotes = true;
-        // `smart` is pandoc's `markdown` and nobody else's: probed, `-f
-        // gfm` and `-f commonmark` both leave `it's` as it stands. It
-        // turns `--` into an en dash, `---` into an em dash, `...` into
-        // an ellipsis, and the quotes into curly ones — and a *pair* of
-        // those becomes a `Quoted` element, which `quoted` does.
-        options.parse.smart = true;
-    }
+    let options = options_for(dialect);
     let root = parse_document(&arena, &prepared, &options);
     // Check the depth once, without recursing, and leave the conversion
     // itself exactly as shallow-document-shaped as it was: threading a
@@ -239,6 +247,532 @@ fn implicit_figure(attr: &Attr, alt: &[Inline], target: &Target) -> Block {
         Caption { short: None, blocks: vec![Block::Plain(alt.to_vec())] },
         vec![Block::Plain(vec![image])],
     )
+}
+
+/// One raw HTML run's literal, with the newline comrak drops.
+///
+/// An unclosed type-1..5 HTML block (outside blockquotes) gains one bonus
+/// newline when only blank lines separate it from EOF. Comrak's literal
+/// already contains the block's trailing blank lines; its first line is
+/// the node's start line.
+fn html_literal(
+    hb: &comrak::nodes::NodeHtmlBlock,
+    data: &comrak::nodes::Ast,
+    src: &Src,
+    in_quote: bool,
+) -> String {
+    let mut literal = hb.literal.clone();
+    if (1..=5).contains(&hb.block_type)
+        && !contains_closer(&literal, hb.block_type)
+        && !in_quote
+        && src.only_blanks_after(data.sourcepos.start.line + literal_lines(&literal) - 1)
+    {
+        literal.push('\n');
+    }
+    literal
+}
+
+/// The tags `pandoc -f markdown` treats as **block-level**: each one is
+/// a `RawBlock` by itself and what lies between two of them is read as
+/// markdown. Measured tag by tag against `pandoc -f markdown -t json`,
+/// and the list is not `CommonMark`'s in either direction: `<embed>`,
+/// `<meta>`, `<title>`, `<track>` and `<source>` are block-level here
+/// while `<a>`, `<img>`, `<input>`, `<label>` and `<span>` are not.
+///
+/// **Thirty-nine of them are not HTML at all.** Pandoc also knows
+/// `DocBook`'s block elements, so `<warning>`, `<note>`, `<tip>`,
+/// `<programlisting>` and `<itemizedlist>` open a block while `<danger>`
+/// and `<foo>` do not — which is measured, not guessable, and is what
+/// the spec's `<Warning>` example turns on. Sorted, and searched as
+/// such.
+static BLOCK_TAGS: &[&str] = &[
+    "address", "area", "article", "aside", "audio", "bibliolist",
+    "blockquote", "body", "button", "calloutlist", "canvas", "caption",
+    "case", "caution", "center", "classsynopsis", "cmdsynopsis", "col",
+    "colgroup", "dd", "default", "del", "details", "dir", "div", "dl",
+    "dt", "embed", "epigraph", "equation", "example", "fieldset",
+    "figcaption", "figure", "footer", "form", "formalpara", "frameset",
+    "funcsynopsis", "glosslist", "h1", "h2", "h3", "h4", "h5", "h6",
+    "head", "header", "hgroup", "hr", "html", "iframe", "important",
+    "informalequation", "informalexample", "informalfigure",
+    "informaltable", "ins", "isindex", "itemizedlist", "li",
+    "literallayout", "main", "map", "mediaobject", "menu", "meta",
+    "msgset", "nav", "noframes", "noscript", "note", "object", "ol",
+    "orderedlist", "output", "p", "para", "procedure", "programlisting",
+    "progress", "qandaset", "screen", "section", "segmentedlist",
+    "sidebar", "simpara", "simplelist", "source", "summary", "switch",
+    "synopsis", "table", "task", "tbody", "td", "tfoot", "th", "thead",
+    "tip", "title", "tr", "track", "ul", "variablelist", "video",
+    "warning",
+];
+
+
+/// The four whose content is **not** markdown: everything through the
+/// matching close tag is one `RawBlock`, verbatim.
+static VERBATIM_TAGS: &[&str] = &["pre", "script", "style", "textarea"];
+
+fn is_block_tag(name: &str) -> bool {
+    BLOCK_TAGS.binary_search(&name).is_ok()
+}
+
+fn is_verbatim_tag(name: &str) -> bool {
+    VERBATIM_TAGS.contains(&name)
+}
+
+/// One `<…>` found in a raw HTML run.
+struct RawTag {
+    /// Byte index just past the `>`.
+    end: usize,
+    /// The element name, lowercased. Empty for a comment, a processing
+    /// instruction, a declaration or a CDATA section — none of which
+    /// holds markdown, and each of which pandoc keeps raw.
+    name: String,
+    closing: bool,
+}
+
+/// The next `<…>` at or after `from`. A `<` that starts nothing this
+/// recognises is skipped rather than guessed at.
+fn next_tag(text: &str, from: usize) -> Option<(usize, RawTag)> {
+    let mut at = from;
+    while let Some(offset) = text.get(at..)?.find('<') {
+        let start = at + offset;
+        let rest = &text[start..];
+        // A comment and a processing instruction are raw; a
+        // declaration and a CDATA section are **not**, and pandoc reads
+        // `<!DOCTYPE html>` and `<![CDATA[ … ]]>` as the literal text
+        // they are. Measured, and the opposite of what `CommonMark`
+        // does with them.
+        for (open, close) in [("<!--", "-->"), ("<?", "?>")] {
+            if let Some(body) = rest.strip_prefix(open) {
+                let end = body
+                    .find(close)
+                    .map_or(text.len(), |index| start + open.len() + index + close.len());
+                return Some((start, RawTag { end, name: String::new(), closing: false }));
+            }
+        }
+        let closing = rest.starts_with("</");
+        let name_at = start + if closing { 2 } else { 1 };
+        let name_len = text[name_at..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .count();
+        let starts_a_name = text[name_at..].starts_with(|c: char| c.is_ascii_alphabetic());
+        if name_len > 0 && starts_a_name {
+            // Scan to the `>`, and step over a quoted attribute value so
+            // a `>` inside one does not end the tag early.
+            let mut quote = None;
+            let mut end = None;
+            for (index, ch) in text[name_at + name_len..].char_indices() {
+                match (quote, ch) {
+                    (Some(open), _) if ch == open => quote = None,
+                    (None, '"' | '\'') => quote = Some(ch),
+                    (None, '>') => {
+                        end = Some(name_at + name_len + index + 1);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(end) = end {
+                let name = text[name_at..name_at + name_len].to_ascii_lowercase();
+                return Some((start, RawTag { end, name, closing }));
+            }
+        }
+        at = start + 1;
+    }
+    None
+}
+
+/// Whether this run holds anything pandoc would break the block at.
+fn breaks_the_block(tag: &RawTag) -> bool {
+    tag.name.is_empty() || is_block_tag(&tag.name) || is_verbatim_tag(&tag.name)
+}
+
+fn has_block_tag(literal: &str) -> bool {
+    let mut at = 0;
+    while let Some((start, tag)) = next_tag(literal, at) {
+        if breaks_the_block(&tag) {
+            return true;
+        }
+        at = tag.end.max(start + 1);
+    }
+    false
+}
+
+/// The index just past `</name>`, searching from `from`.
+fn closing_tag(text: &str, from: usize, name: &str) -> Option<usize> {
+    let mut at = from;
+    while let Some((start, tag)) = next_tag(text, at) {
+        if tag.closing && tag.name == name {
+            return Some(tag.end);
+        }
+        at = tag.end.max(start + 1);
+    }
+    None
+}
+
+/// A run of raw HTML, as pandoc's markdown reads it: **one `RawBlock`
+/// per block-level tag**, with everything between two of them read as
+/// markdown. `CommonMark` keeps the whole run as a single opaque chunk,
+/// and 43 of the spec's 44 HTML-block examples differ for that alone.
+///
+/// The tags come out on their own because that is what pandoc's tree
+/// holds — `<table>`, `<tr>`, `<td>` are three `RawBlock`s with the cell
+/// text as a `Plain` between them — so there is no other shape to write.
+fn html_run(literal: &str, defs: &Notes, dialect: Dialect) -> Vec<Block> {
+    // Nothing block-level in it: the run is a paragraph, not a block.
+    // This is also what stops the recursion — every chunk below is cut
+    // at block tags, so it can only come back through here.
+    if !has_block_tag(literal) {
+        return inline_html(literal, defs, dialect);
+    }
+    let mut out = Vec::new();
+    let mut chunk_from = 0;
+    let mut at = 0;
+    while let Some((start, tag)) = next_tag(literal, at) {
+        if !breaks_the_block(&tag) {
+            at = tag.end.max(start + 1);
+            continue;
+        }
+        // `<pre>`, `<script>`, `<style>` and `<textarea>` hold no
+        // markdown: the whole element is one raw block.
+        let span_end = if is_verbatim_tag(&tag.name) && !tag.closing {
+            closing_tag(literal, tag.end, &tag.name).unwrap_or(literal.len())
+        } else {
+            tag.end
+        };
+        // A `</div>` is not a raw tag on the next line: `native_divs`
+        // takes it, and the markdown before it is read as a document of
+        // its own — which is why `<div>\na\n</div>` ends in a `Para`
+        // and `<td>\na\n</td>` in a `Plain`. Measured both ways.
+        let absorbed = tag.closing && tag.name == "div";
+        push_chunk(&literal[chunk_from..start], absorbed, &mut out, defs, dialect);
+        out.push(Block::RawBlock(
+            Format("html".to_owned()),
+            literal[start..span_end].trim_end_matches('\n').to_owned(),
+        ));
+        at = span_end;
+        chunk_from = span_end;
+    }
+    push_chunk(&literal[chunk_from..], true, &mut out, defs, dialect);
+    out
+}
+
+/// The markdown between two raw tags.
+///
+/// Its last paragraph is a `Plain` unless a blank line closes it, which
+/// is `paragraph`'s rule read against the chunk's own text rather than
+/// the document's. Two ways it can be closed, both measured:
+///
+/// * the chunk ends with a blank line — `<p>\n\na\n\n</p>` keeps its
+///   `Para` where `<p>\na\n\nb\n</p>` ends in a `Plain`;
+/// * or the tag after it is a `</div>`, which `native_divs` takes rather
+///   than leaving on the next line, so the chunk is read as a document
+///   of its own: `<div>\nx\n</div>` is a `Para` and `<td>\nx\n</td>` a
+///   `Plain`.
+///
+/// A chunk that does not end with a newline at all had the tag on its
+/// own line, and is a `Plain` either way: `<div>x</div>`.
+fn push_chunk(text: &str, absorbed: bool, out: &mut Vec<Block>, defs: &Notes, dialect: Dialect) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let closed = text.ends_with('\n') && (absorbed || text.ends_with("\n\n"));
+    let mut parsed = fragment(&dedented(text), defs, dialect);
+    if !closed
+        && let Some(last) = parsed.last_mut()
+        && let Block::Para(inlines) = last
+    {
+        *last = Block::Plain(std::mem::take(inlines));
+    }
+    out.append(&mut parsed);
+}
+
+/// A chunk whose first line of content is indented four columns or more
+/// and has no blank line in front of it.
+///
+/// Pandoc has no indented code block there — its `codeBlockIndented`
+/// wants a blank line first — while a fragment read on its own starts at
+/// column one and makes one. So the chunk is moved back to the margin,
+/// which keeps every relative indent inside it and is the difference
+/// between reading `<td>\n    hi\n</td>` as a cell holding `hi` and as a
+/// cell holding a code block.
+fn dedented(text: &str) -> Cow<'_, str> {
+    // The newline that ended the tag's own line is not a blank line.
+    let body = text.strip_prefix('\n').unwrap_or(text);
+    let first = body.split('\n').next().unwrap_or_default();
+    let indent = first.len() - first.trim_start_matches(' ').len();
+    if indent < 4 || first.trim().is_empty() {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        let keep = line.len() - line.trim_start_matches(' ').len();
+        out.push_str(&line[keep.min(indent)..]);
+    }
+    Cow::Owned(out)
+}
+
+/// Read a fragment with the dialect the document around it was read
+/// with. Its own `Src`, because its line numbers start again at one.
+fn fragment(text: &str, defs: &Notes, dialect: Dialect) -> Vec<Block> {
+    let arena = Arena::new();
+    let root = parse_document(&arena, text, &options_for(dialect));
+    blocks(root.children(), &Src::new(text), false, defs, dialect)
+}
+
+/// A run with no block-level tag in it is a paragraph, not a block:
+/// pandoc reads `<foo>\nbar\n</foo>` as inlines with the tags raw, and
+/// the markdown between them **is** read — `*bar*` comes out an `Emph`.
+///
+/// Getting those inlines uses `CommonMark`'s own rule rather than a
+/// second parser: an HTML block only ever begins at the **start of a
+/// line**, so a word and a space in front of the run make every tag in
+/// it inline. The word is taken off again.
+///
+/// This reads inlines directly rather than going back through `blocks`,
+/// and that is load-bearing: `CommonMark`'s block-tag list is not
+/// pandoc's — `<link>`, `<option>`, `<param>` and eight more open a
+/// block there and are inline here — so a run of one of those came back
+/// as a block and asked to be read as inlines again, forever. The
+/// measured shape of that bug is a stack overflow.
+fn inline_html(literal: &str, defs: &Notes, dialect: Dialect) -> Vec<Block> {
+    let raw = || vec![Block::RawBlock(Format("html".to_owned()), literal.to_owned())];
+    let source = format!("x {}", literal.trim_start());
+    let arena = Arena::new();
+    let root = parse_document(&arena, &source, &options_for(dialect));
+    let Some(node) = root.first_child() else { return raw() };
+    if node.next_sibling().is_some()
+        || !matches!(node.data.borrow().value, NodeValue::Paragraph)
+    {
+        return raw();
+    }
+    let read = inlines(node.children(), defs, dialect);
+    let [Inline::Str(word), Inline::Space | Inline::SoftBreak, rest @ ..] = read.as_slice()
+    else {
+        return raw();
+    };
+    if word != "x" {
+        return raw();
+    }
+    vec![Block::Para(rest.to_vec())]
+}
+
+/// The tag a raw inline holds, if it is one this reader knows.
+fn raw_tag_name(token: &Inline) -> Option<String> {
+    let Inline::RawInline(format, raw) = token else { return None };
+    if format.0 != "html" {
+        return None;
+    }
+    let (start, tag) = next_tag(raw, 0)?;
+    (start == 0 && tag.end == raw.len()).then_some(tag.name)
+}
+
+/// A paragraph that **begins** with a block-level tag is not a
+/// paragraph: pandoc reads `<del>*foo*</del>` as a raw block, a `Plain`
+/// and a raw block, the same shape a whole line of HTML gets. Only at
+/// the start — `x <del>a</del>` stays one paragraph — and what follows
+/// the last tag opens a new one.
+///
+/// This is the case comrak never hands over as an HTML block, because
+/// `CommonMark` starts one only where a tag stands alone on its line.
+fn split_leading_html(block: Block, out: &mut Vec<Block>) {
+    let (Block::Para(inlines) | Block::Plain(inlines)) = &block else {
+        out.push(block);
+        return;
+    };
+    let leads = inlines.first().and_then(raw_tag_name).is_some_and(|n| is_block_tag(&n));
+    if !leads {
+        out.push(block);
+        return;
+    }
+    let trailing_is_para = matches!(block, Block::Para(_));
+    let (Block::Para(inlines) | Block::Plain(inlines)) = block else { unreachable!() };
+    let mut run: Vec<Inline> = Vec::new();
+    let mut seen_tag = false;
+    for token in inlines {
+        let block_tag = raw_tag_name(&token).is_some_and(|name| is_block_tag(&name));
+        if !block_tag {
+            run.push(token);
+            continue;
+        }
+        if !run.is_empty() {
+            out.push(Block::Plain(std::mem::take(&mut run)));
+        }
+        seen_tag = true;
+        let Inline::RawInline(format, raw) = token else { unreachable!() };
+        out.push(Block::RawBlock(*format, raw));
+    }
+    // What follows the last tag is a paragraph of its own, and the space
+    // that separated it from the tag is not part of it.
+    while matches!(run.first(), Some(Inline::Space | Inline::SoftBreak)) {
+        run.remove(0);
+    }
+    if !run.is_empty() {
+        out.push(if seen_tag && trailing_is_para { Block::Para(run) } else { Block::Plain(run) });
+    }
+}
+
+/// An HTML tag's attributes as pandoc reads them: `id` is the
+/// identifier, `class` splits on whitespace, and everything else keeps
+/// its order. Measured — the attribute *names* are matched without
+/// regard to case (`ID`, `Class`) while the values keep theirs, and a
+/// bare attribute is a pair with an empty value.
+fn tag_attr(raw: &str) -> Attr {
+    let mut attr = Attr::default();
+    // Past `<name`, and short of the `>`.
+    let body = raw
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .trim_end_matches('/');
+    let mut rest = body.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '-');
+    while !rest.is_empty() {
+        rest = rest.trim_start();
+        let name_len = rest
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '=' && *c != '>')
+            .map(char::len_utf8)
+            .sum();
+        if name_len == 0 {
+            break;
+        }
+        let (name, after) = rest.split_at(name_len);
+        let after = after.trim_start();
+        let (value, tail) = match after.strip_prefix('=') {
+            None => (String::new(), after),
+            Some(after) => {
+                let after = after.trim_start();
+                if let Some(quote @ ('"' | '\'')) = after.chars().next() {
+                    let after = &after[quote.len_utf8()..];
+                    let end = after.find(quote).unwrap_or(after.len());
+                    (after[..end].to_owned(), &after[(end + 1).min(after.len())..])
+                } else {
+                    let end = after.find(char::is_whitespace).unwrap_or(after.len());
+                    (after[..end].to_owned(), &after[end..])
+                }
+            }
+        };
+        match name.to_ascii_lowercase().as_str() {
+            "id" => attr.identifier = value,
+            "class" => attr.classes = value.split_whitespace().map(str::to_owned).collect(),
+            _ => attr.attributes.push((name.to_owned(), value)),
+        }
+        rest = tail;
+    }
+    attr
+}
+
+/// The attributes of `block` if it is a raw opening `<div>` and nothing
+/// else.
+fn div_open(block: &Block) -> Option<Attr> {
+    let Block::RawBlock(format, raw) = block else { return None };
+    if format.0 != "html" {
+        return None;
+    }
+    let raw = raw.trim();
+    let (start, tag) = next_tag(raw, 0)?;
+    (start == 0 && tag.end == raw.len() && !tag.closing && tag.name == "div")
+        .then(|| tag_attr(raw))
+}
+
+fn div_close(block: &Block) -> bool {
+    matches!(block, Block::RawBlock(format, raw)
+        if format.0 == "html" && raw.trim().eq_ignore_ascii_case("</div>"))
+}
+
+/// Pandoc's `native_divs`: a `<div>` and the `</div>` that closes it are
+/// a `Div` carrying the element's attributes, not two raw blocks.
+///
+/// Measured: an **unclosed** `<div>` takes everything after it, and an
+/// unmatched `</div>` stays raw. The depth bound is the reader's
+/// never-panic promise — a document of ten thousand nested `<div>`s must
+/// not take the stack with it.
+fn native_divs(blocks: Vec<Block>, depth: usize) -> Vec<Block> {
+    if depth >= MAX_NESTING || !blocks.iter().any(|b| div_open(b).is_some()) {
+        return blocks;
+    }
+    let mut items: std::collections::VecDeque<Block> = blocks.into();
+    let mut out = Vec::with_capacity(items.len());
+    while let Some(block) = items.pop_front() {
+        let Some(attr) = div_open(&block) else {
+            out.push(block);
+            continue;
+        };
+        let mut level = 0usize;
+        let mut closes_at = None;
+        for (index, candidate) in items.iter().enumerate() {
+            if div_open(candidate).is_some() {
+                level += 1;
+            } else if div_close(candidate) {
+                if level == 0 {
+                    closes_at = Some(index);
+                    break;
+                }
+                level -= 1;
+            }
+        }
+        let take = closes_at.unwrap_or(items.len());
+        let inner: Vec<Block> = items.drain(..take).collect();
+        if closes_at.is_some() {
+            items.pop_front();
+        }
+        out.push(Block::Div(attr, native_divs(inner, depth + 1)));
+    }
+    out
+}
+
+/// Pandoc's `native_spans`, the inline half of the same rule: a
+/// `<span>` and its `</span>` are a `Span`. Runs over one sibling list,
+/// as the quote pairing does, and an unclosed one stays raw.
+fn native_spans(tokens: Vec<Inline>) -> Vec<Inline> {
+    fn span_open(token: &Inline) -> Option<Attr> {
+        let Inline::RawInline(format, raw) = token else { return None };
+        if format.0 != "html" {
+            return None;
+        }
+        let (start, tag) = next_tag(raw, 0)?;
+        (start == 0 && tag.end == raw.len() && !tag.closing && tag.name == "span")
+            .then(|| tag_attr(raw))
+    }
+    fn span_close(token: &Inline) -> bool {
+        matches!(token, Inline::RawInline(format, raw)
+            if format.0 == "html" && raw.eq_ignore_ascii_case("</span>"))
+    }
+    if !tokens.iter().any(|t| span_open(t).is_some()) {
+        return tokens;
+    }
+    let mut items: std::collections::VecDeque<Inline> = tokens.into();
+    let mut out = Vec::with_capacity(items.len());
+    while let Some(token) = items.pop_front() {
+        let Some(attr) = span_open(&token) else {
+            out.push(token);
+            continue;
+        };
+        let mut level = 0usize;
+        let mut closes_at = None;
+        for (index, candidate) in items.iter().enumerate() {
+            if span_open(candidate).is_some() {
+                level += 1;
+            } else if span_close(candidate) {
+                if level == 0 {
+                    closes_at = Some(index);
+                    break;
+                }
+                level -= 1;
+            }
+        }
+        let Some(closes_at) = closes_at else {
+            out.push(token);
+            continue;
+        };
+        let inner: Vec<Inline> = items.drain(..closes_at).collect();
+        items.pop_front();
+        out.push(Inline::Span(Box::new(attr), native_spans(inner)));
+    }
+    out
 }
 
 /// The class `pandoc -f markdown` gives `<http://x>` and `<a@b.example>`.
@@ -507,13 +1041,28 @@ fn blocks<'a>(
             NodeValue::List(nl) => Some(nl),
             _ => None,
         };
+        // And so can a run of raw HTML in pandoc's dialect: a
+        // block-level tag is a `RawBlock` of its own and what lies
+        // between two of them is markdown.
+        let html = match &node.data.borrow().value {
+            NodeValue::HtmlBlock(hb) if dialect == Dialect::Pandoc => {
+                Some(html_literal(hb, &node.data.borrow(), src, in_quote))
+            }
+            _ => None,
+        };
         if let Some(nl) = list {
             out.extend(lists(node, &nl, src, in_quote, defs, dialect));
+        } else if let Some(literal) = html {
+            out.extend(html_run(&literal, defs, dialect));
         } else if let Some(block) = block(node, src, in_quote, defs, dialect) {
-            out.push(block);
+            if dialect == Dialect::Pandoc {
+                split_leading_html(block, &mut out);
+            } else {
+                out.push(block);
+            }
         }
     }
-    out
+    if dialect == Dialect::Pandoc { native_divs(out, 0) } else { out }
 }
 
 /// Map one comrak list, splitting it wherever a task item meets a plain
@@ -627,7 +1176,44 @@ fn paragraph<'a>(
     {
         return implicit_figure(attr, alt, target);
     }
+    // Pandoc's `para` falls back to `plain` when no blank line follows,
+    // and that is a rule about *every* paragraph, not only the ones
+    // beside HTML: `a\n<p>x</p>` opens with a `Plain`, `a\n\nb` is two
+    // `Para`s, and a paragraph at end of input is a `Para` because
+    // pandoc appends the blank line itself. `CommonMark` has no such
+    // distinction and comrak writes `Para` throughout.
+    //
+    // Two exceptions, both measured. A **fenced code block** ends a
+    // paragraph as a blank line does (pandoc's `para` looks ahead for
+    // one), so `foo\n```\nbar\n```` keeps its `Para`. And a paragraph
+    // directly inside a **list item** is left alone: the list's own
+    // tightness decides there, and reading the next source line instead
+    // made every item but the last of a loose list a `Plain`.
+    if dialect == Dialect::Pandoc && !in_item(node) {
+        let next = src.line(data.sourcepos.end.line + 1).trim();
+        let fence = next.starts_with("```") || next.starts_with("~~~");
+        // A `</div>` is not left on the next line: `native_divs` takes
+        // it, so the paragraph before it ends its own document.
+        let absorbed = next.eq_ignore_ascii_case("</div>");
+        if first_nonmarker_char(next).is_some() && !fence && !absorbed {
+            return Block::Plain(content);
+        }
+    }
     Block::Para(content)
+}
+
+/// Whether this node's own container is a list item or a definition,
+/// where tightness rather than the next line decides `Plain` or `Para`.
+fn in_item<'a>(node: &'a AstNode<'a>) -> bool {
+    node.parent().is_some_and(|parent| {
+        matches!(
+            parent.data.borrow().value,
+            NodeValue::Item(_)
+                | NodeValue::TaskItem(_)
+                | NodeValue::DescriptionTerm
+                | NodeValue::DescriptionDetails
+        )
+    })
 }
 
 fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dialect: Dialect) -> Option<Block> {
@@ -675,23 +1261,10 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
                 text.to_owned(),
             ))
         }
-        NodeValue::HtmlBlock(hb) => {
-            let mut literal = hb.literal.clone();
-            // An unclosed type-1..5 HTML block (outside blockquotes) gains
-            // one bonus newline when only blank lines separate it from EOF.
-            // Comrak's literal already contains the block's trailing blank
-            // lines; its first line is the node's start line.
-            if (1..=5).contains(&hb.block_type)
-                && !contains_closer(&literal, hb.block_type)
-                && !in_quote
-                && src.only_blanks_after(
-                    data.sourcepos.start.line + literal_lines(&literal) - 1,
-                )
-            {
-                literal.push('\n');
-            }
-            Some(Block::RawBlock(Format("html".to_owned()), literal))
-        }
+        NodeValue::HtmlBlock(hb) => Some(Block::RawBlock(
+            Format("html".to_owned()),
+            html_literal(hb, &data, src, in_quote),
+        )),
         NodeValue::ThematicBreak => Some(Block::HorizontalRule),
         // A definition list is a `DescriptionList` of `DescriptionItem`s,
         // each holding a `DescriptionTerm` and one `DescriptionDetails`.
@@ -893,7 +1466,7 @@ impl Identifiers {
                         let _ = self.unique(&taken);
                     }
                 }
-                Block::BlockQuote(inner) => self.assign(inner),
+                Block::BlockQuote(inner) | Block::Div(_, inner) => self.assign(inner),
                 Block::BulletList(items) | Block::OrderedList(_, items) => {
                     for item in items {
                         self.assign(item);
@@ -983,7 +1556,7 @@ fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes, diale
         inline(node, &mut out, defs, dialect);
     }
     let out = merge_adjacent_emphasis(out);
-    if dialect == Dialect::Pandoc { quoted(out) } else { out }
+    if dialect == Dialect::Pandoc { native_spans(quoted(out)) } else { out }
 }
 
 /// The curly quotes `smart` produced, paired into `Quoted` elements.
@@ -1158,7 +1731,22 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
         NodeValue::LineBreak => out.push(Inline::LineBreak),
         NodeValue::Code(c) => out.push(Inline::Code(Box::new(written()), c.literal.clone())),
         NodeValue::HtmlInline(h) => {
-            out.push(Inline::RawInline(Box::new(Format("html".to_owned())), h.clone()));
+            // `<!DOCTYPE …>`, `<!ELEMENT …>` and a CDATA section are the
+            // literal text they are written with in pandoc's markdown,
+            // not raw HTML. Measured: of the `<!` forms only a comment
+            // is raw, and `CommonMark` takes all of them.
+            if dialect == Dialect::Pandoc && h.starts_with("<!") && !h.starts_with("<!--") {
+                let mut first = true;
+                for line in h.split('\n') {
+                    if !first {
+                        out.push(Inline::SoftBreak);
+                    }
+                    first = false;
+                    text_tokens(line, out);
+                }
+            } else {
+                out.push(Inline::RawInline(Box::new(Format("html".to_owned())), h.clone()));
+            }
         }
         NodeValue::Emph => out.push(Inline::Emph(inlines(node.children(), defs, dialect))),
         NodeValue::Strong => out.push(Inline::Strong(inlines(node.children(), defs, dialect))),
@@ -1734,6 +2322,102 @@ mod tests {
                 {"t": "Code", "c": [["", [], []], "code"]},
                 {"t": "Str", "c": "{.rust}"}
             ]}])
+        );
+    }
+
+    /// Raw HTML in pandoc's dialect. Every expectation is off
+    /// `pandoc -f markdown -t json`; `diff-pandoc-md` over the spec is
+    /// the wide check and these are the rules it does not reach.
+    #[test]
+    fn raw_html_is_split_at_block_level_tags() {
+        let raw = |html: &str| serde_json::json!({"t": "RawBlock", "c": ["html", html]});
+
+        // One raw block per tag, and the cell text between them.
+        assert_eq!(
+            pmd("<table><tr><td>\nhi\n</td></tr></table>\n"),
+            serde_json::json!([
+                raw("<table>"), raw("<tr>"), raw("<td>"),
+                {"t": "Plain", "c": [{"t": "Str", "c": "hi"}]},
+                raw("</td>"), raw("</tr>"), raw("</table>")
+            ])
+        );
+
+        // The markdown between them is read as markdown, and a list is
+        // a list.
+        assert_eq!(
+            pmd("<td>\n- x\n</td>\n"),
+            serde_json::json!([
+                raw("<td>"),
+                {"t": "BulletList", "c": [[{"t": "Plain", "c": [{"t": "Str", "c": "x"}]}]]},
+                raw("</td>")
+            ])
+        );
+
+        // `<pre>` holds no markdown, and keeps no trailing newline.
+        assert_eq!(
+            pmd("<pre>\n**not md**\n</pre>\n"),
+            serde_json::json!([raw("<pre>\n**not md**\n</pre>")])
+        );
+
+        // A tag pandoc does not call block-level leaves a paragraph, and
+        // the markdown inside it is still read.
+        assert_eq!(
+            pmd("<foo>\n*bar*\n</foo>\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "RawInline", "c": ["html", "<foo>"]},
+                {"t": "SoftBreak"},
+                {"t": "Emph", "c": [{"t": "Str", "c": "bar"}]},
+                {"t": "SoftBreak"},
+                {"t": "RawInline", "c": ["html", "</foo>"]}
+            ]}])
+        );
+
+        // `<warning>` is not HTML at all — it is `DocBook`, and pandoc
+        // knows it. `<danger>` is neither.
+        assert_eq!(
+            pmd("<warning>\nx\n</warning>\n"),
+            serde_json::json!([
+                raw("<warning>"),
+                {"t": "Plain", "c": [{"t": "Str", "c": "x"}]},
+                raw("</warning>")
+            ])
+        );
+        assert_eq!(pmd("<danger>\nx\n</danger>\n")[0]["t"], "Para");
+
+        // `native_divs` and `native_spans`: the element's own attributes,
+        // `id` and `class` taken out of them.
+        assert_eq!(
+            pmd("<div class=\"a b\" id=\"i\" data-k=\"v\">\nx\n</div>\n"),
+            serde_json::json!([{"t": "Div", "c": [
+                ["i", ["a", "b"], [["data-k", "v"]]],
+                [{"t": "Para", "c": [{"t": "Str", "c": "x"}]}]
+            ]}])
+        );
+        assert_eq!(
+            pmd("a <span class=\"y\">z</span>\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "a"}, {"t": "Space"},
+                {"t": "Span", "c": [["", ["y"], []], [{"t": "Str", "c": "z"}]]}
+            ]}])
+        );
+        // An unmatched closer stays raw; an unclosed opener takes the rest.
+        assert_eq!(pmd("</div>\n\nx\n")[0], raw("</div>"));
+        assert_eq!(pmd("<div>\n\nx\n")[0]["t"], "Div");
+
+        // A declaration is the literal text it is written with, and only
+        // a comment among the `<!` forms is raw.
+        assert_eq!(
+            pmd("<!DOCTYPE html>\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "<!DOCTYPE"}, {"t": "Space"}, {"t": "Str", "c": "html>"}
+            ]}])
+        );
+        assert_eq!(pmd("<!-- c -->\n"), serde_json::json!([raw("<!-- c -->")]));
+
+        // None of it is `gfm`: there a run of HTML is one opaque block.
+        assert_eq!(
+            gfm("<td>\nhi\n</td>\n"),
+            serde_json::json!([raw("<td>\nhi\n</td>\n")])
         );
     }
 

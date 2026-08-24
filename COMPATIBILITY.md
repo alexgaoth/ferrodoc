@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **445/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **488/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1355,40 +1355,76 @@ attributes it hangs on the node are now picked up: `link_attributes`
 autolink's `uri`/`email` class shares that field, so it is given only
 where the source wrote no attributes of its own.
 
-**What the 207 remaining spec examples are**, by the spec's own
-sections, because the shape of that list is the finding:
-
-| failing | section |
-|---|---|
-| **43/44** | HTML blocks |
-| 40/132 | Emphasis and strong emphasis |
-| 26/90 | Links |
-| 16/27 | Setext headings |
-| 11/26 | Lists |
-| 9/20 | Raw HTML |
-| 8/18, 8/29, 8/27 | ATX headings, fenced code, link reference definitions |
-| 7/25, 7/22, 6/19 | block quotes, code spans, autolinks |
-
-**43 of 44 is not a list of extensions; it is one rule.** Pandoc's
-markdown reader writes **one `RawBlock` per tag** and reads what lies
-between them as markdown, where CommonMark keeps the whole HTML block as
-a single opaque chunk:
+**Raw HTML is read the way pandoc reads it** — the one rule that
+accounted for 43 of the spec's 44 HTML-block examples. Pandoc's markdown
+writes **one `RawBlock` per block-level tag** and reads what lies between
+two of them as markdown, where CommonMark keeps the whole run as a single
+opaque chunk:
 
     printf '<table>\n  <tr><td>\n hi\n  </td></tr>\n</table>\n' |
       pandoc -f markdown -t json
 
 gives `RawBlock "<table>"`, `RawBlock "<tr>"`, … with `Plain [Str "hi"]`
-in the middle. `native_divs` and `native_spans` sit on top of it: a
-matched `<div>` pair becomes a `Div` carrying the element's attributes,
-and `<span>` a `Span`. That one card is worth 43 examples and
-`edge-cases.md`; nothing else on the list is worth more than seventeen.
+in the middle. There is no other shape to write: that is what pandoc's
+tree holds, and the gate compares trees.
 
-The rest — emphasis flanking, link destinations with spaces or newlines,
-setext underlines — is **the parser rather than the dialect**. Pandoc's
-markdown is not CommonMark plus extensions, and those sections are where
-the difference stops being a feature list. That is the ceiling this
-reader is approaching, and it is why the number to watch is the shape of
-the table above rather than the total.
+Six rules under it, each measured rather than assumed:
+
+* **which tags are block-level is a list, and it is not CommonMark's.**
+  `<embed>`, `<meta>`, `<title>`, `<track>` and `<source>` are; `<a>`,
+  `<img>`, `<input>`, `<label>` and `<span>` are not. **Thirty-nine of
+  the 107 are not HTML at all** — pandoc also knows DocBook's block
+  elements, so `<warning>`, `<note>`, `<tip>` and `<itemizedlist>` open a
+  block while `<danger>` and `<foo>` do not.
+* `<pre>`, `<script>`, `<style>` and `<textarea>` hold **no markdown**:
+  the whole element is one raw block, and it keeps no trailing newline.
+* a run with no block-level tag in it is a **paragraph**, tags raw and
+  the markdown between them read — `<foo>\n*bar*\n</foo>` has an `Emph`
+  in it. A paragraph that *begins* with a block-level tag is split the
+  same way, which is the case CommonMark never calls an HTML block at
+  all (`<del>*foo*</del>`).
+* `native_divs` and `native_spans`: a matched `<div>` pair is a `Div`
+  carrying the element's attributes (`id` the identifier, `class` split
+  on whitespace, the rest in order, names matched without case), and
+  `<span>` a `Span`. An unclosed `<div>` takes everything after it; an
+  unmatched `</div>` stays raw.
+* of the `<!` forms only a **comment** is raw: `<!DOCTYPE html>` and
+  `<![CDATA[ … ]]>` are the literal text they are written with, block or
+  inline, which is the opposite of what CommonMark does with them.
+* and a paragraph is a `Plain` unless a blank line closes it — pandoc's
+  `para` falls back to `plain`, so `a\n<p>x</p>` opens with a `Plain`
+  while `a\n\nb` is two `Para`s. A fenced code block closes one as a
+  blank line does; a `</div>` does too, because `native_divs` takes it
+  rather than leaving it on the next line, which is the whole of why
+  `<div>\nx\n</div>` ends in a `Para` and `<td>\nx\n</td>` in a `Plain`.
+
+**HTML blocks went 43/44 failing to 7/44, and the reader 445/652 to
+488/652 — 43 examples gained and none lost.** What is left there is
+narrow: a `<pre>` whose content holds a blank line (so CommonMark ends
+the block before the closing tag), a comment indented one space, and
+malformed tags pandoc's inline scanner reads differently.
+
+**What the 164 remaining spec examples are**, by the spec's own sections,
+because the shape of that list is the finding:
+
+| failing | section |
+|---|---|
+| 40/132 | Emphasis and strong emphasis |
+| 26/90 | Links |
+| 16/27 | Setext headings |
+| 9/26 | Lists |
+| 8/18, 8/29, 8/27 | ATX headings, fenced code, link reference definitions |
+| 7/20, 7/44 | Raw HTML, HTML blocks |
+| 7/25, 7/22, 6/19 | block quotes, code spans, autolinks |
+
+**This is the parser rather than the dialect, and no card closes it.**
+Emphasis flanking, link destinations with spaces or newlines, setext
+underlines, and pandoc's rule that a heading, a list or a block quote
+needs a blank line in front of it — `a\n# H` is one paragraph there and a
+paragraph plus a heading here. Pandoc's markdown is not CommonMark plus a
+feature list, and those sections are where the difference stops being a
+feature at all. That is the ceiling this reader is approaching, and it is
+why the number to watch is the shape of the table rather than the total.
 
 **What the remaining ten corpus documents need**, each named rather
 than described as "the dialect": bracketed spans `[text]{#id}`,
