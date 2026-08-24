@@ -11,7 +11,7 @@
 //! Unicode (`$x^2$` becomes `x²`) where this writes the TeX, and it fills
 //! to `--columns` where this never wraps.
 
-use ferrodoc_ast::{Alignment, Block, Inline, Pandoc};
+use ferrodoc_ast::{Alignment, Block, Inline, ListNumberDelim, Pandoc};
 use std::fmt::Write as _;
 
 /// The column a `HorizontalRule` fills and pandoc's default `--columns`.
@@ -36,6 +36,12 @@ pub fn write_text(doc: &Pandoc) -> String {
 struct Writer {
     /// Footnote bodies in reference order; written at the end as `[N] …`.
     notes: Vec<String>,
+    /// How many list items deep the block being written is. A list item
+    /// renders its content with an **empty** prefix and adds the
+    /// continuation indent afterwards, so the prefix cannot say whether
+    /// the block is nested — and a code block four spaces in is markup at
+    /// the top level and four stray spaces inside an item.
+    nested: usize,
 }
 
 impl Writer {
@@ -51,12 +57,31 @@ impl Writer {
                 let text = self.inlines(inlines);
                 out.push(indent(&text, prefix));
             }
-            // Four spaces, which is what makes it read as code at all.
+            // Four spaces at the **top level**, which is what makes it
+            // read as code at all — and none inside a quote or a list
+            // item, where the container's own indentation already sets it
+            // apart. Four more there put the code four columns right of
+            // where pandoc has it, on every nested block.
             Block::CodeBlock(_, text) => {
-                out.push(indent(text.trim_end_matches('\n'), &format!("{prefix}    ")));
+                let inner = if prefix.is_empty() && self.nested == 0 {
+                    "    ".to_owned()
+                } else {
+                    prefix.to_owned()
+                };
+                out.push(indent(text.trim_end_matches('\n'), &inner));
             }
             // Two more spaces per level, so nesting is visible.
-            Block::BlockQuote(inner) => self.blocks(inner, out, &format!("{prefix}  ")),
+            Block::BlockQuote(inner) => {
+                let inner_prefix = format!("{prefix}  ");
+                let before = out.len();
+                self.blocks(inner, out, &inner_prefix);
+                // A quote whose content renders to nothing — a raw block
+                // in another format is one — is still a quote, and pandoc
+                // writes its indentation on a line of its own.
+                if out.len() == before {
+                    out.push(inner_prefix);
+                }
+            }
             Block::Div(_, inner) => self.blocks(inner, out, prefix),
             Block::Figure(_, caption, inner) => {
                 self.blocks(inner, out, prefix);
@@ -65,8 +90,15 @@ impl Writer {
             Block::BulletList(items) => self.list(items, out, prefix, |_| "- ".to_owned()),
             Block::OrderedList(attrs, items) => {
                 let start = attrs.start;
+                // The delimiter the list was written with. A list that
+                // said `3)` came out saying `3.`, which is the one thing
+                // a plain-text rendering of a list can still get wrong.
+                let close = match attrs.delim {
+                    ListNumberDelim::OneParen | ListNumberDelim::TwoParens => ')',
+                    _ => '.',
+                };
                 self.list(items, out, prefix, move |i| {
-                    format!("{}.", start + i64::try_from(i).unwrap_or(0))
+                    format!("{}{close}", start + i64::try_from(i).unwrap_or(0))
                 });
             }
             Block::DefinitionList(entries) => {
@@ -85,7 +117,16 @@ impl Writer {
             Block::Table(table) => {
                 let rendered = self.table(table);
                 if !rendered.is_empty() {
-                    out.push(indent(&rendered, prefix));
+                    // A table opens with a blank line of its own, which
+                    // is invisible at the top level and is the
+                    // container's indentation inside one. Probed: a quote
+                    // holding a table starts with a line of just the
+                    // quote's two spaces.
+                    let mut text = indent(&rendered, prefix);
+                    if !prefix.is_empty() {
+                        text.insert_str(0, &format!("{prefix}\n"));
+                    }
+                    out.push(text);
                 }
                 self.blocks(&table.caption.blocks, out, prefix);
             }
@@ -124,7 +165,17 @@ impl Writer {
                 (format!("{mark:<width$}"), " ".repeat(width))
             };
             let mut inner = Vec::new();
-            self.blocks(item, &mut inner, "");
+            // **Only the first block sits at the marker.** A code block
+            // there takes no indentation of its own — the marker column
+            // already sets it apart — and one further down the item takes
+            // the usual four. Measured: `3.  fence` for the first and
+            // `      indented code` for a later one under a `- ` marker.
+            if let Some((first, rest)) = item.split_first() {
+                self.nested += 1;
+                self.block(first, &mut inner, "");
+                self.nested -= 1;
+                self.blocks(rest, &mut inner, "");
+            }
             let body = inner.join(if loose { "\n\n" } else { "\n" });
             let mut lines = body.split('\n');
             let mut text = format!("{}{}", head, lines.next().unwrap_or_default());
@@ -174,22 +225,29 @@ impl Writer {
         let align = |c: usize| {
             table.colspecs.get(c).map_or(Alignment::AlignDefault, |s| s.alignment)
         };
+        // Each cell is padded to its column and the columns are joined by
+        // one space — **except the last, which takes only the padding in
+        // front of it**. That is why a row ending in an empty cell keeps
+        // its trailing spaces and a header ending in its column's widest
+        // word does not.
         let line = |row: &Vec<String>| {
             let mut out = String::from("  ");
             for (c, width) in widths.iter().enumerate() {
                 let cell = row.get(c).map_or("", String::as_str);
-                if matches!(align(c), Alignment::AlignRight) {
-                    let pad = width.saturating_sub(cell.chars().count());
-                    out.push_str(&" ".repeat(pad));
-                    out.push_str(cell);
-                } else {
-                    let _ = write!(out, "{cell:<width$}");
-                }
+                let slack = width.saturating_sub(cell.chars().count());
+                let (before, after) = match align(c) {
+                    Alignment::AlignRight => (slack, 0),
+                    Alignment::AlignCenter => (slack / 2, slack - slack / 2),
+                    _ => (0, slack),
+                };
+                out.push_str(&" ".repeat(before));
+                out.push_str(cell);
                 if c + 1 < widths.len() {
+                    out.push_str(&" ".repeat(after));
                     out.push(' ');
                 }
             }
-            out.trim_end().to_owned()
+            out
         };
         let rule: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
         let mut lines: Vec<String> = head.iter().map(line).collect();
@@ -219,8 +277,28 @@ impl Writer {
         out
     }
 
+    /// Two breaking spaces with nothing between them are one space, the
+    /// way pandoc's layout has it: a raw inline in another format renders
+    /// to nothing, so `plus <br/> and` is `plus and` there and was
+    /// `plus  and` here.
     fn collect(&mut self, out: &mut String, inlines: &[Inline]) {
+        let mut after_break = false;
         for inline in inlines {
+            let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
+            if breaking && after_break {
+                continue;
+            }
+            let before = out.len();
+            self.one(out, inline);
+            if out.len() == before {
+                continue;
+            }
+            after_break = breaking;
+        }
+    }
+
+    fn one(&mut self, out: &mut String, inline: &Inline) {
+        {
             match inline {
                 Inline::Str(s) | Inline::Code(_, s) | Inline::Math(_, s) => out.push_str(s),
                 Inline::Space | Inline::SoftBreak => out.push(' '),
@@ -256,7 +334,10 @@ impl Writer {
                     self.notes.push(String::new());
                     let mut inner = Vec::new();
                     self.blocks(blocks, &mut inner, "");
-                    self.notes[index] = inner.join(" ");
+                    // The body's blocks stay blocks: a footnote of two
+                    // paragraphs and a list is three paragraphs at the
+                    // end of the document, not one run-on line.
+                    self.notes[index] = inner.join("\n\n");
                     let _ = write!(out, "[{}]", index + 1);
                 }
                 Inline::RawInline(..) => {}
