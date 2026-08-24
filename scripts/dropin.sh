@@ -95,10 +95,28 @@ deliberate() {
 attribute_miss() {
     local id="$1" p_args="$2" f_args="$3"
     local dir="$work/$id.try" combination try_p
-    local dialect_applies=0
-    case "$input" in *.md|*.markdown)
-        case " $args " in *" -f "*|*" --from "*|*--from=*|*--defaults*) ;; *) dialect_applies=1 ;; esac
-    esac
+    # The hypothesis is about pandoc's `markdown`, so it applies wherever
+    # *that* is the input format however it was named — on the command
+    # line, in a defaults file, or inferred from the extension. Skipping
+    # every row that spelled `-f markdown` out loud put nine of them in
+    # the remainder bucket and kept them there.
+    local dialect_applies=0 from=
+    from=$(printf '%s\n' $args | awk '
+        /^--from=/ { sub(/^--from=/, ""); f = $0; next }
+        take       { f = $0; take = 0; next }
+        $0 == "-f" || $0 == "--from" { take = 1 }
+        END { print f }')
+    if [ -z "$from" ]; then
+        case " $args " in *--defaults*)
+            local defaults
+            defaults=$(printf '%s\n' $args | sed -n 's/^--defaults=//p; /^--defaults$/{n;p;}')
+            [ -z "$defaults" ] || from=$(sed -n 's/^from:[[:space:]]*//p' "$defaults")
+        esac
+    fi
+    if [ -z "$from" ]; then
+        case "$input" in *.md|*.markdown|*.pmd) from=markdown ;; esac
+    fi
+    case "$from" in markdown|markdown[+-]*) dialect_applies=1 ;; esac
     for combination in \
         "highlighting" "wrap=none" "wrap=preserve" "dialect" \
         "highlighting+wrap=none" "highlighting+wrap=preserve" \
