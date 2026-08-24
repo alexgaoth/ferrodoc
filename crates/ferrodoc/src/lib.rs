@@ -222,8 +222,7 @@ impl Format {
             Format::Markdown | Format::Gfm | Format::Html | Format::Plain | Format::Latex => {
                 Wrapping::Fills
             }
-            Format::Rst => Wrapping::Fills,
-            Format::Asciidoc => Wrapping::Preserved,
+            Format::Rst | Format::Asciidoc => Wrapping::Fills,
             // `pandoc --wrap=auto -t docx` is accepted and does nothing
             // there too, so ignoring it is the compatible answer.
             Format::Docx | Format::Odt | Format::Epub | Format::Ipynb | Format::Json => {
@@ -701,6 +700,15 @@ pub fn render_wrapped_with_media(
         #[cfg(feature = "text")]
         (None, Format::Plain) if wrap == Wrap::Preserve => {
             Ok(ferrodoc_text::write_text_preserved(doc).into_bytes())
+        }
+        #[cfg(feature = "asciidoc")]
+        (_, Format::Asciidoc) => {
+            let wrap = match wrap {
+                Wrap::None => ferrodoc_asciidoc::Wrap::None,
+                Wrap::Preserve => ferrodoc_asciidoc::Wrap::Preserve,
+                Wrap::Auto(columns) => ferrodoc_asciidoc::Wrap::Fill(columns),
+            };
+            Ok(ferrodoc_asciidoc::write_asciidoc_wrapped(doc, wrap).into_bytes())
         }
         #[cfg(feature = "rst")]
         (_, Format::Rst) => {
@@ -1279,13 +1287,9 @@ mod tests {
         // plain-text conversion and got `NotCompiled`, which CI catches
         // and `verify.sh` — which only checks that the trimmed build
         // *compiles* — does not.
-        #[cfg(feature = "asciidoc")]
-        {
-            let error = out(Format::Asciidoc, Wrap::None).expect_err("asciidoc joins nothing");
-            let message = error.to_string();
-            assert!(message.contains("asciidoc"), "{message}");
-            assert!(matches!(error, Error::NotWrappable(..)), "{message}");
-        }
+        // Nothing refuses a mode any more: all seven text writers lay
+        // lines out all three ways, which is what D4.3 asked for. The
+        // error still exists for the formats that have no lines at all.
         // HTML does all three, since 2026-08-24: `auto` fills to the
         // column, `preserve` keeps the document's own line breaks, and
         // `none` joins them.
@@ -1319,6 +1323,15 @@ mod tests {
         assert_eq!(out(Format::Rst, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
         #[cfg(feature = "rst")]
         assert_eq!(out(Format::Rst, Wrap::Auto(72)).unwrap(), "one two\n");
+        // AsciiDoc completes the five.
+        #[cfg(feature = "asciidoc")]
+        assert_eq!(out(Format::Asciidoc, Wrap::None).unwrap(), "one two\n");
+        #[cfg(feature = "asciidoc")]
+        assert_eq!(out(Format::Asciidoc, Wrap::Preserve).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "asciidoc")]
+        assert_eq!(out(Format::Asciidoc, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "asciidoc")]
+        assert_eq!(out(Format::Asciidoc, Wrap::Auto(72)).unwrap(), "one two\n");
 
         // `pandoc --wrap=auto -t json` is accepted and does nothing;
         // refusing it would break a command line pandoc runs.

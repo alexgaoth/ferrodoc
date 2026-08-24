@@ -34,11 +34,106 @@ use ferrodoc_ast::{
 };
 use std::fmt::Write as _;
 
+/// Marks a place a line may be broken. Chosen because no reader here can
+/// produce one inside text: `CommonMark` replaces NUL with U+FFFD by
+/// specification, and XML — which DOCX, ODT and EPUB are — forbids it.
+const BREAK: char = '\u{0}';
+/// The same, for a `SoftBreak`, which `--wrap=preserve` keeps as a
+/// newline where an ordinary space stays a space.
+const SOFT: char = '\u{1}';
+
+/// How the writer lays lines out, as pandoc's `--wrap` means it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wrap {
+    /// Every soft break becomes a space and no line is broken.
+    None,
+    /// A soft break stays a line break; nothing else is broken. This is
+    /// what the writer did before it could fill, and the default.
+    #[default]
+    Preserve,
+    /// Fill to this many columns, breaking at spaces and soft breaks.
+    Fill(usize),
+}
+
+/// Turn the break marks into whatever the mode asks for.
+///
+/// Filling is a **post-pass** over the finished text: every line's own
+/// leading whitespace is the indentation its continuation lines take, and
+/// by the time a line exists the list or block it sits in has already
+/// applied it.
+fn lay_out(text: &str, wrap: Wrap) -> String {
+    match wrap {
+        Wrap::None => text.replace([BREAK, SOFT], " "),
+        // A kept line break is still a break and takes the line's own
+        // indentation with it.
+        Wrap::Preserve => reflow(text, usize::MAX, true),
+        Wrap::Fill(columns) => reflow(text, columns, false),
+    }
+}
+
+fn reflow(text: &str, columns: usize, force_soft: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        fill(line, columns, force_soft, &mut out);
+    }
+    out
+}
+
+/// Greedy fill: take words while they fit, break at the last mark that
+/// did. A word longer than the width goes on its own line and overruns —
+/// breaking inside it would invent a break the text does not have.
+fn fill(line: &str, columns: usize, force_soft: bool, out: &mut String) {
+    // **No hanging indent.** An `AsciiDoc` list item's continuation lines
+    // are flush with the marker, not with its content — measured: pandoc
+    // wraps `* a fairly long bullet item that will` and starts the next
+    // line at column zero. Only the line's own leading whitespace counts.
+    let indent = " ".repeat(line.chars().take_while(|c| *c == ' ').count());
+    let mut width = 0;
+    let mut rest = line;
+    let mut forced = false;
+    let mut index = 0;
+    loop {
+        let (word, next_forced, tail) = match rest.find([BREAK, SOFT]) {
+            Some(at) => {
+                let mark = rest[at..].chars().next().unwrap_or(BREAK);
+                (&rest[..at], mark == SOFT, Some(&rest[at + mark.len_utf8()..]))
+            }
+            None => (rest, false, None),
+        };
+        let word_width = word.chars().count();
+        if index == 0 {
+            width = word_width;
+        } else if !(forced && force_soft) && width.saturating_add(1 + word_width) <= columns {
+            out.push(' ');
+            width += 1 + word_width;
+        } else {
+            let _ = write!(out, "\n{indent}");
+            width = indent.chars().count() + word_width;
+        }
+        out.push_str(word);
+        index += 1;
+        forced = next_forced;
+        match tail {
+            Some(tail) => rest = tail,
+            None => return,
+        }
+    }
+}
+
 /// Render a document as `AsciiDoc`.
 pub fn write_asciidoc(doc: &Pandoc) -> String {
+    write_asciidoc_wrapped(doc, Wrap::Preserve)
+}
+
+/// The same, laid out the way `--wrap` asks for.
+#[must_use]
+pub fn write_asciidoc_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
     let mut out = String::new();
     blocks(&doc.blocks, &mut out, Depth::default());
-    let text = out.trim_end().to_owned();
+    let text = lay_out(out.trim_end(), wrap);
     if text.is_empty() { text } else { text + "\n" }
 }
 
@@ -209,7 +304,10 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
             // appear only once, so a document with two level-1 headings
             // would be invalid.
             let marks = "=".repeat(usize::try_from(*level).unwrap_or(1).clamp(1, 5) + 1);
-            let _ = writeln!(out, "{marks} {}", text.trim());
+            // **A heading is never filled.** Pandoc keeps one on a single
+            // line however narrow the column; a heading broken in two
+            // reads as a heading and a paragraph.
+            let _ = writeln!(out, "{marks} {}", text.trim().replace([BREAK, SOFT], " "));
         }
         // Five quotes, which is what pandoc writes. Three is a valid
         // break too; the bytes are the test.
@@ -461,8 +559,8 @@ fn inline_to(inline: &Inline, out: &mut String) {
     };
     match inline {
         Inline::Str(text) => out.push_str(&escape(text)),
-        Inline::Space => out.push(' '),
-        Inline::SoftBreak => out.push('\n'),
+        Inline::Space => out.push(BREAK),
+        Inline::SoftBreak => out.push(SOFT),
         // A trailing `+` is the hard break.
         Inline::LineBreak => out.push_str(" +\n"),
         // The markers are the opposite way round from markdown: `_` is
