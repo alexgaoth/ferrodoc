@@ -531,6 +531,16 @@ each is pinned by
 
 The first two are the ones an ordinary GitHub README hits.
 
+**The first one costs something in the writer**, and it is worth naming
+because the price is not obvious from the row. A reader that strikes on
+one tilde means the writer has to escape a `~` that could pair with a
+later one — pandoc, whose reader needs two, escapes only a doubled
+tilde. The escape used to be every `~` in the document, so `~/path` and
+`2 ~ 3` carried a backslash they did not need; it is now only a tilde
+with another one after it in the same run, which is as narrow as the
+decision allows. Reversing the decision would make `-t gfm` byte-
+identical to pandoc on one more corpus document.
+
 A pipe table always keeps its grid; everything else about a table degrades
 in a stated way, because GFM's table syntax is one header row of one-line
 cells:

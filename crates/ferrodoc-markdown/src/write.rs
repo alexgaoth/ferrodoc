@@ -1137,16 +1137,25 @@ fn escape_text(out: &mut String, text: &str, gfm: bool) {
             // Only where it would be read as an escape. See the note above
             // for why this is wider than pandoc's.
             '\\' if next.is_none_or(|c| c.is_ascii_punctuation()) => out.push_str("\\\\"),
-            // `|` divides a table row anywhere, and `~` opens strikeout.
+            // `|` divides a table row anywhere.
+            '|' if gfm => {
+                out.push('\\');
+                out.push(ch);
+            }
+            // A `~` that **could pair with a later one**, which is what
+            // it takes to open strikeout. Pandoc escapes only a doubled
+            // tilde, and it can afford to because its own reader needs
+            // two — this reader strikes on one, deliberately, because
+            // GitHub does (`COMPATIBILITY.md` lists it among the reader
+            // divergences that follow GitHub rather than pandoc).
             //
-            // **Every** `~`, where pandoc escapes only a doubled one.
-            // Pandoc can afford the narrower rule because its own reader
-            // needs two tildes; this reader strikes on one (`~b~` is
-            // `Strikeout` here and `Str "~b~"` there), so a bare `~`
-            // would come back as markup. The divergence is the reader's,
-            // and until it is settled the writer has to be safe rather
-            // than identical.
-            '~' | '|' if gfm => {
+            // The cost of that decision lands here, and this is as narrow
+            // as it can be made without changing it: every `~` was
+            // escaped, so `~/path` and `2 ~ 3` carried a backslash they
+            // did not need. A lone tilde has nothing to pair with, and a
+            // pair split across two `Str`s cannot strike either — a
+            // delimiter run must flank its content.
+            '~' if gfm && chars.clone().any(|c| c == '~') => {
                 out.push('\\');
                 out.push(ch);
             }
