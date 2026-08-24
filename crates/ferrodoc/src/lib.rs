@@ -219,8 +219,7 @@ impl Format {
             // HTML one does since 2026-08-24 — it marks its break
             // opportunities as it writes, including **between a tag's
             // attributes**, which is where pandoc breaks a long tag.
-            Format::Markdown | Format::Gfm | Format::Html => Wrapping::Fills,
-            Format::Plain => Wrapping::Joined,
+            Format::Markdown | Format::Gfm | Format::Html | Format::Plain => Wrapping::Fills,
             Format::Latex | Format::Rst | Format::Asciidoc => Wrapping::Preserved,
             // `pandoc --wrap=auto -t docx` is accepted and does nothing
             // there too, so ignoring it is the compatible answer.
@@ -691,6 +690,14 @@ pub fn render_wrapped_with_media(
         #[cfg(feature = "markdown")]
         (Some(columns), Format::Gfm) => {
             Ok(ferrodoc_markdown::write_gfm_wrapped(doc, columns).into_bytes())
+        }
+        #[cfg(feature = "text")]
+        (Some(columns), Format::Plain) if columns != usize::MAX => {
+            Ok(ferrodoc_text::write_text_wrapped(doc, columns).into_bytes())
+        }
+        #[cfg(feature = "text")]
+        (None, Format::Plain) if wrap == Wrap::Preserve => {
+            Ok(ferrodoc_text::write_text_preserved(doc).into_bytes())
         }
         _ => render_with_media(doc, to, media),
     }
@@ -1245,7 +1252,6 @@ mod tests {
         // A writer that cannot lay lines out that way says which one it
         // does rather than returning the layout it already had.
         for (to, refused) in [
-            (Format::Plain, Wrap::Auto(72)),
             (Format::Latex, Wrap::None),
             (Format::Rst, Wrap::Auto(72)),
             (Format::Asciidoc, Wrap::None),
@@ -1262,6 +1268,11 @@ mod tests {
         assert_eq!(out(Format::Html, Wrap::Preserve).unwrap(), "<p>one\ntwo</p>\n");
         assert_eq!(out(Format::Html, Wrap::Auto(5)).unwrap(), "<p>one\ntwo</p>\n");
         assert_eq!(out(Format::Html, Wrap::Auto(72)).unwrap(), "<p>one two</p>\n");
+        // Plain fills too, since 2026-08-24; `preserve` it still refuses,
+        // because pandoc's plain writer joins a soft break either way.
+        assert_eq!(out(Format::Plain, Wrap::None).unwrap(), "one two\n");
+        assert_eq!(out(Format::Plain, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
+        assert_eq!(out(Format::Plain, Wrap::Auto(72)).unwrap(), "one two\n");
 
         // `pandoc --wrap=auto -t json` is accepted and does nothing;
         // refusing it would break a command line pandoc runs.

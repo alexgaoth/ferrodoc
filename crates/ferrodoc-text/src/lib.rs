@@ -17,9 +17,36 @@ use std::fmt::Write as _;
 /// The column a `HorizontalRule` fills and pandoc's default `--columns`.
 const COLUMNS: usize = 72;
 
-/// Render a document as plain text.
+/// Marks a place a line may be broken. Chosen because no reader here can
+/// produce one inside text: `CommonMark` replaces NUL with U+FFFD by
+/// specification, and XML — which DOCX, ODT and EPUB are — forbids it.
+/// Every one becomes a space or a newline before the string leaves.
+const BREAK: char = '\u{0}';
+/// The same, for a `SoftBreak` — which `--wrap=preserve` keeps as a
+/// newline where an ordinary space stays a space.
+const SOFT: char = '\u{1}';
+
+/// Render a document as plain text, every soft break joined into a space
+/// and no line broken — pandoc's `--wrap=none`.
 pub fn write_text(doc: &Pandoc) -> String {
-    let mut writer = Writer::default();
+    render(doc, None, false)
+}
+
+/// The same, filled to `columns` — pandoc's `--wrap=auto`.
+#[must_use]
+pub fn write_text_wrapped(doc: &Pandoc, columns: usize) -> String {
+    render(doc, Some(columns), false)
+}
+
+/// The same, with the document's own line breaks kept — pandoc's
+/// `--wrap=preserve`. A space stays a space; a soft break stays a break.
+#[must_use]
+pub fn write_text_preserved(doc: &Pandoc) -> String {
+    render(doc, None, true)
+}
+
+fn render(doc: &Pandoc, columns: Option<usize>, preserve: bool) -> String {
+    let mut writer = Writer { columns, preserve, ..Writer::default() };
     let mut paragraphs = Vec::new();
     writer.blocks(&doc.blocks, &mut paragraphs, "");
     for (index, body) in writer.notes.iter().enumerate() {
@@ -36,6 +63,25 @@ pub fn write_text(doc: &Pandoc) -> String {
 struct Writer {
     /// Footnote bodies in reference order; written at the end as `[N] …`.
     notes: Vec<String>,
+    /// The column to fill to, or `None` to leave every line as it falls.
+    columns: Option<usize>,
+    /// Columns already spoken for by list markers. A list item renders
+    /// its content with an **empty** prefix and adds the continuation
+    /// indent afterwards, so the prefix cannot say how wide the line
+    /// really is; this can. Every line of the item is that much shorter.
+    reserved: usize,
+    /// Whether a soft break stays a line break rather than becoming a
+    /// space — pandoc's `--wrap=preserve`.
+    preserve: bool,
+    /// Whether the block being written is inside a table cell, where a
+    /// cell is one line whatever the column count — the table lays its
+    /// own columns out. A footnote *referenced* from a cell has its body
+    /// at the end of the document, outside the table, and is filled.
+    in_cell: bool,
+    /// Columns spoken for on the **first line only** — a footnote's
+    /// `[N] ` label, which shifts the body's first line and nothing
+    /// after it. The first line laid out consumes it.
+    hanging: usize,
     /// How many list items deep the block being written is. A list item
     /// renders its content with an **empty** prefix and adds the
     /// continuation indent afterwards, so the prefix cannot say whether
@@ -45,6 +91,26 @@ struct Writer {
 }
 
 impl Writer {
+    /// Turn the break marks into spaces, or into a fill at the width the
+    /// prefix leaves. The prefix is part of the line pandoc counts, so a
+    /// quote or a list item fills to less than the full width.
+    fn lay_out(&mut self, text: &str, indent: usize) -> String {
+        let Some(columns) = self.columns.filter(|_| !self.in_cell) else {
+            let soft = if self.preserve && !self.in_cell { "\n" } else { " " };
+            return text.replace(BREAK, " ").replace(SOFT, soft);
+        };
+        let width = columns.saturating_sub(indent + self.reserved).max(1);
+        let first = width.saturating_sub(std::mem::take(&mut self.hanging)).max(1);
+        let mut out = String::with_capacity(text.len());
+        for (index, paragraph) in text.split('\n').enumerate() {
+            if index > 0 {
+                out.push('\n');
+            }
+            fill(paragraph, if index == 0 { first } else { width }, width, &mut out);
+        }
+        out
+    }
+
     fn blocks(&mut self, blocks: &[Block], out: &mut Vec<String>, prefix: &str) {
         for block in blocks {
             self.block(block, out, prefix);
@@ -53,8 +119,15 @@ impl Writer {
 
     fn block(&mut self, block: &Block, out: &mut Vec<String>, prefix: &str) {
         match block {
-            Block::Plain(inlines) | Block::Para(inlines) | Block::Header(_, _, inlines) => {
+            Block::Plain(inlines) | Block::Para(inlines) => {
                 let text = self.inlines(inlines);
+                out.push(indent(&self.lay_out(&text, prefix.chars().count()), prefix));
+            }
+            // **A heading is never filled.** Pandoc keeps one on a single
+            // line however long it is and however narrow the column; a
+            // heading broken in two reads as two headings.
+            Block::Header(_, _, inlines) => {
+                let text = self.inlines(inlines).replace([BREAK, SOFT], " ");
                 out.push(indent(&text, prefix));
             }
             // Four spaces at the **top level**, which is what makes it
@@ -104,14 +177,19 @@ impl Writer {
             Block::DefinitionList(entries) => {
                 for (term, definitions) in entries {
                     let text = self.inlines(term);
-                    out.push(indent(&text, prefix));
+                    out.push(indent(&self.lay_out(&text, prefix.chars().count()), prefix));
                     for definition in definitions {
                         self.blocks(definition, out, &format!("{prefix}    "));
                     }
                 }
             }
             Block::LineBlock(lines) => {
-                let text: Vec<String> = lines.iter().map(|l| self.inlines(l)).collect();
+                // A line block's lines are the document's own and are
+                // never re-filled; only the marks come out.
+                let text: Vec<String> = lines
+                    .iter()
+                    .map(|l| self.inlines(l).replace([BREAK, SOFT], " "))
+                    .collect();
                 out.push(indent(&text.join("\n"), prefix));
             }
             Block::Table(table) => {
@@ -130,7 +208,10 @@ impl Writer {
                 }
                 self.blocks(&table.caption.blocks, out, prefix);
             }
-            Block::HorizontalRule => out.push(indent(&"-".repeat(COLUMNS), prefix)),
+            // The rule fills the column count asked for, not a fixed 72.
+            Block::HorizontalRule => {
+                out.push(indent(&"-".repeat(self.columns.unwrap_or(COLUMNS)), prefix));
+            }
             Block::RawBlock(..) => {}
         }
     }
@@ -170,12 +251,19 @@ impl Writer {
             // already sets it apart — and one further down the item takes
             // the usual four. Measured: `3.  fence` for the first and
             // `      indented code` for a later one under a `- ` marker.
+            let reserved = self.reserved;
+            // The container's own prefix counts too: the item's blocks
+            // are rendered with an empty one and it is added afterwards,
+            // so a list inside a quote fills to less than a list at the
+            // top level by exactly the quote's two columns.
+            self.reserved += continuation.chars().count() + prefix.chars().count();
             if let Some((first, rest)) = item.split_first() {
                 self.nested += 1;
                 self.block(first, &mut inner, "");
                 self.nested -= 1;
                 self.blocks(rest, &mut inner, "");
             }
+            self.reserved = reserved;
             let body = inner.join(if loose { "\n\n" } else { "\n" });
             let mut lines = body.split('\n');
             let mut text = format!("{}{}", head, lines.next().unwrap_or_default());
@@ -262,8 +350,10 @@ impl Writer {
                 row.cells
                     .iter()
                     .map(|cell| {
+                        let in_cell = std::mem::replace(&mut self.in_cell, true);
                         let mut inner = Vec::new();
                         self.blocks(&cell.blocks, &mut inner, "");
+                        self.in_cell = in_cell;
                         inner.join(" ")
                     })
                     .collect()
@@ -301,7 +391,8 @@ impl Writer {
         {
             match inline {
                 Inline::Str(s) | Inline::Code(_, s) | Inline::Math(_, s) => out.push_str(s),
-                Inline::Space | Inline::SoftBreak => out.push(' '),
+                Inline::Space => out.push(BREAK),
+                Inline::SoftBreak => out.push(SOFT),
                 Inline::LineBreak => out.push('\n'),
                 // The one markup pandoc keeps: without the tildes the text
                 // says the opposite of what it means.
@@ -333,7 +424,16 @@ impl Writer {
                     let index = self.notes.len();
                     self.notes.push(String::new());
                     let mut inner = Vec::new();
+                    // The body is written after `[N] `, and those columns
+                    // are gone before the first word: the label is not a
+                    // hanging indent — the second line starts at column
+                    // zero — but the first line is that much shorter.
+                    let hanging = self.hanging;
+                    self.hanging = format!("[{}] ", index + 1).chars().count();
+                    let in_cell = std::mem::take(&mut self.in_cell);
                     self.blocks(blocks, &mut inner, "");
+                    self.in_cell = in_cell;
+                    self.hanging = hanging;
                     // The body's blocks stay blocks: a footnote of two
                     // paragraphs and a list is three paragraphs at the
                     // end of the document, not one run-on line.
@@ -347,6 +447,28 @@ impl Writer {
 }
 
 /// Put `prefix` on every non-empty line of `text`.
+/// Greedy fill: take words while they fit, break at the last mark that
+/// did. A word longer than the width goes on its own line and overruns —
+/// breaking inside it would invent a break the text does not have.
+fn fill(line: &str, first: usize, rest: usize, out: &mut String) {
+    let mut width = 0;
+    let mut limit = first;
+    for (index, word) in line.split([BREAK, SOFT]).enumerate() {
+        let word_width = word.chars().count();
+        if index == 0 {
+            width = word_width;
+        } else if width + 1 + word_width <= limit {
+            out.push(' ');
+            width += 1 + word_width;
+        } else {
+            out.push('\n');
+            width = word_width;
+            limit = rest;
+        }
+        out.push_str(word);
+    }
+}
+
 fn indent(text: &str, prefix: &str) -> String {
     if prefix.is_empty() {
         return text.to_owned();
