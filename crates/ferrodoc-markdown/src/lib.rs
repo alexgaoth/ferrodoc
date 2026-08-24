@@ -345,9 +345,12 @@ fn next_tag(text: &str, from: usize) -> Option<(usize, RawTag)> {
         // does with them.
         for (open, close) in [("<!--", "-->"), ("<?", "?>")] {
             if let Some(body) = rest.strip_prefix(open) {
-                let end = body
-                    .find(close)
-                    .map_or(text.len(), |index| start + open.len() + index + close.len());
+                // **Unclosed, it is not raw at all**: pandoc reads
+                // `<!-- comment` with no `-->` as the literal text it is,
+                // and `smart` then turns its `--` into an en dash.
+                // `CommonMark` runs the block to the end of the input.
+                let Some(index) = body.find(close) else { break };
+                let end = start + open.len() + index + close.len();
                 return Some((start, RawTag { end, name: String::new(), closing: false }));
             }
         }
@@ -1469,6 +1472,27 @@ fn paragraph<'a>(
     Block::Para(content)
 }
 
+/// The paragraph pandoc reads from a fence that is never closed.
+///
+/// The opening line comes from the **source**, cut at the column comrak
+/// says the block starts in, so a `> ` or a `3. ` in front of it is not
+/// part of the text; the lines under it come from the literal, which
+/// comrak has already dedented.
+fn unclosed_fence(literal: &str, src: &Src, data: &comrak::nodes::Ast) -> Block {
+    let line = src.line(data.sourcepos.start.line);
+    let opener = line.get(data.sourcepos.start.column.saturating_sub(1)..).unwrap_or(line);
+    let mut inlines = Vec::new();
+    text_tokens(opener.trim_end(), &mut inlines);
+    // The blank lines comrak keeps at the end of an unclosed block are
+    // where the block *stopped*, not content: left in, each one is a
+    // soft break with nothing after it.
+    for content in literal.trim_end_matches('\n').lines() {
+        inlines.push(Inline::SoftBreak);
+        text_tokens(content, &mut inlines);
+    }
+    Block::Para(inlines)
+}
+
 /// Whether this node's own container reads its content as a document of
 /// its own, so the line after the paragraph is not the paragraph's
 /// business.
@@ -1515,6 +1539,15 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
             // Content lines start on the line after the opening fence, so
             // the block's last line is start.line + the literal line count.
             // (Sourcepos *end* lines are unreliable for unclosed blocks.)
+            // **An unclosed fence is not a code block at all** in
+            // pandoc's markdown: the opener and everything under it are
+            // the literal text they are written with. `CommonMark` runs
+            // the block to the end of its container. Measured at the top
+            // level, inside a block quote and inside a list item, closed
+            // and unclosed.
+            if dialect == Dialect::Pandoc && cb.fenced && !cb.closed {
+                return Some(unclosed_fence(&cb.literal, src, &data));
+            }
             let keep_literal = cb.fenced
                 && !cb.closed
                 && !in_quote
@@ -2392,6 +2425,51 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    /// Two things `CommonMark` runs to the end of the input and pandoc
+    /// reads as the literal text they are: a fence that never closes and
+    /// a comment that never closes.
+    #[test]
+    fn an_unclosed_construct_is_text_in_pandocs_dialect() {
+        let fence = serde_json::json!([{"t": "Para", "c": [
+            {"t": "Str", "c": "```"},
+            {"t": "SoftBreak"},
+            {"t": "Str", "c": "content"}
+        ]}]);
+        assert_eq!(pmd("```\ncontent\n"), fence);
+        // Closed, it is a code block again.
+        assert_eq!(
+            pmd("```\ncontent\n```\n"),
+            serde_json::json!([{"t": "CodeBlock", "c": [["", [], []], "content"]}])
+        );
+        // The opener comes from the source, cut at the block's own
+        // column, so a container's marker is not part of the text.
+        assert_eq!(
+            pmd("> ```\n> content\n")[0]["c"],
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "```"},
+                {"t": "SoftBreak"},
+                {"t": "Str", "c": "content"}
+            ]}])
+        );
+        // An unclosed comment is text too, and `smart` then reaches its
+        // `--`.
+        assert_eq!(
+            pmd("<!-- open\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Str", "c": "<!\u{2013}"},
+                {"t": "Space"},
+                {"t": "Str", "c": "open"}
+            ]}])
+        );
+        assert_eq!(
+            pmd("<!-- shut -->\n"),
+            serde_json::json!([{"t": "RawBlock", "c": ["html", "<!-- shut -->"]}])
+        );
+        // `gfm` keeps `CommonMark`'s reading of both.
+        assert_eq!(gfm("```\ncontent\n")[0]["t"], "CodeBlock");
+        assert_eq!(gfm("<!-- open\n")[0]["t"], "RawBlock");
     }
 
     /// `[text]{#id}` is a `Span`, and only pandoc's dialect reads one.

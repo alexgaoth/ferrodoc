@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **13/20** over every markdown document, **496/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **14/20** over every markdown document, **498/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1444,6 +1444,14 @@ in it is not a span at all, so `[t]{foo}` stays `[t]{foo}`. The pairing
 runs **before** the quote pairing, because `smart` has already made the
 quotes in `[t]{k="a b"}` curly and turning those into a `Quoted` first
 would eat the value.
+
+**Two unclosed constructs are text, not blocks.** A fence that never
+closes is the literal `` ``` `` and the lines under it (`CommonMark` runs
+the block to the end of its container), and a `<!--` with no `-->` is the
+text it is written with — which `smart` then reaches, so it comes out
+`<!–`. The fence's opening line is taken from the *source*, cut at the
+column the block starts in, so a `> ` or a `3. ` in front of it is not
+part of the text.
 
 **Task items are opposite in the two dialects**, on both counts and each
 measured against its own reader: an **ordered** list has task items in
