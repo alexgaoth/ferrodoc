@@ -918,7 +918,7 @@ directly without asking its reader to survive anything.
 | `plain` | 7/12 |
 | `gfm` | 6/12 |
 | `rst` | **12/12** |
-| `asciidoc` | 2/12 |
+| `asciidoc` | 11/12 |
 | `markdown` | 2/12 |
 
 Twelve documents: the eight in `corpus/` read as CommonMark, and the four
