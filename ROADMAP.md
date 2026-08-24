@@ -445,7 +445,7 @@ table rather than the total.
 
 **Which makes the aliasing decision a different question than it was.**
 `markdown` still does not alias `pandoc_markdown`, and the reason is
-unchanged: 488/652 is not 100, and a silent change of meaning on a
+unchanged: 491/652 is not 100, and a silent change of meaning on a
 quarter of documents is worse than a flag someone types. What has
 changed is that the remaining quarter is now *named* — it is the four
 parser sections above, not an unread list.

@@ -214,7 +214,7 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
     let defs = if dialect.is_extended() { footnotes(root, &src, dialect) } else { Notes::new() };
     let mut blocks = blocks(root.children(), &src, false, &defs, dialect);
     if dialect.is_extended() {
-        Identifiers::default().assign(&mut blocks);
+        Identifiers { seen: HashMap::new(), dialect }.assign(&mut blocks);
     }
     let mut document = Pandoc::new(blocks);
     if dialect == Dialect::Pandoc {
@@ -1440,9 +1440,9 @@ fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment], defs: &Notes,
 /// heading whose own slug is `a-1` takes `a-1` even when an earlier `a`
 /// already produced it. Probed, because it looks like a bug and is not
 /// ours to fix — `# a` `# a` `# a-1` gives `a`, `a-1`, `a-1`.
-#[derive(Default)]
 struct Identifiers {
     seen: HashMap<String, u32>,
+    dialect: Dialect,
 }
 
 impl Identifiers {
@@ -1460,7 +1460,7 @@ impl Identifiers {
                     if attr.identifier.is_empty() {
                         let mut text = String::new();
                         stringify(inlines, &mut text);
-                        attr.identifier = self.unique(&slug(&text));
+                        attr.identifier = self.unique(&slug(&text, self.dialect));
                     } else {
                         let taken = attr.identifier.clone();
                         let _ = self.unique(&taken);
@@ -1493,16 +1493,37 @@ impl Identifiers {
 /// a hyphen or a space, and turn spaces into hyphens. Any whitespace
 /// counts, not just the ASCII space — pandoc slugs a heading holding a
 /// non-breaking space as `a-b`, not `ab`.
-fn slug(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if ch.is_whitespace() {
-            out.push('-');
-        } else if ch == '-' || ch == '_' || ch.is_alphanumeric() {
-            out.extend(ch.to_lowercase());
+fn slug(text: &str, dialect: Dialect) -> String {
+    if dialect != Dialect::Pandoc {
+        let mut out = String::with_capacity(text.len());
+        for ch in text.chars() {
+            if ch.is_whitespace() {
+                out.push('-');
+            } else if ch == '-' || ch == '_' || ch.is_alphanumeric() {
+                out.extend(ch.to_lowercase());
+            }
         }
+        return out;
     }
-    out
+    // Pandoc's own dialect slugs differently in three ways, each
+    // probed: it keeps `.`, it splits the filtered text into **words**
+    // and joins them with one hyphen rather than writing one per
+    // whitespace character, and it drops everything before the first
+    // letter — so `# foo ### b` is `foo-b` where GitHub says `foo--b`,
+    // `# a.b` is `a.b` where GitHub says `ab`, and `# 1. x` is `x`.
+    // A heading that leaves nothing behind is called `section`.
+    let kept: String = text
+        .chars()
+        .filter(|c| {
+            c.is_whitespace() || *c == '-' || *c == '_' || *c == '.' || c.is_alphanumeric()
+        })
+        .flat_map(char::to_lowercase)
+        .collect();
+    let mut out = kept.split_whitespace().collect::<Vec<_>>().join("-");
+    match out.find(char::is_alphabetic) {
+        Some(at) => out.split_off(at),
+        None => "section".to_owned(),
+    }
 }
 
 /// The plain text of an inline sequence, as pandoc's `stringify` produces
@@ -2003,6 +2024,32 @@ mod tests {
         assert_eq!(ids("# ![alt](x) t\n"), ["alt-t"]);
         // Any whitespace, not just the ASCII space.
         assert_eq!(ids("# a\u{a0}b\n"), ["a-b"]);
+    }
+
+    /// Pandoc's own dialect does not use GitHub's slug, and the three
+    /// ways it differs are each probed against `pandoc -f markdown`.
+    #[test]
+    fn pandocs_dialect_slugs_its_own_way() {
+        let ids = |md: &str| {
+            let doc = read_pandoc_markdown(md).expect("convertible");
+            doc.blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Header(_, attr, _) => Some(attr.identifier.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // A run of whitespace is one hyphen, not one per character.
+        assert_eq!(ids("# foo ### b\n"), ["foo-b"]);
+        assert_eq!(ids("# Punctuation, & symbols!\n"), ["punctuation-symbols"]);
+        // `.` is kept, where GitHub's slug drops it.
+        assert_eq!(ids("# a.b\n"), ["a.b"]);
+        assert_eq!(slug("a.b", Dialect::Gfm), "ab");
+        // Everything before the first letter goes, and a heading that
+        // leaves nothing is called `section`.
+        assert_eq!(ids("# 1. x\n"), ["x"]);
+        assert_eq!(ids("# 123\n"), ["section"]);
     }
 
     #[test]

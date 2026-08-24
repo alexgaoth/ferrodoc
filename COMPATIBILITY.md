@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **488/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **491/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1399,23 +1399,33 @@ Six rules under it, each measured rather than assumed:
   `<div>\nx\n</div>` ends in a `Para` and `<td>\nx\n</td>` in a `Plain`.
 
 **HTML blocks went 43/44 failing to 7/44, and the reader 445/652 to
-488/652 — 43 examples gained and none lost.** What is left there is
+488/652 on that card alone — 43 examples gained and none lost.** What is
+left there is
 narrow: a `<pre>` whose content holds a blank line (so CommonMark ends
 the block before the closing tag), a comment indented one space, and
 malformed tags pandoc's inline scanner reads differently.
 
-**What the 164 remaining spec examples are**, by the spec's own sections,
+**Heading identifiers are pandoc's, not GitHub's.** Three differences,
+each probed: a **run** of whitespace is one hyphen rather than one per
+character (`# foo ### b` is `foo-b`, where `gfm` says `foo--b`), `.` is
+kept (`# a.b` is `a.b`, where `gfm` says `ab`), and everything before
+the first letter is dropped — `# 1. x` is `x` and `# 123` is `section`.
+No gate had seen it because no corpus heading held punctuation between
+two words, and every HTML conversion of a pandoc-markdown document
+carries these.
+
+**What the 161 remaining spec examples are**, by the spec's own sections,
 because the shape of that list is the finding:
 
 | failing | section |
 |---|---|
 | 40/132 | Emphasis and strong emphasis |
 | 26/90 | Links |
-| 16/27 | Setext headings |
+| 15/27 | Setext headings |
 | 9/26 | Lists |
-| 8/18, 8/29, 8/27 | ATX headings, fenced code, link reference definitions |
-| 7/20, 7/44 | Raw HTML, HTML blocks |
-| 7/25, 7/22, 6/19 | block quotes, code spans, autolinks |
+| 8/29, 8/27 | fenced code, link reference definitions |
+| 7/20, 7/25, 7/22 | Raw HTML, block quotes, code spans |
+| 6/18, 6/19, 6/44 | ATX headings, autolinks, HTML blocks |
 
 **This is the parser rather than the dialect, and no card closes it.**
 Emphasis flanking, link destinations with spaces or newlines, setext
