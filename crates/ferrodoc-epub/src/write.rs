@@ -311,7 +311,7 @@ fn unique(candidate: &str, ids: &mut Vec<String>) -> String {
 
 /// One content document's XHTML.
 fn chapter_xhtml(blocks: &[Block]) -> String {
-    let body = ferrodoc_html::write_html(&Pandoc::new(blocks.to_vec()));
+    let body = ferrodoc_html::write_html_section_divs(&Pandoc::new(blocks.to_vec()));
     xhtml("bodymatter", &body)
 }
 

@@ -72,10 +72,34 @@ pub enum Wrap {
     Fill(usize),
 }
 
+/// Who built the section divs in the tree. Pandoc's `--section-divs` is
+/// a *writer* decision, and the writer treats a `Div` classed `section`
+/// differently depending on which side of it made the div — measured on
+/// `-f json -t html5` with and without the flag, on the same input.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Sections {
+    /// They arrived with the document, so the header inside is the
+    /// section's own and its attributes belong on the section too. This
+    /// is plain `-t html5`, and what the CLI always writes.
+    Given,
+    /// The caller made them from the headers and already put on the
+    /// classes it wanted; write them as they stand. This is
+    /// `--section-divs`, and what the EPUB writer needs.
+    Made,
+}
+
 /// Render a document as HTML, matching pandoc's HTML writer with
 /// `--wrap=none` and no syntax highlighting.
 pub fn write_html(doc: &Pandoc) -> String {
     write_html_with_id_prefix(doc, "")
+}
+
+/// The same, for a caller that built the section divs itself — pandoc's
+/// `--section-divs`. The EPUB writer is the one that does; see
+/// [`Sections`] for what changes.
+#[must_use]
+pub fn write_html_section_divs(doc: &Pandoc) -> String {
+    write_body(doc, "", Wrap::None, Sections::Made)
 }
 
 /// The same, with `--id-prefix` on the identifiers this writer *invents*.
@@ -97,9 +121,13 @@ pub fn write_html_with_id_prefix(doc: &Pandoc, id_prefix: &str) -> String {
 /// in. `Wrap::None` is what [`write_html`] does.
 #[must_use]
 pub fn write_html_wrapped(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> String {
+    write_body(doc, id_prefix, wrap, Sections::Given)
+}
+
+fn write_body(doc: &Pandoc, id_prefix: &str, wrap: Wrap, sections: Sections) -> String {
     let mut out = String::new();
     let (blocks, notes) = take_notes(&doc.blocks, id_prefix);
-    write_blocks(&mut out, &blocks);
+    write_blocks(&mut out, &blocks, sections);
     if out.is_empty() {
         out.push('\n'); // pandoc's output always ends with a newline
     }
@@ -108,7 +136,7 @@ pub fn write_html_wrapped(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> String {
     if out.ends_with("\n\n") {
         out.pop();
     }
-    write_notes(&mut out, &notes, id_prefix);
+    write_notes(&mut out, &notes, id_prefix, sections);
     lay_out(&out, wrap)
 }
 
@@ -625,7 +653,7 @@ fn walk_inlines(blocks: &mut [Block], f: &mut impl FnMut(&mut Vec<Inline>)) {
 /// Two rules, both probed: the backlink goes **inside** the last block
 /// when that block is a paragraph and on a line of its own when it is
 /// not, and a note with an empty body gets **no backlink at all**.
-fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str) {
+fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str, sections: Sections) {
     if notes.is_empty() {
         return;
     }
@@ -643,7 +671,7 @@ fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str) {
         );
         let _ = write!(out, "<li{BREAK}id=\"{prefix}fn{number}\">");
         let mut rendered = String::new();
-        write_blocks(&mut rendered, body);
+        write_blocks(&mut rendered, body, sections);
         let rendered = rendered.trim_end_matches('\n');
         if rendered.is_empty() {
             out.push_str("</li>\n");
@@ -658,27 +686,27 @@ fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str) {
     out.push_str("</ol>\n</section>\n");
 }
 
-fn write_blocks(out: &mut String, blocks: &[Block]) {
+fn write_blocks(out: &mut String, blocks: &[Block], sections: Sections) {
     for block in blocks {
-        write_block(out, block);
+        write_block(out, block, sections);
         out.push('\n');
     }
 }
 
 /// Like [`write_blocks`] but without the trailing newline after the last
 /// block — the form used inside container elements.
-fn write_blocks_joined(out: &mut String, blocks: &[Block]) {
+fn write_blocks_joined(out: &mut String, blocks: &[Block], sections: Sections) {
     let mut first = true;
     for block in blocks {
         if !first {
             out.push('\n');
         }
         first = false;
-        write_block(out, block);
+        write_block(out, block, sections);
     }
 }
 
-fn write_block(out: &mut String, block: &Block) {
+fn write_block(out: &mut String, block: &Block, sections: Sections) {
     match block {
         Block::Plain(inlines) => write_inlines(out, inlines),
         Block::Para(inlines) => {
@@ -720,7 +748,7 @@ fn write_block(out: &mut String, block: &Block) {
         }
         Block::BlockQuote(blocks) => {
             out.push_str("<blockquote>\n");
-            write_blocks_joined(out, blocks);
+            write_blocks_joined(out, blocks, sections);
             out.push_str("\n</blockquote>");
         }
         Block::BulletList(items) => {
@@ -736,7 +764,7 @@ fn write_block(out: &mut String, block: &Block) {
             } else {
                 out.push_str("<ul>\n");
             }
-            write_list_items(out, items);
+            write_list_items(out, items, sections);
             out.push_str("</ul>");
         }
         Block::OrderedList(attrs, items) => {
@@ -748,7 +776,7 @@ fn write_block(out: &mut String, block: &Block) {
                 let _ = write!(out, "{BREAK}type=\"{t}\"");
             }
             out.push_str(">\n");
-            write_list_items(out, items);
+            write_list_items(out, items, sections);
             out.push_str("</ol>");
         }
         Block::DefinitionList(items) => {
@@ -759,7 +787,7 @@ fn write_block(out: &mut String, block: &Block) {
                 out.push_str("</dt>\n");
                 for definition in definitions {
                     out.push_str("<dd>\n");
-                    write_blocks_joined(out, definition);
+                    write_blocks_joined(out, definition, sections);
                     out.push_str("\n</dd>\n");
                 }
             }
@@ -778,26 +806,88 @@ fn write_block(out: &mut String, block: &Block) {
             }
             out.push_str("</div>");
         }
-        Block::Div(attr, blocks) => {
-            out.push_str("<div");
-            write_attr(out, attr);
-            out.push_str(">\n");
-            write_blocks_joined(out, blocks);
-            out.push_str("\n</div>");
-        }
+        Block::Div(attr, blocks) => write_div(out, attr, blocks, sections),
         Block::Figure(attr, caption, blocks) => {
             out.push_str("<figure");
             write_attr(out, attr);
             out.push_str(">\n");
-            write_blocks_joined(out, blocks);
-            write_figcaption(out, caption);
+            write_blocks_joined(out, blocks, sections);
+            write_figcaption(out, caption, sections);
             out.push_str("\n</figure>");
         }
-        Block::Table(table) => write_table(out, table),
+        Block::Table(table) => write_table(out, table, sections),
     }
 }
 
-fn write_list_items(out: &mut String, items: &[Vec<Block>]) {
+/// Not every `Div` is a `<div>`. Measured on `pandoc -f json -t html5`:
+///
+/// * a `Div` classed `section`, or one whose first block is a `Header`
+///   carrying no identifier of its own, is written as `<section>`;
+/// * the `section` class is never written — the element already says it;
+/// * such a header is the section's own, so the section takes the
+///   header's classes in front of the div's and the header's attributes
+///   behind the div's, duplicates dropped and the header's value
+///   winning, while the header keeps both;
+/// * and when the div has nothing but `section` to say, it is not a
+///   section at all: pandoc drops the wrapper and moves its id onto the
+///   header.
+///
+/// `html4` writes `<div class="section ...">` for the same input; this
+/// writer only writes html5, so the choice does not arise.
+///
+/// EPUB and DOCX wrap every heading in one of these, so it is most of
+/// what `ferrodoc -t html` writes from either — and it wrote `<div>`
+/// for all of them until 2026-08-24.
+fn write_div(out: &mut String, attr: &Attr, blocks: &[Block], sections: Sections) {
+    let head = match blocks.first() {
+        Some(Block::Header(_, header, _))
+            if header.identifier.is_empty() && sections == Sections::Given =>
+        {
+            Some(header)
+        }
+        _ => None,
+    };
+    let own: Vec<&String> = attr.classes.iter().filter(|class| *class != "section").collect();
+
+    if let (Some(head), true) = (head, own.is_empty()) {
+        // The wrapper existed only to carry the identifier, so the
+        // header carries it and the wrapper goes.
+        let Some(Block::Header(level, _, inlines)) = blocks.first() else { unreachable!() };
+        let promoted = Attr { identifier: attr.identifier.clone(), ..head.clone() };
+        write_block(out, &Block::Header(*level, promoted, inlines.clone()), sections);
+        for block in &blocks[1..] {
+            out.push('\n');
+            write_block(out, block, sections);
+        }
+        return;
+    }
+
+    let section = head.is_some() || attr.classes.iter().any(|class| class == "section");
+    let tag = if section { "section" } else { "div" };
+    let mut merged = Attr {
+        identifier: attr.identifier.clone(),
+        classes: Vec::new(),
+        attributes: attr.attributes.clone(),
+    };
+    for class in head.map(|h| h.classes.iter()).into_iter().flatten().chain(own) {
+        if !merged.classes.contains(class) {
+            merged.classes.push(class.clone());
+        }
+    }
+    for (key, value) in head.map(|h| h.attributes.iter()).into_iter().flatten() {
+        match merged.attributes.iter_mut().find(|(k, _)| k == key) {
+            Some(slot) => slot.1.clone_from(value),
+            None => merged.attributes.push((key.clone(), value.clone())),
+        }
+    }
+    let _ = write!(out, "<{tag}");
+    write_attr(out, &merged);
+    out.push_str(">\n");
+    write_blocks_joined(out, blocks, sections);
+    let _ = write!(out, "\n</{tag}>");
+}
+
+fn write_list_items(out: &mut String, items: &[Vec<Block>], sections: Sections) {
     for item in items {
         out.push_str("<li>");
         match item.first().and_then(task_box) {
@@ -824,10 +914,10 @@ fn write_list_items(out: &mut String, items: &[Vec<Block>]) {
                 }
                 for block in &item[1..] {
                     out.push('\n');
-                    write_block(out, block);
+                    write_block(out, block, sections);
                 }
             }
-            None => write_blocks_joined(out, item),
+            None => write_blocks_joined(out, item, sections),
         }
         out.push_str("</li>\n");
     }
@@ -862,16 +952,16 @@ fn list_type(style: ListNumberStyle) -> Option<&'static str> {
     }
 }
 
-fn write_figcaption(out: &mut String, caption: &Caption) {
+fn write_figcaption(out: &mut String, caption: &Caption, sections: Sections) {
     if caption.blocks.is_empty() {
         return;
     }
     out.push_str("\n<figcaption>");
-    write_blocks_joined(out, &caption.blocks);
+    write_blocks_joined(out, &caption.blocks, sections);
     out.push_str("</figcaption>");
 }
 
-fn write_table(out: &mut String, table: &Table) {
+fn write_table(out: &mut String, table: &Table, sections: Sections) {
     out.push_str("<table");
     write_attr(out, &table.attr);
     // A table whose columns carry relative widths says so on the element,
@@ -885,7 +975,7 @@ fn write_table(out: &mut String, table: &Table) {
     out.push('>');
     if !table.caption.blocks.is_empty() {
         out.push_str("\n<caption>");
-        write_blocks_joined(out, &table.caption.blocks);
+        write_blocks_joined(out, &table.caption.blocks, sections);
         out.push_str("</caption>");
     }
     // The column widths a word processor set. Dropping them made every
@@ -907,40 +997,52 @@ fn write_table(out: &mut String, table: &Table) {
     if !table.head.rows.is_empty() {
         out.push_str("\n<thead>");
         for row in &table.head.rows {
-            write_table_row(out, row, "th", &table.colspecs);
+            write_table_row(out, row, "th", &table.colspecs, sections);
         }
         out.push_str("\n</thead>");
     }
     for body in &table.bodies {
         out.push_str("\n<tbody>");
         for row in body.head.iter().chain(&body.body) {
-            write_table_row(out, row, "td", &table.colspecs);
+            write_table_row(out, row, "td", &table.colspecs, sections);
         }
         out.push_str("\n</tbody>");
     }
     if !table.foot.rows.is_empty() {
         out.push_str("\n<tfoot>");
         for row in &table.foot.rows {
-            write_table_row(out, row, "td", &table.colspecs);
+            write_table_row(out, row, "td", &table.colspecs, sections);
         }
         out.push_str("\n</tfoot>");
     }
     out.push_str("\n</table>");
 }
 
-fn write_table_row(out: &mut String, row: &Row, cell_tag: &str, colspecs: &[ColSpec]) {
+fn write_table_row(
+    out: &mut String,
+    row: &Row,
+    cell_tag: &str,
+    colspecs: &[ColSpec],
+    sections: Sections,
+) {
     out.push_str("\n<tr>");
     // The column a cell sits in is its position *after* the spans before
     // it, which is what makes the column's alignment findable.
     let mut column = 0usize;
     for cell in &row.cells {
-        write_table_cell(out, cell, cell_tag, colspecs.get(column));
+        write_table_cell(out, cell, cell_tag, colspecs.get(column), sections);
         column += usize::try_from(cell.col_span).unwrap_or(1).max(1);
     }
     out.push_str("\n</tr>");
 }
 
-fn write_table_cell(out: &mut String, cell: &Cell, tag: &str, colspec: Option<&ColSpec>) {
+fn write_table_cell(
+    out: &mut String,
+    cell: &Cell,
+    tag: &str,
+    colspec: Option<&ColSpec>,
+    sections: Sections,
+) {
     let _ = write!(out, "\n<{tag}");
     if cell.row_span != 1 {
         let _ = write!(out, "{BREAK}rowspan=\"{}\"", cell.row_span);
@@ -962,7 +1064,7 @@ fn write_table_cell(out: &mut String, cell: &Cell, tag: &str, colspec: Option<&C
         let _ = write!(out, "{BREAK}style=\"text-align: {align};\"");
     }
     out.push('>');
-    write_blocks_joined(out, &cell.blocks);
+    write_blocks_joined(out, &cell.blocks, sections);
     let _ = write!(out, "</{tag}>");
 }
 
@@ -1366,6 +1468,69 @@ mod tests {
 
     fn doc(blocks: Vec<Block>) -> Pandoc {
         Pandoc { blocks, ..Pandoc::default() }
+    }
+
+    fn section(id: &str, classes: &[&str], blocks: Vec<Block>) -> Block {
+        Block::Div(
+            Attr {
+                identifier: id.to_owned(),
+                classes: classes.iter().map(|class| (*class).to_owned()).collect(),
+                attributes: Vec::new(),
+            },
+            blocks,
+        )
+    }
+
+    /// `diff-html` cannot reach any of this: its corpus is the spec for
+    /// a dialect with no way to write a `Div` at all. Every
+    /// expectation here was read off `pandoc -f json -t html5` on the
+    /// same AST — see [`write_div`] for the rule they pin.
+    #[test]
+    fn a_section_div_is_a_section_element() {
+        let para = Block::Para(vec![Inline::Str("z".to_owned())]);
+
+        // Classed `section`: the element says it, so the class is not written.
+        let given = doc(vec![section("x", &["section", "level1"], vec![para.clone()])]);
+        assert_eq!(write_html(&given).trim_end(), "<section id=\"x\" class=\"level1\">\n<p>z</p>\n</section>");
+
+        // No `section` class and no header of that shape: still a `<div>`.
+        let plain = doc(vec![section("x", &["level1"], vec![para.clone()])]);
+        assert_eq!(write_html(&plain).trim_end(), "<div id=\"x\" class=\"level1\">\n<p>z</p>\n</div>");
+
+        // A header with no identifier of its own is the section's own:
+        // its classes go in front of the div's, duplicates dropped, and
+        // it keeps them too.
+        let owned = doc(vec![section(
+            "x",
+            &["section", "level1", "unnumbered"],
+            vec![header(1, "", &["unnumbered"], "T"), para.clone()],
+        )]);
+        assert_eq!(
+            write_html(&owned).trim_end(),
+            "<section id=\"x\" class=\"unnumbered level1\">\n\
+             <h1 class=\"unnumbered\">T</h1>\n<p>z</p>\n</section>"
+        );
+
+        // The same tree written by a caller that built the sections
+        // itself — `--section-divs` — keeps the div's own order and does
+        // not merge. This is the EPUB writer's path.
+        assert_eq!(
+            write_html_section_divs(&owned).trim_end(),
+            "<section id=\"x\" class=\"level1 unnumbered\">\n\
+             <h1 class=\"unnumbered\">T</h1>\n<p>z</p>\n</section>"
+        );
+
+        // Nothing but `section` left to say: the wrapper existed only to
+        // carry the identifier, and the header carries it instead.
+        let bare = doc(vec![section(
+            "x",
+            &["section"],
+            vec![header(1, "", &["hc"], "T"), para],
+        )]);
+        assert_eq!(
+            write_html(&bare).trim_end(),
+            "<h1 class=\"hc\" id=\"x\">T</h1>\n<p>z</p>"
+        );
     }
 
     /// Three rules `scripts/compare-toc.sh` cannot reach, because none of
