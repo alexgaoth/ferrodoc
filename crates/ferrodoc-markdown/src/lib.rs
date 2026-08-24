@@ -1339,10 +1339,13 @@ fn lists<'a>(
     dialect: Dialect,
 ) -> Vec<Block> {
     // Only bullet lists have task items in pandoc, so an ordered list is
-    // never split.
+    // never split — and **only `gfm` splits at all**. Pandoc's own
+    // markdown keeps `- [ ] a` and `- b` in one list, measured; running
+    // the gfm rule there cut every mixed list into three.
     let mut runs: Vec<(bool, Vec<&'a AstNode<'a>>)> = Vec::new();
     for item in node.children() {
-        let is_task = nl.list_type == ListType::Bullet
+        let is_task = dialect == Dialect::Gfm
+            && nl.list_type == ListType::Bullet
             && matches!(item.data.borrow().value, NodeValue::TaskItem(_));
         match runs.last_mut() {
             Some((kind, nodes)) if *kind == is_task => nodes.push(item),
