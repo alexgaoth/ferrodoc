@@ -1355,7 +1355,42 @@ attributes it hangs on the node are now picked up: `link_attributes`
 autolink's `uri`/`email` class shares that field, so it is given only
 where the source wrote no attributes of its own.
 
-**What the remaining twelve corpus documents need**, each named rather
+**What the 207 remaining spec examples are**, by the spec's own
+sections, because the shape of that list is the finding:
+
+| failing | section |
+|---|---|
+| **43/44** | HTML blocks |
+| 40/132 | Emphasis and strong emphasis |
+| 26/90 | Links |
+| 16/27 | Setext headings |
+| 11/26 | Lists |
+| 9/20 | Raw HTML |
+| 8/18, 8/29, 8/27 | ATX headings, fenced code, link reference definitions |
+| 7/25, 7/22, 6/19 | block quotes, code spans, autolinks |
+
+**43 of 44 is not a list of extensions; it is one rule.** Pandoc's
+markdown reader writes **one `RawBlock` per tag** and reads what lies
+between them as markdown, where CommonMark keeps the whole HTML block as
+a single opaque chunk:
+
+    printf '<table>\n  <tr><td>\n hi\n  </td></tr>\n</table>\n' |
+      pandoc -f markdown -t json
+
+gives `RawBlock "<table>"`, `RawBlock "<tr>"`, … with `Plain [Str "hi"]`
+in the middle. `native_divs` and `native_spans` sit on top of it: a
+matched `<div>` pair becomes a `Div` carrying the element's attributes,
+and `<span>` a `Span`. That one card is worth 43 examples and
+`edge-cases.md`; nothing else on the list is worth more than seventeen.
+
+The rest — emphasis flanking, link destinations with spaces or newlines,
+setext underlines — is **the parser rather than the dialect**. Pandoc's
+markdown is not CommonMark plus extensions, and those sections are where
+the difference stops being a feature list. That is the ceiling this
+reader is approaching, and it is why the number to watch is the shape of
+the table above rather than the total.
+
+**What the remaining ten corpus documents need**, each named rather
 than described as "the dialect": bracketed spans `[text]{#id}`,
 `native_divs` (a `<div>` is a `Div` there and a `RawBlock` here —
 `edge-cases.md`), a block scalar in a metadata block (`abstract: |`), a

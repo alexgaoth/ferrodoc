@@ -414,13 +414,29 @@ attributes only had to be read — `link_attributes`,
 `inline_code_attributes` and `inline_footnotes` — take the corpus run to
 **10/20**.
 
-What is left is a list of named constructs rather than a decision:
-bracketed spans `[text]{#id}`, `native_divs`, block scalars in a
-metadata block, a multi-word fence info string, `***x***` nesting the
+**And reading the 207 remaining spec failures by section is what says
+what to do next.** `43 of 44` HTML-block examples fail, and they fail
+for one reason: pandoc's markdown writes **one `RawBlock` per tag** and
+reads what lies between them as markdown, where CommonMark keeps the
+block as a single opaque chunk. `native_divs` and `native_spans` sit on
+top of that. **That is the next card, and it is worth more than
+everything else on the list put together** — 43 spec examples and
+`edge-cases.md`, against seventeen for the largest of the rest.
+
+The rest of the list is bracketed spans `[text]{#id}`, block scalars in
+a metadata block, a multi-word fence info string, `***x***` nesting the
 other way round from CommonMark, and what pandoc's markdown does with a
-GFM document. None of them is `smart`-sized; each is a card, and the
-last three need the *source* rather than the tree, which is the same
-wall `COMPATIBILITY.md` already records for `[http://x](http://x)`.
+GFM document. The last two need the *source* rather than the tree, which
+is the wall `COMPATIBILITY.md` already records for
+`[http://x](http://x)`.
+
+**What the section table also says is where the ceiling is.** Emphasis
+40/132, links 26/90, setext headings 16/27: those are not extensions,
+they are a different parser. Pandoc's markdown is not CommonMark plus a
+feature list, and no card closes that gap. So the exit test for D4.4 —
+"until the number is close to 100" — should be re-read as *close to 100
+on what a dialect can reach*, and the honest way to say that is the
+table rather than the total.
 
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number
