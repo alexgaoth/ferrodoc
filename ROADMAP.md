@@ -106,7 +106,7 @@ That is checkable, and 1.0 is not reachable until it is checked.
 
 Today's gates score *ASTs and single conversions*. They cannot answer "would
 this user notice". `scripts/dropin.sh` does, and **its number today is
-`0/48`**:
+`4/48`** — it was `0/48` when the corpus was collected:
 
 - a corpus of **real command lines** — the invocations that appear in
   Makefiles, CI jobs and scripts, not synthetic ones;
@@ -312,17 +312,26 @@ name standalone HTML as an exception the way it names citations.
 
 #### What the drop-in number is waiting on now
 
-`--defaults` and the `-c` alias took *out of surface* from **15 rows to
-7**, and the headline is still `0/48`. That is the useful result: the
-seven rows that were refused now run, and every one of them differs on
-the **standalone page shape**, which is 0.5's template work rather than
-0.4's flags. The remaining seven refusals are `--template`, `-V`,
-`--reference-doc` (all 0.5), `--include-in-header`/`-H`/`-B`/`-A`, and
-`--toc-depth` twice.
+Updated 2026-08-23, after the writers were brought to pandoc's bytes.
+**`4/48`, with no refusals at all**, and — the number that matters more —
+`scripts/dropin.sh --attribute` now attributes **25 of the 44 misses** to
+one or more of exactly three global decisions:
 
-So the order that follows from the measurement is: `--toc-depth` and the
-three include flags, which are 0.4 and small, then **0.5's templates**,
-which is what most of the corpus is actually blocked on.
+| decision | rows it alone would fix |
+|---|---|
+| pandoc's 72-column fill (D4.3) | 23 |
+| `-f markdown` meaning pandoc's dialect (D4.4) | 18 |
+| syntax highlighting (0.7) | 9 |
+
+Most rows need more than one of them, which is why the column sums past
+25. The remaining 19 need something none of the three explains, and that
+bucket has shrunk from 26. The writer work is what moved it: every one
+of those rows was differing on a *spelling* as well, and now differs on
+one thing instead of three.
+
+So the order that follows from the measurement is unchanged in shape and
+sharper in detail: **the three decisions, in the order of the table**.
+None of them is a flag any more; each is a body of work with a card.
 
 #### D4.4 — decided: `markdown` does not alias `pandoc_markdown`, yet
 
@@ -362,16 +371,17 @@ can be taken in any order, or in parallel by two people.
 
 #### Where this stands, 2026-08-22
 
-**D4.1 and D4.2 are done, and the number is `0/48`.**
+**D4.1 and D4.2 are done, and the number was `0/48` when they were.**
 
 `dropin/` holds 48 real invocations — collected by GitHub code search
 over Makefiles, CI files and shell scripts, 327 distinct lines collapsing
 to 34 flag signatures, each row carrying the repository it came from and
 what was altered to make it runnable here. `scripts/dropin.sh` runs both
 binaries and compares every byte either wrote, stdout, output files and
-stderr, and `verify.sh` prints the number. It is a *measurement* while it
-is zero, because a floor of zero holds nothing; **it becomes a gate the
-day it is not zero.**
+stderr, and `verify.sh` prints the number. It was a *measurement* while
+it was zero, because a floor of zero holds nothing; it became a gate the
+day it was not, and the floor rises with the number — **4 as of
+2026-08-23**.
 
 Three findings, and each of them changes what 0.4 should do:
 
@@ -420,10 +430,10 @@ template from the wild does too.
 
 ```console
 $ ./scripts/flags.sh
-144/144 flag combinations byte-identical
+184/184 flag combinations byte-identical
 ```
 
-Ten flag combinations over every document in `corpus/`: `-s`, `--toc`,
+Every flag over every document in `corpus/`: `-s`, `--toc`,
 `--toc-depth`, `--css`, `-V`, `--title-prefix`, `-H`, `-B`, `-A`, and a
 third-party `--template` — gated at 100 in `verify.sh`, because
 reproducing a template is not something one gets 90% right.
@@ -445,8 +455,9 @@ and all a self-consistent package can take. With it, **every one of the
 48 command lines in `dropin/` runs** — the corpus has no refusals left.
 
 **Still 0.5:** the default templates for the standalone formats other
-than HTML. What `-s` HTML still differs on is **syntax highlighting**,
-which is 0.7.
+than HTML — `samples/07-markdown-to-latex` is 141 lines of difference and
+almost all of it is pandoc's LaTeX preamble. What `-s` HTML still differs
+on is **syntax highlighting**, which is 0.7.
 
 **Not this version:** the full pandoc template language if it proves to need
 a general interpreter — in that case, state the subset and refuse the rest
@@ -470,19 +481,43 @@ between them.
 | EPUB spec chunks | 8/22 | resolved by the raw-HTML decision, or the gate retired as measuring the wrong thing |
 | `scripts/sweep-epub-xhtml.sh` | 77 of 128 differ | **zero unrecorded**, which is the real number for the HTML reader |
 
-**A second oracle exists and is now measured.** `./scripts/writers.sh`
-compares each text writer against **pandoc's own writer** on the same
-AST, byte for byte, in a second — the comparison the fidelity round trips
-could never make for a format pandoc does not read back. Today:
-`html 8/8`, `plain 5/8`, `gfm 3/8`, `rst 2/8`, `asciidoc 2/8`,
-`markdown 1/8`, `latex 0/8` on `corpus/*.md`. It is reported and not
-gated, because no floor has been chosen; **the card is to choose one per
-writer and gate it**, which is a far tighter contract than the round trip
-and is the one the 1.0 claim is written in.
+#### The writer half of this version is **done**, 2026-08-23
+
+`./scripts/writers.sh` compares each text writer against **pandoc's own
+writer** on the same AST, byte for byte — the comparison the fidelity
+round trips could never make for a format pandoc does not read back. The
+card was to choose a floor per writer and gate it. Both halves happened,
+in that order:
+
+| writer | was | now | floor |
+|---|---|---|---|
+| `html` | 8/8 | **12/12** | 12 |
+| `rst` | 2/8 | **12/12** | 12 |
+| `plain` | 5/8 | **12/12** | 12 |
+| `latex` | 0/8 | 11/12 | 11 |
+| `asciidoc` | 2/8 | 11/12 | 11 |
+| `gfm` | 3/8 | 7/12 | 7 |
+| `markdown` | 1/8 | 3/12 | 3 |
+
+The corpus grew from eight documents to twelve on the way, and that is
+the part worth carrying forward: the four added are read as **GFM**,
+because `CommonMark` has no table, no task list and no footnote, so a
+score over the original eight could not see the constructs the writers
+were worst at. The first run of the wider corpus found that the HTML
+writer — at `diff-html` 652/652 — **dropped every footnote**.
+
+Each floor is the score that writer reached, because every point below
+one is a document that used to be byte-identical and is not any more.
+
+`markdown` stays low for a stated reason rather than an unstated one:
+`-t markdown` is `CommonMark` here and pandoc's own dialect there, so
+that row measures the dialect gap on the writer side and moves when
+D4.4 does.
 
 **Exit test:** the sweep reports no divergence outside the recorded set,
 `docs/divergences.md` and `COMPATIBILITY.md` agree with the gates, and
-every writer above has a floor.
+every writer above has a floor. **The third is met**; the sweep and the
+reader gates in the table above are what remains.
 
 **Not this version:** new formats, performance work.
 
