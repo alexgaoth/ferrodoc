@@ -248,7 +248,7 @@ if [ "$want_gates" = 1 ]; then
     # `--defaults` landed. A **count**, not a percentage: over 48 rows a
     # percentage floor tolerates a whole row going backwards.
     # See dropin/README.md.
-    gate "real command lines" ./scripts/dropin.sh --fail-under 9
+    gate "real command lines" ./scripts/dropin.sh --fail-under 10
 
     # Every flag that shapes output, against pandoc, over every document
     # in `corpus/`. A **gate at 100**, not a floor: a flag's whole job is

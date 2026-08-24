@@ -1115,13 +1115,20 @@ fn opens_autolink(out: &str, ch: char) -> bool {
 ///   its own reader turns the text into a link.
 fn escape_text(out: &mut String, text: &str, gfm: bool) {
     let mut chars = text.chars().peekable();
+    let mut escaped_bang = false;
     while let Some(ch) = chars.next() {
         let next = chars.peek().copied();
+        let after_bang = std::mem::take(&mut escaped_bang);
         let at_line_start = out.is_empty() || out.ends_with('\n');
         // A marker only opens a block when the line breaks after it, so
         // `-b` is text and `- b` is a list. Pandoc splits on exactly that.
         let opens_block = next.is_none_or(|c| c == ' ');
         match ch {
+            // The `\!` just written is what stops the image, so the
+            // bracket behind it stands: pandoc writes `\![CDATA\[`, not
+            // `\!\[CDATA\[`, and an ODT holding a CDATA section is where
+            // the difference showed up.
+            '[' if after_bang => out.push(ch),
             '*' | '[' | ']' | '<' | '>' | '`' | '$' => {
                 out.push('\\');
                 out.push(ch);
@@ -1196,7 +1203,10 @@ fn escape_text(out: &mut String, text: &str, gfm: bool) {
             // `]` to stop a link forming — which fails when the very next
             // inline **is** a link and supplies the `](url)` itself.
             // `CommonMark` example 593 is that document.
-            '!' if next == Some('[') => out.push_str("\\!"),
+            '!' if next == Some('[') => {
+                out.push_str("\\!");
+                escaped_bang = true;
+            }
             '&' if entity_ahead(next, &chars) => out.push_str("&amp;"),
             // A literal newline inside a `Str` is text, not structure:
             // written raw it would split the paragraph. A tab is only
@@ -1851,6 +1861,26 @@ mod tests {
         assert!(round_trips("*_foo_*\n"));
         assert!(round_trips("foo***bar***baz\n"));
         assert!(round_trips("foo******bar******baz\n"));
+    }
+
+    #[test]
+    fn an_escaped_bang_leaves_its_bracket_alone() {
+        // Round-tripping cannot see this: `\!\[` and `\![` read back as
+        // the same text. What differs is the spelling, and pandoc's is
+        // the second — the escaped `!` is already what stops the image,
+        // so the bracket behind it stands. An ODT holding a CDATA
+        // section is where it showed up (`dropin-045`).
+        let doc = Pandoc::new(vec![Block::Para(vec![Inline::Str(
+            "<![CDATA[ character data ]]>".to_owned(),
+        )])]);
+        assert_eq!(
+            write_markdown(&doc),
+            "\\<\\![CDATA\\[ character data \\]\\]\\>\n"
+        );
+        // A `!` with no bracket after it is not escaped at all, and a
+        // bracket with no `!` before it still is.
+        let plain = Pandoc::new(vec![Block::Para(vec![Inline::Str("a!b[c".to_owned())])]);
+        assert_eq!(write_markdown(&plain), "a!b\\[c\n");
     }
 
     #[test]
