@@ -73,9 +73,9 @@ OPTIONS:
                             document's own metadata
         --template FILE     Use this template instead of pandoc's default
         --toc-depth N       How deep the contents go [3]
-    -H, --include-in-header FILE    Verbatim into <head>
-    -B, --include-before-body FILE  Verbatim after <body>
-    -A, --include-after-body FILE   Verbatim before </body>
+    -H, --include-in-header FILE    Verbatim into <head>   } each implies
+    -B, --include-before-body FILE  Verbatim after <body>  } --standalone,
+    -A, --include-after-body FILE   Verbatim before </body>} as in pandoc
 
 FORMATS:
 ";
@@ -502,6 +502,22 @@ fn take_flag(
         }
         name if page_flag(name) => {
             let given = value(name)?;
+            // The three include flags imply `--standalone` in pandoc,
+            // and nothing else here does — `--css`, `--template`,
+            // `--toc` and `-V` all leave a fragment a fragment,
+            // measured one flag at a time. Without this a Makefile that
+            // says `-H header.html` got a fragment where pandoc writes
+            // a page (`dropin-013`).
+            if matches!(
+                name,
+                "-H" | "--include-in-header"
+                    | "-B"
+                    | "--include-before-body"
+                    | "-A"
+                    | "--include-after-body"
+            ) {
+                out.framing.standalone = true;
+            }
             page_option(name, given, &mut out.page)?;
         }
         _ => return Ok(false),
@@ -1517,6 +1533,27 @@ mod tests {
         }
         assert!(!dir.join("../escaped.png").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Which flags imply `--standalone`, measured one at a time against
+    /// pandoc: the three include flags do and nothing else here does.
+    /// A `-H header.html` that wrote a fragment is `dropin-013`.
+    #[test]
+    fn the_include_flags_imply_standalone() {
+        let include = std::env::temp_dir().join("ferrodoc-include.html");
+        std::fs::write(&include, "<!-- x -->\n").expect("a writable temp dir");
+        let path = include.to_string_lossy().into_owned();
+        let parse = |flag: &str, value: &str| {
+            let argv = [flag, value, "x.md"].map(str::to_owned);
+            parse_args(&argv).expect("parsed").expect("options").standalone
+        };
+        for flag in ["-H", "--include-in-header", "-B", "--include-before-body", "-A"] {
+            assert!(parse(flag, &path), "{flag} should imply --standalone");
+        }
+        for (flag, value) in [("-c", "x.css"), ("--toc-depth", "2"), ("-V", "k=v")] {
+            assert!(!parse(flag, value), "{flag} should not imply --standalone");
+        }
+        let _ = std::fs::remove_file(&include);
     }
 
     /// Every container, because a walk that misses one leaves a picture
