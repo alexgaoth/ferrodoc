@@ -359,7 +359,7 @@ cargo build --release --target wasm32-unknown-unknown \
   `default = ["all"]`, so nothing changes for anyone who does not ask. A
   caller who converts markdown and HTML can leave the other nine out:
   `--no-default-features --features markdown,html` takes the wasm module to
-  **58%** of its gzipped size and the CLI binary to 60% of its own. The
+  **59%** of its gzipped size and the CLI binary to 60% of its own. The
   ratio is the claim and the byte count illustrates it: the CLI is
   reproducible to the byte in one checkout with one toolchain but 0.7%
   smaller on a CI runner, and the wasm module varies by about 0.03% with
