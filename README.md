@@ -104,7 +104,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
-| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **10/20** over every markdown document in `corpus/`, and **491/652** over the CommonMark spec — which is why `-f markdown` is still CommonMark here |
+| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **10/20** over every markdown document in `corpus/`, and **496/652** over the CommonMark spec — which is why `-f markdown` is still CommonMark here |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |

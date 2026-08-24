@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **491/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **496/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1414,7 +1414,11 @@ No gate had seen it because no corpus heading held punctuation between
 two words, and every HTML conversion of a pandoc-markdown document
 carries these.
 
-**What the 161 remaining spec examples are**, by the spec's own sections,
+**A code span is trimmed**, on both sides and of ASCII whitespace only:
+`` ` a` `` is `a` where CommonMark says ` a`, and `` ` ` `` is empty. A
+non-breaking space inside one is content, not padding.
+
+**What the 156 remaining spec examples are**, by the spec's own sections,
 because the shape of that list is the finding:
 
 | failing | section |
@@ -1423,8 +1427,8 @@ because the shape of that list is the finding:
 | 26/90 | Links |
 | 15/27 | Setext headings |
 | 9/26 | Lists |
-| 8/29, 8/27 | fenced code, link reference definitions |
-| 7/20, 7/25, 7/22 | Raw HTML, block quotes, code spans |
+| 8/27, 7/29 | link reference definitions, fenced code |
+| 7/20, 7/25 | Raw HTML, block quotes |
 | 6/18, 6/19, 6/44 | ATX headings, autolinks, HTML blocks |
 
 **This is the parser rather than the dialect, and no card closes it.**

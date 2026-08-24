@@ -1750,7 +1750,20 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
         NodeValue::Text(t) => text_tokens(t, out),
         NodeValue::SoftBreak => out.push(Inline::SoftBreak),
         NodeValue::LineBreak => out.push(Inline::LineBreak),
-        NodeValue::Code(c) => out.push(Inline::Code(Box::new(written()), c.literal.clone())),
+        NodeValue::Code(c) => {
+            // Pandoc trims a code span's whitespace on both sides;
+            // `CommonMark` strips at most one space, and only when both
+            // ends have one. Probed on six shapes: `` ` a` `` is `a`
+            // there and ` a` here, and `` ` ` `` is empty. **ASCII
+            // whitespace only** — a non-breaking space is content, and
+            // trimming it took spec example 333 with it.
+            let literal = if dialect == Dialect::Pandoc {
+                c.literal.trim_matches(|c: char| c.is_ascii_whitespace()).to_owned()
+            } else {
+                c.literal.clone()
+            };
+            out.push(Inline::Code(Box::new(written()), literal));
+        }
         NodeValue::HtmlInline(h) => {
             // `<!DOCTYPE …>`, `<!ELEMENT …>` and a CDATA section are the
             // literal text they are written with in pandoc's markdown,
@@ -2024,6 +2037,25 @@ mod tests {
         assert_eq!(ids("# ![alt](x) t\n"), ["alt-t"]);
         // Any whitespace, not just the ASCII space.
         assert_eq!(ids("# a\u{a0}b\n"), ["a-b"]);
+    }
+
+    /// Pandoc trims a code span; `CommonMark` strips at most one space
+    /// and only when both ends have one. ASCII whitespace only.
+    #[test]
+    fn a_code_span_is_trimmed_in_pandocs_dialect() {
+        let code = |literal: &str| {
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "Code", "c": [["", [], []], literal]}
+            ]}])
+        };
+        assert_eq!(pmd("` a`\n"), code("a"));
+        assert_eq!(pmd("`a `\n"), code("a"));
+        assert_eq!(pmd("`  ``  `\n"), code("``"));
+        assert_eq!(pmd("` `\n"), code(""));
+        // A non-breaking space is content, not padding.
+        assert_eq!(pmd("`\u{a0}b\u{a0}`\n"), code("\u{a0}b\u{a0}"));
+        // `gfm` keeps `CommonMark`'s rule.
+        assert_eq!(gfm("` a`\n"), code(" a"));
     }
 
     /// Pandoc's own dialect does not use GitHub's slug, and the three
