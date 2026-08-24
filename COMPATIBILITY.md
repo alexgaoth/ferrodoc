@@ -76,7 +76,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
-| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **10/20** over every markdown document, **496/652** over the spec |
+| `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **11/20** over every markdown document, **496/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
@@ -1414,6 +1414,14 @@ No gate had seen it because no corpus heading held punctuation between
 two words, and every HTML conversion of a pandoc-markdown document
 carries these.
 
+**Bracketed spans are read**: `[text]{#id .cls k=v}` is a `Span`, and
+`[text]{.smallcaps}` a `SmallCaps` — that class alone, and among others
+a `SmallCaps` inside the span. An attribute list with anything malformed
+in it is not a span at all, so `[t]{foo}` stays `[t]{foo}`. The pairing
+runs **before** the quote pairing, because `smart` has already made the
+quotes in `[t]{k="a b"}` curly and turning those into a `Quoted` first
+would eat the value.
+
 **A code span is trimmed**, on both sides and of ASCII whitespace only:
 `` ` a` `` is `a` where CommonMark says ` a`, and `` ` ` `` is empty. A
 non-breaking space inside one is content, not padding.
@@ -1441,9 +1449,8 @@ feature at all. That is the ceiling this reader is approaching, and it is
 why the number to watch is the shape of the table rather than the total.
 
 **What the remaining ten corpus documents need**, each named rather
-than described as "the dialect": bracketed spans `[text]{#id}`,
-`native_divs` (a `<div>` is a `Div` there and a `RawBlock` here —
-`edge-cases.md`), a block scalar in a metadata block (`abstract: |`), a
+than described as "the dialect": a block scalar in a metadata block
+(`abstract: |`), a
 fence info string of several words (pandoc does not read one as a fence
 at all), `***x***` nesting `Strong` outside `Emph` where CommonMark
 nests the other way round, and the four `.gfm` documents, which are read

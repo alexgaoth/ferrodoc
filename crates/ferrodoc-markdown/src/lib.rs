@@ -616,6 +616,181 @@ fn split_leading_html(block: Block, out: &mut Vec<Block>) {
     }
 }
 
+/// Pandoc's attribute list, `{#id .class key=value}`, as written in a
+/// bracketed span or after a heading.
+///
+/// `None` when any item is malformed, because pandoc then reads the
+/// whole construct as the literal text it is: `[t]{foo}` is not a span,
+/// it is `[t]{foo}`. The last `#id` wins, classes accumulate, and a
+/// value may be quoted so it can hold a space.
+fn pandoc_attr(text: &str) -> Option<Attr> {
+    let mut attr = Attr::default();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix('#') {
+            let end = after.find(char::is_whitespace).unwrap_or(after.len());
+            if end == 0 {
+                return None;
+            }
+            after[..end].clone_into(&mut attr.identifier);
+            rest = after[end..].trim_start();
+        } else if let Some(after) = rest.strip_prefix('.') {
+            let end = after.find(char::is_whitespace).unwrap_or(after.len());
+            if end == 0 {
+                return None;
+            }
+            attr.classes.push(after[..end].to_owned());
+            rest = after[end..].trim_start();
+        } else {
+            let name_end = rest.find(['=', ' '])?;
+            if !rest[name_end..].starts_with('=') || name_end == 0 {
+                return None;
+            }
+            let after = &rest[name_end + 1..];
+            // `smart` runs in the parser, so the quotes around a value
+            // are curly by the time this sees them.
+            let quotes = [('"', '"'), ('\'', '\''), ('\u{201c}', '\u{201d}'), ('\u{2018}', '\u{2019}')];
+            let opener = after.chars().next().and_then(|first| {
+                quotes.iter().find(|(open, _)| *open == first).copied()
+            });
+            let (value, tail) = if let Some((open, close)) = opener {
+                let after = &after[open.len_utf8()..];
+                let end = after.find(close)?;
+                (&after[..end], &after[end + close.len_utf8()..])
+            } else {
+                let end = after.find(char::is_whitespace).unwrap_or(after.len());
+                (&after[..end], &after[end..])
+            };
+            attr.attributes.push((rest[..name_end].to_owned(), value.to_owned()));
+            rest = tail.trim_start();
+        }
+    }
+    Some(attr)
+}
+
+/// `[text]{#id .cls k=v}` is a `Span` — a construct only pandoc's
+/// markdown reads, and one comrak leaves as the literal text it is
+/// written with. The text between the brackets has already been read as
+/// inlines, so this only has to find the two ends and wrap what lies
+/// between; the shape is the quote pairing's.
+///
+/// Two rules measured beyond the obvious: `.smallcaps` **alone** is a
+/// `SmallCaps` rather than a `Span` carrying that class, and among other
+/// attributes it is a `SmallCaps` **inside** the span; and an attribute
+/// list with anything malformed in it is not a span at all, so
+/// `[t]{foo}` stays `[t]{foo}`.
+fn bracketed_spans(tokens: Vec<Inline>) -> Vec<Inline> {
+    let holds = |needle: &str| {
+        tokens.iter().any(|t| matches!(t, Inline::Str(word) if word.contains(needle)))
+    };
+    if !(holds("[") && holds("]{")) {
+        return tokens;
+    }
+    let mut rest: std::collections::VecDeque<Inline> = tokens.into();
+    let mut out: Vec<Inline> = Vec::new();
+    while let Some(token) = rest.pop_front() {
+        let Inline::Str(word) = token else {
+            out.push(token);
+            continue;
+        };
+        // A `[` that opens nothing leaves the word whole — cutting it
+        // there would leave two `Str` tokens where pandoc has one.
+        let mut from = 0;
+        loop {
+            let Some(offset) = word[from..].find('[') else {
+                push_word(&mut out, word);
+                break;
+            };
+            let at = from + offset;
+            rest.push_front(Inline::Str(word[at + 1..].to_owned()));
+            if let Some(span) = take_span(&mut rest) {
+                push_word(&mut out, word[..at].to_owned());
+                out.push(span);
+                break;
+            }
+            // `take_span` consumed nothing, so the tail goes back into
+            // the word and the search moves past this bracket.
+            rest.pop_front();
+            from = at + 1;
+        }
+    }
+    out
+}
+
+fn push_word(out: &mut Vec<Inline>, word: String) {
+    if !word.is_empty() {
+        out.push(Inline::Str(word));
+    }
+}
+
+/// The span that opens at the front of `rest`, or nothing — and nothing
+/// is consumed unless there is one.
+fn take_span(rest: &mut std::collections::VecDeque<Inline>) -> Option<Inline> {
+    // Where the `]{` is, and where the `}` that closes the list is.
+    let (index, at) = rest.iter().enumerate().find_map(|(index, token)| match token {
+        Inline::Str(word) => word.find("]{").map(|at| (index, at)),
+        _ => None,
+    })?;
+    let mut list = String::new();
+    let mut end = None;
+    for (offset, token) in rest.iter().enumerate().skip(index) {
+        let word = match token {
+            Inline::Str(word) if offset == index => &word[at + 2..],
+            Inline::Str(word) => word.as_str(),
+            Inline::Space => {
+                list.push(' ');
+                continue;
+            }
+            // An attribute list is text and spaces; anything else means
+            // the `]{` was not one.
+            _ => return None,
+        };
+        if let Some(close) = word.find('}') {
+            list.push_str(&word[..close]);
+            end = Some((offset, word.len() - close - 1));
+            break;
+        }
+        list.push_str(word);
+    }
+    let (end_index, remaining) = end?;
+    let attr = pandoc_attr(&list)?;
+
+    let mut content: Vec<Inline> = Vec::new();
+    for _ in 0..index {
+        content.push(rest.pop_front().expect("counted just now"));
+    }
+    let Some(Inline::Str(word)) = rest.pop_front() else {
+        unreachable!("the `]{{` was found in a Str")
+    };
+    push_word(&mut content, word[..at].to_owned());
+    // Everything from the `]{` through the `}` goes; what follows the
+    // `}` in whichever token held it comes back for the next pass.
+    let mut closing = word;
+    for _ in index..end_index {
+        closing = match rest.pop_front() {
+            Some(Inline::Str(next)) => next,
+            _ => String::new(),
+        };
+    }
+    rest.push_front(Inline::Str(closing[closing.len() - remaining..].to_owned()));
+
+    let content = pandoc_inlines(content);
+    let small = attr.classes.iter().position(|class| class == "smallcaps");
+    Some(match small {
+        None => Inline::Span(Box::new(attr), content),
+        Some(index) => {
+            let mut attr = attr;
+            attr.classes.remove(index);
+            let caps = Inline::SmallCaps(content);
+            if attr == Attr::default() {
+                caps
+            } else {
+                Inline::Span(Box::new(attr), vec![caps])
+            }
+        }
+    })
+}
+
 /// An HTML tag's attributes as pandoc reads them: `id` is the
 /// identifier, `class` splits on whitespace, and everything else keeps
 /// its order. Measured — the attribute *names* are matched without
@@ -1577,7 +1752,16 @@ fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes, diale
         inline(node, &mut out, defs, dialect);
     }
     let out = merge_adjacent_emphasis(out);
-    if dialect == Dialect::Pandoc { native_spans(quoted(out)) } else { out }
+    if dialect == Dialect::Pandoc { pandoc_inlines(out) } else { out }
+}
+
+/// The three pairings pandoc's dialect makes over one sibling list.
+///
+/// **`bracketed_spans` runs first**, and must: `smart` has already
+/// turned the quotes in `[t]{k="a b"}` curly, and pairing those into a
+/// `Quoted` before the attribute list is read would eat the value.
+fn pandoc_inlines(tokens: Vec<Inline>) -> Vec<Inline> {
+    native_spans(quoted(bracketed_spans(tokens)))
 }
 
 /// The curly quotes `smart` produced, paired into `Quoted` elements.
@@ -2037,6 +2221,53 @@ mod tests {
         assert_eq!(ids("# ![alt](x) t\n"), ["alt-t"]);
         // Any whitespace, not just the ASCII space.
         assert_eq!(ids("# a\u{a0}b\n"), ["a-b"]);
+    }
+
+    /// `[text]{#id}` is a `Span`, and only pandoc's dialect reads one.
+    #[test]
+    fn a_bracketed_span_is_a_span() {
+        assert_eq!(
+            pmd("[text]{#id .cls k=v}\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Span", "c": [
+                ["id", ["cls"], [["k", "v"]]], [{"t": "Str", "c": "text"}]
+            ]}]}])
+        );
+        // The text between the brackets is markdown, and a value may be
+        // quoted so it can hold a space — which `smart` has already made
+        // curly by the time the attributes are read.
+        assert_eq!(
+            pmd("[a *b*]{k=\"x y\"}\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Span", "c": [
+                ["", [], [["k", "x y"]]],
+                [{"t": "Str", "c": "a"}, {"t": "Space"},
+                 {"t": "Emph", "c": [{"t": "Str", "c": "b"}]}]
+            ]}]}])
+        );
+        // `.smallcaps` alone is a `SmallCaps`, and among others it is
+        // one inside the span.
+        assert_eq!(
+            pmd("[t]{.smallcaps}\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                {"t": "SmallCaps", "c": [{"t": "Str", "c": "t"}]}
+            ]}])
+        );
+        assert_eq!(
+            pmd("[t]{.smallcaps #i}\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Span", "c": [
+                ["i", [], []], [{"t": "SmallCaps", "c": [{"t": "Str", "c": "t"}]}]
+            ]}]}])
+        );
+        // A malformed attribute list is not a span at all, and the
+        // bracket that opened nothing does not cut the word in two.
+        assert_eq!(
+            pmd("[t]{foo}\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Str", "c": "[t]{foo}"}]}])
+        );
+        // Not `gfm`.
+        assert_eq!(
+            gfm("[t]{#i}\n"),
+            serde_json::json!([{"t": "Para", "c": [{"t": "Str", "c": "[t]{#i}"}]}])
+        );
     }
 
     /// Pandoc trims a code span; `CommonMark` strips at most one space
