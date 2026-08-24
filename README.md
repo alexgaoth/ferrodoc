@@ -293,8 +293,21 @@ produce was an error by name rather than a silent no-op. Filling them one
 at a time is what let the default flip.
 
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
-real pandoc command lines through both binaries and publishes how many
-produce identical bytes. It doubled the day the default flipped.
+real pandoc command lines — collected from public Makefiles, CI files and
+scripts — through both binaries and compares every byte either wrote,
+stdout, output files and stderr. **10/48 command lines identical**, with
+**0 refused** for a flag ferrodoc does not have.
+
+`--attribute` turns that into work: it retries each miss with one of
+pandoc's own features switched off at a time and names the smallest set
+that makes the two agree. Reading `-f markdown` as pandoc's dialect
+rather than CommonMark accounts for **17** misses on its own and **10**
+more together with pandoc's default syntax highlighting, which accounts
+for **3** by itself. One row is a difference this project has decided to
+keep. That leaves **7**, and six of those are the same dialect decision
+from an angle the experiment cannot model — `markdown_github` naming it,
+a `.pmd` document written in it, or `-t markdown` being asked to *write*
+it. **The number is one decision away.**
 
 `--extract-media DIR` writes the input's embedded images under `DIR` and
 repoints the output at them, matching `pandoc --extract-media` file for

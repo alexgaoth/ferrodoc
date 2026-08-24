@@ -1363,6 +1363,30 @@ stderr. The test is pandoc's own, probed: the first line is exactly `---`,
 the line after it is not blank, and a later line is exactly `---` or
 `...`. `stdout` and the exit code are untouched.
 
+**What the dialect costs is measured, and it is most of the drop-in
+number.** `scripts/dropin.sh --attribute` retries every miss with one of
+pandoc's own features neutralised at a time and names the smallest set
+that makes the two agree. On the 38 misses in 48 real command lines:
+
+| what one change would fix the row | rows |
+|---|---|
+| reading `-f markdown` as pandoc's dialect | **17** |
+| that, and pandoc's default syntax highlighting | **10** |
+| highlighting alone | 3 |
+| a difference this project keeps (`dropin-006`) | 1 |
+| neither | **7** |
+
+**Six of those last seven are the same decision from an angle the
+experiment cannot model.** The counterfactual works by handing pandoc
+`-f commonmark`, and that cannot express what these rows need: two name
+the dialect as `markdown_github`, one is a `.pmd` document written in it,
+and three ask `-t markdown` to *write* it — pandoc's markdown writer
+spells an em dash `---`, a heading identifier `{#id}`, an anchor
+`[]{#id .anchor}` and a container `:::`, and CommonMark has none of
+those. The seventh is `--reference-doc`. So the honest reading is that
+**one decision stands between 10/48 and the high thirties**, and it is
+the same decision on both the reading and the writing side.
+
 ### `--wrap` — pandoc's, since 2026-08-24
 
 **Every text writer lays lines out all three ways, and the default is

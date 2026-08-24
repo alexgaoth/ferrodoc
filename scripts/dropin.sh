@@ -66,10 +66,15 @@ trap 'rm -rf "$work"' EXIT
 # this list is a pointer, not a place to retire a failure.
 deliberate() {
     case "$1" in
-        # `--wrap` defaults differ on purpose until 0.4 decides it, and
-        # the LaTeX and markdown writers fill differently as a result.
-        # ROADMAP card D4.3.
-        NONE) return 0 ;;
+        # The LaTeX writer sets an ordered list's counter **before** its
+        # label, and pandoc writes them the other way round. Pandoc's own
+        # reader takes the start value from the first directive it meets,
+        # so pandoc's order loses it — a list that asked to begin at 3
+        # comes back beginning at 1. COMPATIBILITY.md records the
+        # measurement. The row needs the dialect as well, and is listed
+        # here because it cannot become identical even with it: that is
+        # what this list means, and why it is not counted as work.
+        dropin-006) return 0 ;;
         *) return 1 ;;
     esac
 }

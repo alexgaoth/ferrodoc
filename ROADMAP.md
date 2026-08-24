@@ -239,7 +239,7 @@ mean shipping eight of them with no way to say whether they helped.
 | **D4.5 — extension syntax** *(done)* | Accepted where the named dialect already does it; refused by name otherwise, saying which of the three reads it. A name pandoc does not have is a typo and says so — checked before the no-op test, which had accepted `-nothing`. | `extension_syntax_is_accepted_when_it_asks_for_nothing` in `main.rs`; `dropin-008` now runs with the `markdown_github-hard_line_breaks` its source actually wrote. | Implementing a missing extension. |
 | **D4.6 — diagnostics** | `--quiet`, `--verbose`, `--log`, `--fail-if-warnings`, and unknown-flag behaviour: fail naming the flag and whether it is unimplemented or out of scope. | Every unknown flag produces a message naming it; `--fail-if-warnings` turns the metadata-block warning into a non-zero exit. **No silent acceptance anywhere.** | Rewriting existing warnings. |
 | **D4.7 — paths and defaults** *(done)* | `--defaults` splices its flags in **where the flag appeared** (pandoc's precedence, measured both ways round); `--resource-path` is searched after the document's own directory; `--data-dir` supplies `templates/default.html5` and names a `--template`. A key with no flag behind it is refused by name. | The seven `--defaults` rows in `dropin/` run; `--resource-path` embeds a picture neither binary finds without it. | `--reference-doc`, which is 0.5. |
-| **D4.8 — text shaping** *(done)* | All five, plus `--metadata-file`. `--ascii` is HTML-only and refuses the other writers by name — pandoc spells the escape differently in each. | `./scripts/flags.sh`, **184/184 byte-identical**, gated at 100 in `verify.sh`. `--eol=crlf` is compared on bytes. | Highlighting. Anything in 0.5. |
+| **D4.8 — text shaping** *(done)* | All five, plus `--metadata-file`. `--ascii` is HTML-only and refuses the other writers by name — pandoc spells the escape differently in each. | `./scripts/flags.sh`, **224/224 byte-identical**, gated at 100 in `verify.sh`. `--eol=crlf` is compared on bytes. | Highlighting. Anything in 0.5. |
 
 #### D4.3 — decided: match pandoc, and the default cannot flip yet
 
@@ -436,6 +436,34 @@ Three findings, and each of them changes what 0.4 should do:
    drop-in number is gated by 0.5 and 0.7 as much as by 0.4** — worth
    knowing before the version ladder is treated as an order of work.
 
+#### Where this stands, 2026-08-24 — **10/48, and one decision left**
+
+The floor is 10. Four things moved it since the fill landed, and none of
+them was a card:
+
+| | what it was | rows |
+|---|---|---|
+| the attribution's own guard | it skipped the dialect hypothesis on any command line that spelled `-f` out loud, which is most of them | 9 misfiled |
+| `<div>` for a section div | pandoc's html5 writes `<section>`, so every EPUB and DOCX differed on every heading | 1 |
+| `\!\[` for `\![` | the escaped `!` is already what stops the image | 1 |
+| `-H`/`-B`/`-A` not implying `--standalone` | a Makefile got a fragment where pandoc writes a page | — |
+| metadata not reaching the template | `-M pagetitle`, `-M linkcolor` | — |
+
+**The remainder is no longer a third cause.** With the guard fixed, the
+attribution reads: the dialect 17, the dialect with highlighting 10,
+highlighting alone 3, one deliberate, **seven left** — and six of those
+seven are the same dialect decision from an angle the counterfactual
+cannot model, because it works by handing pandoc `-f commonmark` and
+CommonMark cannot say what they need. Two name the dialect
+`markdown_github`, one is a `.pmd` written in it, and **three ask
+`-t markdown` to write it** — which is the half of D4.4 the card does not
+mention. The seventh is `--reference-doc`, which is 0.5.
+
+**So the order is settled by measurement rather than by taste: D4.4,
+then 0.7, and there is nothing else to read.** COMPATIBILITY.md carries
+the table; `claims.sh` holds both the number and the flag figure to the
+commands that derive them, which nothing did before.
+
 ### 0.5 — Templates, variables and standalone parity
 
 **Claim:** `-s` output is pandoc's, and a user's own template works.
@@ -455,17 +483,26 @@ publishing pipelines cannot move at all.
 same document and variables, produces identical bytes; a third-party
 template from the wild does too.
 
-#### Where this stands, 2026-08-23 — **the exit test passes**
+#### Where this stands, 2026-08-24 — **the exit test passes**
 
 ```console
 $ ./scripts/flags.sh
-184/184 flag combinations byte-identical
+224/224 flag combinations byte-identical
 ```
 
 Every flag over every document in `corpus/`: `-s`, `--toc`,
-`--toc-depth`, `--css`, `-V`, `--title-prefix`, `-H`, `-B`, `-A`, and a
-third-party `--template` — gated at 100 in `verify.sh`, because
-reproducing a template is not something one gets 90% right.
+`--toc-depth`, `--css`, `-V`, `-M`, `--metadata-file`, `--title-prefix`,
+`-H`, `-B`, `-A`, and a third-party `--template` — gated at 100 in
+`verify.sh`, because reproducing a template is not something one gets
+90% right.
+
+Two rules were added on 2026-08-24 and both came from the drop-in
+corpus rather than from the card: **`-H`, `-B` and `-A` imply
+`--standalone`** (nothing else here does, measured one flag at a time),
+and **a template reads the document's own metadata as variables**, so
+`-M pagetitle=Home` names the page and `-M linkcolor=…` colours its
+links, with `-V` beating `-M`. The figure is under `claims.sh` now; it
+had said 144/144 in COMPATIBILITY.md since the corpus was that size.
 
 **The licence question is settled and it is what made this reachable.**
 Pandoc's `COPYRIGHT` dual-licenses everything in `data/templates` as GPL

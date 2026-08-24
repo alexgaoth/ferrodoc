@@ -88,7 +88,9 @@ gate_claims() {
 "LaTeX writer (fidelity)	ours	COMPATIBILITY.md	\`diff-latex\` | LaTeX writer" \
 "LaTeX writer (fidelity)	pandoc	COMPATIBILITY.md	\`diff-latex\` | LaTeX writer" \
 "RST writer (fidelity)	ours	COMPATIBILITY.md	\`diff-rst\` | RST writer" \
-"RST writer (fidelity)	pandoc	COMPATIBILITY.md	\`diff-rst\` | RST writer"
+"RST writer (fidelity)	pandoc	COMPATIBILITY.md	\`diff-rst\` | RST writer" \
+"flags vs pandoc	ours	COMPATIBILITY.md	flag combinations byte-identical" \
+"real command lines	ours	README.md	command lines identical"
 }
 
 # The figure in one recorded score line: `N/M` from ours, or the `N/M`
