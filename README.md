@@ -15,11 +15,18 @@ npm install ferrodoc          # browser, Node and edge
 Any other language with an FFI links the C ABI in
 [`bindings/c`](bindings/c) — one header, one function.
 
+> **It is not a drop-in `pandoc`, and the number is in the repository.**
+> `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
+> from public Makefiles and CI files — through both binaries and compares
+> every byte: **10/48 identical**, 0 refused for a missing flag. What
+> stands between that and the rest is one decision, named and measured
+> below. The bet here is the *library*, not the command line.
+
 ## Why you would switch
 
 Say you have ten thousand Word documents to put into a search index.
 
-Today that means pandoc, which is a 153 MB binary you spawn **once per
+Today that means pandoc, which is a 160 MB binary you spawn **once per
 file**. The conversion is fast; the process is not. You pay it ten
 thousand times.
 

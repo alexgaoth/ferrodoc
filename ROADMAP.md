@@ -450,6 +450,34 @@ quarter of documents is worse than a flag someone types. What has
 changed is that the remaining quarter is now *named* — it is the four
 parser sections above, not an unread list.
 
+#### Where the dialect stands, 2026-08-24 (end of day)
+
+Seven cards closed in one pass, each measured against the pinned binary
+and each with its own test:
+
+| | corpus | spec |
+|---|---|---|
+| where it started | 6/20 | 417/652 |
+| `smart` — dashes, apostrophe, and the `Quoted` pairing | 6/20 | 429 |
+| `implicit_figures` | 9/20 | 445 |
+| inline attributes, `^[…]` notes | 10/20 | 445 |
+| **raw HTML — one `RawBlock` per tag, divs, spans, verbatim** | 10/20 | **488** |
+| heading identifiers (pandoc's slug, not GitHub's) | 10/20 | 491 |
+| a code span is trimmed | 10/20 | 496 |
+| bracketed spans `[t]{#id}` | 11/20 | 496 |
+| metadata block scalars (was a **refusal**) | 12/20 | 496 |
+
+**Not one example regressed**, at any step: every change was checked
+example by example against the trees the reader produced before it.
+
+What is left is the parser, and the section table above says so. The
+next honest question is not "which card next" but **whether 76% is the
+ceiling worth living with** — because the four sections that hold the
+remaining 156 are emphasis flanking, link destinations, setext
+underlines and the blank-line-before-a-block rule, and comrak is a
+`CommonMark` parser. Answering it means either accepting the ceiling or
+writing a second reader, and that is a decision, not a card.
+
 **Sequencing:** D4.1 → D4.2 first and in that order. D4.3 and D4.4 are
 decisions with code attached and should not be started until the number
 exists to judge them by. D4.5 through D4.8 are independent of each other and
