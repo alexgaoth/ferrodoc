@@ -175,6 +175,7 @@ if dialect == Dialect::Pandoc {
     options.extension.front_matter_delimiter = Some("---".to_owned());
     options.extension.link_attributes = true;
     options.extension.inline_code_attributes = true;
+    options.extension.fenced_code_attributes = true;
     options.extension.inline_footnotes = true;
     // `smart` is pandoc's `markdown` and nobody else's: probed, `-f
     // gfm` and `-f commonmark` both leave `it's` as it stands. It
@@ -1511,16 +1512,27 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
             } else {
                 cb.literal.strip_suffix('\n').unwrap_or(&cb.literal)
             };
-            let classes = cb
-                .info
-                .split_whitespace()
-                .next()
-                .map(|lang| vec![lang.to_owned()])
-                .unwrap_or_default();
-            Some(Block::CodeBlock(
-                Attr { classes, ..Attr::default() },
-                text.to_owned(),
-            ))
+            // `{#id .class k=v}` after the fence, which only
+            // `pandoc_markdown` turns on; comrak hangs it here exactly as
+            // it does for a heading. Without it the whole brace was taken
+            // for the language and every block came out classed `{.rust`.
+            let attr = data.attrs.as_ref().map_or_else(
+                || Attr {
+                    classes: cb
+                        .info
+                        .split_whitespace()
+                        .next()
+                        .map(|lang| vec![lang.to_owned()])
+                        .unwrap_or_default(),
+                    ..Attr::default()
+                },
+                |attrs| Attr {
+                    identifier: attrs.id.clone().unwrap_or_default(),
+                    classes: attrs.classes.clone(),
+                    attributes: attrs.pairs.clone(),
+                },
+            );
+            Some(Block::CodeBlock(attr, text.to_owned()))
         }
         NodeValue::HtmlBlock(hb) => Some(Block::RawBlock(
             Format("html".to_owned()),
@@ -2723,6 +2735,16 @@ mod tests {
             serde_json::json!([{"t": "Para", "c": [
                 {"t": "Code", "c": [["", ["rust"], []], "code"]}
             ]}])
+        );
+        // And the same after a fence, where the whole brace used to be
+        // taken for the language name.
+        assert_eq!(
+            pmd("``` {#i .rust k=v}\nx\n```\n"),
+            serde_json::json!([{"t": "CodeBlock", "c": [["i", ["rust"], [["k", "v"]]], "x"]}])
+        );
+        assert_eq!(
+            pmd("```rust\nx\n```\n"),
+            serde_json::json!([{"t": "CodeBlock", "c": [["", ["rust"], []], "x"]}])
         );
         // An image's identifier still moves to the figure around it.
         assert_eq!(
