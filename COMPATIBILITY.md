@@ -901,14 +901,18 @@ flag combination that shapes output and requires all of them:
 
 ```console
 $ ./scripts/flags.sh
-144/144 flag combinations byte-identical
+224/224 flag combinations byte-identical
 ```
 
-That covers `-s`, `--toc`, `--toc-depth`, `--css`, `-V`, `--title-prefix`,
-`-H`, `-B`, `-A` and a third-party `--template`. Two rules in it were
-measured rather than assumed: **`--css` turns pandoc's default stylesheet
-off** (145 lines of every `-s -c` comparison), and **`--toc` on a document
-with no heading writes nothing at all**, not an empty `<nav>`.
+That covers `-s`, `--toc`, `--toc-depth`, `--css`, `-V`, `-M`,
+`--metadata-file`, `--title-prefix`, `-H`, `-B`, `-A` and a third-party
+`--template`. Four rules in it were measured rather than assumed:
+**`--css` turns pandoc's default stylesheet off** (145 lines of every
+`-s -c` comparison); **`--toc` on a document with no heading writes
+nothing at all**, not an empty `<nav>`; **`-H`, `-B` and `-A` imply
+`--standalone`** and nothing else here does; and **a template reads the
+document's metadata as variables**, so `-M linkcolor="#007bff"` colours
+the links, with `-V` beating `-M` where both name one.
 
 What `-s` still differs on is **syntax highlighting**: a document with a
 labelled code block makes pandoc add 65 lines of highlighting CSS, which

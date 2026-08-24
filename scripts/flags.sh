@@ -82,6 +82,11 @@ done <<EOF
 --ascii --id-prefix=q-
 -s --toc --id-prefix=p-
 -s --metadata-file $A/meta.yaml
+-s -M pagetitle=Home
+-s -M linkcolor=#007bff
+-s -V linkcolor=blue -M linkcolor=red
+-s -M lang=fr -M description=short
+-M pagetitle=Home
 EOF
 
 echo

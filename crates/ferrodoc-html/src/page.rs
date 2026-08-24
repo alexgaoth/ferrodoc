@@ -12,7 +12,7 @@
 
 use crate::template::{Context, Value, render};
 use crate::{Wrap, escape_text, meta_text, meta_texts, toc_list_wrapped, write_html_wrapped};
-use ferrodoc_ast::Pandoc;
+use ferrodoc_ast::{MetaValue, Pandoc};
 
 /// Pandoc's default HTML template, verbatim. See `templates/LICENSE`.
 const DEFAULT_TEMPLATE: &str = include_str!("../templates/html5.html");
@@ -108,7 +108,12 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
     if let Some(title) = &title {
         set("title", Value::Text(escaped(title)));
     }
-    let pagetitle = title.unwrap_or_else(|| page.pagetitle.unwrap_or_default().to_owned());
+    // `-M pagetitle=Home` beats both, measured on a document that has a
+    // title of its own: pandoc fills `pagetitle` in only when nothing
+    // has said what it is.
+    let pagetitle = meta_text(doc, "pagetitle")
+        .or(title)
+        .unwrap_or_else(|| page.pagetitle.unwrap_or_default().to_owned());
     set("pagetitle", Value::Text(escaped(&pagetitle)));
 
     if !page.id_prefix.is_empty() {
@@ -170,6 +175,29 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
     // The prefix reaches the body because the footnote identifiers are
     // invented while writing, not carried by the tree.
     set("body", Value::Text(trimmed(&write_html_wrapped(doc, &page.id_prefix, page.wrap))));
+
+    // A template reads the document's own metadata too: `-M
+    // linkcolor="#007bff"` colours the links and `-M pagetitle=Home`
+    // names the page, and neither is a variable this writer computes.
+    // Measured against pandoc: metadata reaches the template, `-V` beats
+    // it, and it never displaces something already worked out — `-M
+    // body=x` leaves the body alone — which is why this runs after every
+    // `set` above and passes over a name already spoken for.
+    for (key, value) in &doc.meta {
+        if context.contains_key(key) {
+            continue;
+        }
+        let entry = match value {
+            MetaValue::MetaBool(true) => Value::Flag,
+            MetaValue::MetaBool(false) | MetaValue::MetaMap(_) => continue,
+            _ => match meta_texts(doc, key).as_slice() {
+                [] => continue,
+                [one] => Value::Text(escaped(one)),
+                many => Value::List(many.iter().map(|text| escaped(text)).collect()),
+            },
+        };
+        context.insert(key.clone(), entry);
+    }
 
     // `-V` last, because it wins. `pandoc -V lang=fr` overrides a
     // document that says otherwise, and a caller who passes one has said
