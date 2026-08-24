@@ -184,6 +184,12 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
         options.extension.superscript = true;
         options.extension.subscript = true;
         options.extension.front_matter_delimiter = Some("---".to_owned());
+        // `smart` is pandoc's `markdown` and nobody else's: probed, `-f
+        // gfm` and `-f commonmark` both leave `it's` as it stands. It
+        // turns `--` into an en dash, `---` into an em dash, `...` into
+        // an ellipsis, and the quotes into curly ones — and a *pair* of
+        // those becomes a `Quoted` element, which `quoted` does.
+        options.parse.smart = true;
     }
     let root = parse_document(&arena, &prepared, &options);
     // Check the depth once, without recursing, and leave the conversion
@@ -932,7 +938,147 @@ fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes, diale
     for node in iter {
         inline(node, &mut out, defs, dialect);
     }
-    merge_adjacent_emphasis(out)
+    let out = merge_adjacent_emphasis(out);
+    if dialect == Dialect::Pandoc { quoted(out) } else { out }
+}
+
+/// The curly quotes `smart` produced, paired into `Quoted` elements.
+///
+/// comrak writes the characters and stops there; pandoc makes a **pair**
+/// an element and leaves a lone one as the character it is, which is how
+/// `don’t` and `dogs’ bones` survive. Three rules, each probed against
+/// `pandoc -f markdown -t json`:
+///
+/// * an opener with no closer after it is text — `a "unclosed` stays
+///   `“unclosed`;
+/// * a pair inside emphasis is a `Quoted` inside the `Emph`, and a pair
+///   that *straddles* one is not a pair at all: `"opens *and closes"
+///   inside*` is two literal characters. That is why this runs over one
+///   sibling list — the list `inlines` has just built — rather than over
+///   the flattened document;
+/// * the body is paired again, so `"nested 'inner' here"` nests.
+fn quoted(tokens: Vec<Inline>) -> Vec<Inline> {
+    const OPEN_DOUBLE: char = '\u{201c}';
+    const CLOSE_DOUBLE: char = '\u{201d}';
+    const OPEN_SINGLE: char = '\u{2018}';
+    const CLOSE_SINGLE: char = '\u{2019}';
+
+    fn text(out: &mut Vec<Inline>, word: String) {
+        if !word.is_empty() {
+            out.push(Inline::Str(word));
+        }
+    }
+
+    /// The length of the mark that ends a quotation, which may be the
+    /// closing character or an opening one standing in for it.
+    fn ends_at(rest: &str) -> usize {
+        rest.chars().next().map_or(0, char::len_utf8)
+    }
+
+    // comrak decides that a quote opens from what stands *before* it;
+    // pandoc decides that it closes from what stands *after*, and the
+    // two disagree wherever a quote has a space on both sides. `a " b "
+    // c` is two closing marks there and two opening ones here, and no
+    // pair at all either way. Measured on three shapes.
+    let mut tokens = tokens;
+    for index in 0..tokens.len() {
+        let ends_the_line = match tokens.get(index + 1) {
+            None | Some(Inline::Space | Inline::SoftBreak | Inline::LineBreak) => true,
+            Some(_) => false,
+        };
+        let Some(Inline::Str(word)) = tokens.get_mut(index).filter(|_| ends_the_line) else {
+            continue;
+        };
+        for (open, close) in [(OPEN_DOUBLE, CLOSE_DOUBLE), (OPEN_SINGLE, CLOSE_SINGLE)] {
+            if word.ends_with(open) {
+                word.truncate(word.len() - open.len_utf8());
+                word.push(close);
+            }
+        }
+    }
+
+    let mut rest: std::collections::VecDeque<Inline> = tokens.into();
+    let mut out: Vec<Inline> = Vec::new();
+    while let Some(token) = rest.pop_front() {
+        let Inline::Str(word) = token else {
+            out.push(token);
+            continue;
+        };
+        // An opener with no closer is text, and a later opener in the
+        // same word may still have one, so the search moves past it
+        // rather than cutting the word up.
+        let mut from = 0;
+        let found = loop {
+            let Some(offset) = word[from..].find([OPEN_DOUBLE, OPEN_SINGLE]) else {
+                break None;
+            };
+            let at = from + offset;
+            let open = word[at..].chars().next().expect("the match names one");
+            let close = if open == OPEN_DOUBLE { CLOSE_DOUBLE } else { CLOSE_SINGLE };
+            let after = at + open.len_utf8();
+            // An **empty** pair is not one: pandoc leaves `""` as two
+            // characters rather than making a `Quoted` with nothing in it.
+            // Inside an open quote the next mark of that kind ends it,
+            // opening-shaped or not: pandoc reads `"b and then "c" done`
+            // as one quotation and a stray mark, not as two. And an
+            // **empty** pair is not one — `""` stays two characters.
+            let ends = [close, open];
+            if let Some(cut) = word[after..].find(ends)
+                && cut > 0
+            {
+                break Some((at, open, close, None, after + cut));
+            }
+            if let Some(found) = rest.iter().enumerate().find_map(|(index, token)| match token {
+                Inline::Str(word) => word.find(ends).map(|cut| (index, cut)),
+                _ => None,
+            }) && !(found == (0, 0) && word[after..].is_empty())
+            {
+                break Some((at, open, close, Some(found.0), found.1));
+            }
+            from = after;
+        };
+        let Some((at, open, _, sibling, cut)) = found else {
+            text(&mut out, word);
+            continue;
+        };
+        text(&mut out, word[..at].to_owned());
+        let after = at + open.len_utf8();
+        let mut body: Vec<Inline> = Vec::new();
+        let tail = match sibling {
+            // Both quotes in one word.
+            None => {
+                text(&mut body, word[after..cut].to_owned());
+                word[cut + ends_at(&word[cut..])..].to_owned()
+            }
+            // The closer is a later sibling: everything between them is
+            // the body, and what follows it goes back for the next pass.
+            Some(index) => {
+                text(&mut body, word[after..].to_owned());
+                for _ in 0..index {
+                    body.push(rest.pop_front().expect("counted just now"));
+                }
+                let Some(Inline::Str(last)) = rest.pop_front() else {
+                    unreachable!("the closer was found in a Str")
+                };
+                text(&mut body, last[..cut].to_owned());
+                last[cut + ends_at(&last[cut..])..].to_owned()
+            }
+        };
+        rest.push_front(Inline::Str(tail));
+        // A quotation does not end in whitespace: `"a *b* "c"` quotes
+        // `a *b*` and not `a *b* `. Only reachable where an opening mark
+        // ended the quotation, since a closing one cannot follow a space.
+        while matches!(body.last(), Some(Inline::Space | Inline::SoftBreak | Inline::LineBreak)) {
+            body.pop();
+        }
+        let kind = if open == OPEN_DOUBLE {
+            ferrodoc_ast::QuoteType::DoubleQuote
+        } else {
+            ferrodoc_ast::QuoteType::SingleQuote
+        };
+        out.push(Inline::Quoted(kind, quoted(body)));
+    }
+    out
 }
 
 /// Merge directly-adjacent same-type `Emph`/`Strong` siblings: pandoc's
@@ -1032,6 +1178,11 @@ mod tests {
 
     fn gfm(md: &str) -> serde_json::Value {
         serde_json::to_value(read_gfm(md).expect("convertible")).unwrap()["blocks"].clone()
+    }
+
+    fn pmd(md: &str) -> serde_json::Value {
+        serde_json::to_value(read_pandoc_markdown(md).expect("convertible")).unwrap()["blocks"]
+            .clone()
     }
 
     /// Every heading's identifier, in document order.
@@ -1368,6 +1519,64 @@ mod tests {
             serde_json::json!([{"t": "Para", "c": [
                 {"t": "Strong", "c": [{"t": "Str", "c": "a"}, {"t": "Str", "c": "b"}]}
             ]}])
+        );
+    }
+
+    /// `smart` is pandoc's `markdown` and nobody else's, and the part
+    /// comrak does not do is the pairing: it writes the characters and
+    /// stops, while pandoc makes a *pair* a `Quoted` element. Every
+    /// expectation here was read off `pandoc -f markdown -t json`.
+    #[test]
+    fn smart_punctuation_is_read_the_way_pandoc_reads_it() {
+        let quoted = |kind: &str, inner: serde_json::Value| {
+            serde_json::json!({"t": "Quoted", "c": [{"t": kind}, inner]})
+        };
+        let str_ = |s: &str| serde_json::json!({"t": "Str", "c": s});
+        let space = serde_json::json!({"t": "Space"});
+
+        // Dashes and the ellipsis are characters; an apostrophe is one too.
+        assert_eq!(
+            pmd("a--b a---b a...b don't\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                str_("a\u{2013}b"), space, str_("a\u{2014}b"), space,
+                str_("a\u{2026}b"), space, str_("don\u{2019}t")
+            ]}])
+        );
+
+        // A pair is an element, and it nests.
+        assert_eq!(
+            pmd("\"a 'b' c\"\n"),
+            serde_json::json!([{"t": "Para", "c": [quoted("DoubleQuote", serde_json::json!([
+                str_("a"), space,
+                quoted("SingleQuote", serde_json::json!([str_("b")])),
+                space, str_("c")
+            ]))]}])
+        );
+
+        // An opener with no closer is the character it is, and so is a
+        // mark with a space on both sides — which comrak calls opening
+        // and pandoc calls closing.
+        assert_eq!(
+            pmd("a \"unclosed\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                str_("a"), space, str_("\u{201c}unclosed")
+            ]}])
+        );
+        assert_eq!(
+            pmd("a \" b\n"),
+            serde_json::json!([{"t": "Para", "c": [
+                str_("a"), space, str_("\u{201d}"), space, str_("b")
+            ]}])
+        );
+
+        // Nothing of this is `gfm` or `commonmark`, measured on both.
+        assert_eq!(
+            gfm("don't a--b\n"),
+            serde_json::json!([{"t": "Para", "c": [str_("don't"), space, str_("a--b")]}])
+        );
+        assert_eq!(
+            doc("don't a--b\n"),
+            serde_json::json!([{"t": "Para", "c": [str_("don't"), space, str_("a--b")]}])
         );
     }
 
