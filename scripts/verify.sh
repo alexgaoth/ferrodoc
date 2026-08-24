@@ -261,11 +261,13 @@ if [ "$want_gates" = 1 ]; then
     # The gates for these are *fidelity* runs — write it, read it back —
     # which says nothing where pandoc cannot read the format back at all
     # (AsciiDoc) or reads it as badly as we do (LaTeX, 1/13 each). Pandoc
-    # writes all of them, so the bytes are an oracle after all, and this
-    # is the first number they have ever had. Reported, not gated: no
-    # floor has been chosen and one chosen after seeing a score is not a
-    # floor. 1 s.
-    measure "text writers vs pandoc's" ./scripts/writers.sh
+    # writes all of them, so the bytes are an oracle after all.
+    #
+    # **Gated now**, one floor per writer, each floor the score that
+    # writer reached: every point below one is a document that used to be
+    # byte-identical and is not any more, which is a regression rather
+    # than a range. 1 s.
+    gate "text writers vs pandoc's" ./scripts/writers.sh --floors
 
     echo "== published figures"
     # Every score above is published somewhere a reader will believe it.

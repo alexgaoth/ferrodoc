@@ -46,7 +46,39 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 verbose=0
-[ "${1-}" != "--verbose" ] || verbose=1
+floors=0
+case "${1-}" in
+    --verbose) verbose=1 ;;
+    --floors)  floors=1 ;;
+    "") ;;
+    *) echo "usage: $0 [--verbose|--floors]" >&2; exit 2 ;;
+esac
+
+# The floor for each writer is **the score it reached**, because every
+# point below one is a document that used to be byte-identical and is not
+# any more. That is a regression, not a range.
+#
+# A floor chosen after seeing a score is not a floor — which is why this
+# printed a number and gated nothing for as long as the numbers were low.
+# It is a contract now because five of the seven are at or within one of
+# the whole corpus, and the two that are not are held to what they have.
+floor_for() {
+    case "$1" in
+        html)     echo 12 ;;
+        rst)      echo 12 ;;
+        plain)    echo 12 ;;
+        latex)    echo 11 ;;
+        asciidoc) echo 11 ;;
+        gfm)      echo 6 ;;
+        # `-t markdown` here is CommonMark and there is pandoc's own
+        # dialect, so this row measures the dialect gap on the writer
+        # side. It moves when `pandoc_markdown` does, not when the writer
+        # does — see ROADMAP card D4.4.
+        markdown) echo 2 ;;
+        *)        echo 0 ;;
+    esac
+}
+below=0
 
 # The last line is a one-line summary, because `verify.sh` reports a
 # measurement by its final line and seven of these would otherwise be
@@ -83,9 +115,16 @@ for format in html markdown gfm latex rst asciidoc plain; do
             fi
         done
     done
-    printf '%-10s %d/%d byte-identical to pandoc (--wrap=%s)\n' \
-        "$format" "$same" "$total" "$wrap"
+    floor=$(floor_for "$format")
+    if [ "$same" -lt "$floor" ]; then
+        printf '%-10s %d/%d — BELOW ITS FLOOR OF %d\n' "$format" "$same" "$total" "$floor"
+        below=1
+    elif [ "$floors" = 0 ]; then
+        printf '%-10s %d/%d byte-identical to pandoc (--wrap=%s)\n' \
+            "$format" "$same" "$total" "$wrap"
+    fi
     summary="$summary $format $same/$total,"
 done
 
 printf 'byte-identical:%s all on corpus/*.md and corpus/gfm/*.gfm\n' "${summary%,}"
+exit "$below"

@@ -65,12 +65,29 @@ see, and `verify.sh` runs all three:
 |---|---|---|
 | `scripts/flags.sh` | every CLI flag, against pandoc, over every document in `corpus/` | **gated at 100** — a flag's whole job is to produce particular bytes |
 | `scripts/dropin.sh` | 48 real pandoc command lines from public Makefiles and CI files, byte for byte, with every miss classified | gated at a **count** of rows, not a percentage |
-| `scripts/writers.sh` | each text writer against **pandoc's own writer** on the same AST | reported; no floor has been chosen |
+| `scripts/writers.sh` | each text writer against **pandoc's own writer**, on the same AST, over twelve documents | gated at **one floor per writer**, each the score that writer reached |
 
 `writers.sh` is why "pandoc cannot read AsciiDoc, so it has no oracle" is
 no longer the whole story: pandoc *writes* every text format this writes,
 so the bytes are an oracle for all of them — and it is the only judge
 AsciiDoc has ever had.
+
+Two things about it are worth knowing before reading its number.
+
+**Its corpus is twelve documents and four of them are GFM.** The eight in
+`corpus/` are read as CommonMark, which has no table, no task list and no
+footnote — so a score over them alone cannot see the constructs the
+writers are worst at. Adding the four in `corpus/gfm/` found, on the
+first run, that the HTML writer **dropped every footnote** while
+`diff-html` read 652/652: that gate is markdown → HTML over the
+CommonMark suite, which has no footnote to lose.
+
+**Its floors are the scores, not a range.** Every point below one is a
+document that used to be byte-identical and is not any more, which is a
+regression. A floor chosen after seeing a score is not a floor, which is
+why this was a measurement for as long as the numbers were low; it became
+a gate when five of the seven writers reached the whole corpus or came
+within one document of it. `COMPATIBILITY.md` has the table.
 
 ## `samples/`, which is where the gates are blind
 

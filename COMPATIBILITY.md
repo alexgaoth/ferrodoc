@@ -909,59 +909,61 @@ difference and nothing else.
 LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared
 directly without asking its reader to survive anything.
 `./scripts/writers.sh` does that for every text writer, in a second, and
-`verify.sh` prints it:
+`verify.sh` **gates it**:
 
-| writer | byte-identical to pandoc |
-|---|---|
-| `html` | **12/12** |
-| `latex` | 11/12 |
-| `plain` | **12/12** |
-| `gfm` | 6/12 |
-| `rst` | **12/12** |
-| `asciidoc` | 11/12 |
-| `markdown` | 2/12 |
+| writer | byte-identical to pandoc | floor |
+|---|---|---|
+| `html` | **12/12** | 12 |
+| `rst` | **12/12** | 12 |
+| `plain` | **12/12** | 12 |
+| `latex` | 11/12 | 11 |
+| `asciidoc` | 11/12 | 11 |
+| `gfm` | 6/12 | 6 |
+| `markdown` | 2/12 | 2 |
 
 Twelve documents: the eight in `corpus/` read as CommonMark, and the four
 in `corpus/gfm/` read as GFM. **The second four are there because the
 first eight cannot express what the writers are worst at** — CommonMark
-has no table, no task list and no footnote, so a score over it alone said
-`latex 7/8` while `samples/07-markdown-to-latex` showed the LaTeX table
-writer diverging on every row it wrote. It is the blind-spot rule again,
-and this time it found a hole in the writer this file calls exact.
+has no table, no task list and no footnote — and the first thing the GFM
+pass found was that the HTML writer, at `diff-html` 652/652, **dropped
+every footnote**: the reference, the body and the whole `<section
+id="footnotes">`, silently, on every document that had one.
 
-It says two things the round trip cannot.
+**Each floor is the score that writer reached**, because every point
+below one is a document that used to be byte-identical and is not any
+more. A floor chosen after seeing a score is not a floor, which is why
+this printed a number and gated nothing while the numbers were low; it is
+a contract now that five of the seven are at the whole corpus or one
+document from it.
 
-**The LaTeX writer was never the furthest away.** Its fidelity gate
-reads 1/13 and had always been taken as this writer's score; the bytes
-say it matches pandoc on 7 of the 8 CommonMark documents. Pandoc
-round-trips the same 1 of 13, so that number is a property of pandoc's
-LaTeX *reader*. Getting there took nine measured causes, each probed
-against the pinned binary rather than read out of the manual: the
-typographic replacements (`—` → `---`, `…` → `\ldots`, the curly quotes,
-and `\-`/`\,`/`\hspace{0pt}` for the invisible spaces), the `-\/-`
-ligature break, two-space indentation of `\item` content with a
-`verbatim` environment left flush, `\texorpdfstring` when the typeset
-heading and the PDF bookmark differ, a level-6 heading written as a
-paragraph, `\pandocbounded{\includegraphics[keepaspectratio,…]}`,
-`\url`/`\nolinkurl` for a link whose text is its target, a dropped raw
-block taking its blank line with it, and the space collapse around a
-dropped raw inline.
+`markdown` is the odd row and stays low for a stated reason: `-t markdown`
+is CommonMark here and pandoc's own dialect there, so that row measures
+the dialect gap on the writer side and moves when `pandoc_markdown` does
+rather than when the writer does — ROADMAP card D4.4.
 
-**The HTML writer, at 652/652, was dropping every footnote.** That is
-the GFM pass earning its place on the first run: `diff-html` is markdown
-→ HTML over the CommonMark suite, which has no footnote to lose, so a
-writer that deleted the reference, the body and the whole `<section
-id="footnotes">` scored 100%. `corpus/gfm/footnotes.gfm` is where it
-shows. Fixed, and the fix carries pandoc's own numbering rule.
+Six writers went from 2/12–7/12 to where they are on **fifty-one measured
+spellings**, each probed against the pinned binary a character or a
+construct at a time rather than read out of the manual. The commit
+messages carry them one by one; the shape of them is worth stating,
+because it is the same three shapes every time:
 
-Of the LaTeX writer's remaining misses, one is a **deliberate
-divergence** of the kind the roadmap names — match pandoc except where
-matching means copying something pandoc's own reader cannot read back.
-An ordered list starting at 3 is
-`\setcounter` then `\def\labelenumi` here and the other way round in
-pandoc, because **pandoc's reader takes the start value from the first
-directive it meets and stops looking** — so pandoc's own output reads
-back starting at 1:
+- **an escape that is wider than pandoc's.** Markdown escaped `a_b`,
+  every `&` and every tab; RST escaped every `*` and `|` wherever it
+  stood; AsciiDoc reached for a backslash where AsciiDoc has no general
+  escape at all and `++*++` is the only spelling that works. Each is
+  safe, and each made a README converted here differ from the same README
+  converted there on nearly every line;
+- **a spelling no round trip can see.** An indented code block and a
+  fenced one are the same `CodeBlock`; a padded pipe table and an
+  unpadded one are the same `Table`; `.. code::` and `.. code-block::`
+  are the same directive. The fidelity gates read 100% through all of
+  them;
+- **a construct the corpus could not reach.** Tables, task lists and
+  footnotes, in every writer at once.
+
+Four divergences stay, each because pandoc's own output does not read
+back as what went in. They are named where they arise, and the LaTeX one
+is the clearest:
 
 ```sh
 printf '3) a\n\n4) b\n' > /tmp/l.md
@@ -969,12 +971,19 @@ pandoc /tmp/l.md -f commonmark -t latex | pandoc -f latex -t json | grep -o '"c"
 ferrodoc /tmp/l.md -f commonmark -t latex | pandoc -f latex -t json | grep -o '"c":\[\[3' # start kept
 ```
 
-Both typeset identically; only the byte order differs. Matching pandoc
-here would mean copying a spelling its own reader misreads, which is the
-same test the three divergences above already failed.
+An ordered list starting at 3 is `\setcounter` then `\def\labelenumi`
+here and the other way round in pandoc, because **pandoc's reader takes
+the start value from the first directive it meets and stops looking**.
+Both typeset identically; only the byte order differs, and it is the one
+document the LaTeX row is short of the corpus. The other three: a
+backslash before ASCII punctuation and an entity-shaped `&` in markdown,
+where pandoc writes `\\` and drops the character after it; the GFM
+autolink triggers, which pandoc leaves bare so its own reader turns
+literal text into a link; and a multi-block footnote in AsciiDoc, where
+pandoc writes `[multiblock footnote omitted]` and loses the body.
 
-**Escaping is byte-identical to pandoc's**, checkable directly because
-pandoc writes LaTeX from the same AST:
+**LaTeX escaping is byte-identical to pandoc's**, checkable directly
+because pandoc writes LaTeX from the same AST:
 
 ```sh
 printf "A \`a  b\`, \`<p>\`, \`a|b\` and a < b with a 'quote'.\n" > /tmp/e.md
