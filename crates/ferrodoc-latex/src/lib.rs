@@ -45,9 +45,146 @@ use std::fmt::Write as _;
 /// [`write_latex_standalone`] for something `pdflatex` can compile on its
 /// own.
 pub fn write_latex(doc: &Pandoc) -> String {
+    write_latex_wrapped(doc, Wrap::Preserve)
+}
+
+/// Marks a place a line may be broken. Chosen because no reader here can
+/// produce one inside text: `CommonMark` replaces NUL with U+FFFD by
+/// specification, and XML — which DOCX, ODT and EPUB are — forbids it.
+const BREAK: char = '\u{0}';
+/// The same, for a `SoftBreak`, which `--wrap=preserve` keeps as a
+/// newline where an ordinary space stays a space.
+const SOFT: char = '\u{1}';
+/// Opens a region whose continuation lines are indented two further, and
+/// closes it. A `\footnote{…}` is one: pandoc indents the body's wrapped
+/// lines by two and returns to the paragraph's own indent after the
+/// closing brace, which nothing in the finished text says.
+const IN: char = '\u{2}';
+const OUT: char = '\u{3}';
+
+/// How the writer lays lines out, as pandoc's `--wrap` means it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wrap {
+    /// Every soft break becomes a space and no line is broken.
+    None,
+    /// A soft break stays a line break; nothing else is broken. This is
+    /// what the writer did before it could fill, and the default.
+    #[default]
+    Preserve,
+    /// Fill to this many columns, breaking at spaces and soft breaks.
+    Fill(usize),
+}
+
+/// Render a document as a LaTeX fragment, laid out the way `--wrap` asks.
+#[must_use]
+pub fn write_latex_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
     let mut out = String::new();
     blocks(&doc.blocks, 0, &mut out);
-    out.trim_end().to_owned() + "\n"
+    lay_out(out.trim_end(), wrap) + "\n"
+}
+
+/// Turn the break marks into whatever the mode asks for.
+///
+/// Filling is a **post-pass** over the finished text, and it can be:
+/// every line's own leading whitespace is the indentation its
+/// continuation lines take, and by the time a line exists that
+/// indentation has already been applied by the list or quote it sits in.
+fn lay_out(text: &str, wrap: Wrap) -> String {
+    match wrap {
+        Wrap::None => text.replace([BREAK, SOFT], " ").replace([IN, OUT], ""),
+        // A kept line break is still a break, and takes the indentation
+        // of the region it is in: a soft break inside a footnote body
+        // starts its line at two. Same rule as the fill, with the column
+        // count out of the way and every soft break forced.
+        Wrap::Preserve => reflow(text, usize::MAX, true),
+        Wrap::Fill(columns) => reflow(text, columns, false),
+    }
+}
+
+/// The body of the two laying-out modes: fill to `columns`, and break at
+/// every soft mark when `force_soft` — which is what `--wrap=preserve`
+/// asks for.
+fn reflow(text: &str, columns: usize, force_soft: bool) -> String {
+    {
+        let mut out = String::with_capacity(text.len());
+        // The depth carries **across lines**: a footnote whose body is
+        // more than one block opens on one line and closes several later,
+        // and a depth reset per line indented every wrapped line after it.
+        let mut depth = 0;
+        for (index, line) in text.split('\n').enumerate() {
+            if index > 0 {
+                out.push('\n');
+            }
+            fill(line, columns, force_soft, &mut depth, &mut out);
+        }
+        out
+    }
+}
+
+/// Split a line at its break marks, saying for each piece whether the
+/// mark before it was a **soft break** — which `--wrap=preserve` forces —
+/// or an ordinary space, which is only an opportunity.
+fn split_marks(line: &str) -> Vec<(&str, bool)> {
+    let mut pieces = Vec::new();
+    let mut rest = line;
+    let mut force = false;
+    while let Some(at) = rest.find([BREAK, SOFT]) {
+        let mark = rest[at..].chars().next().unwrap_or(BREAK);
+        pieces.push((&rest[..at], force));
+        force = mark == SOFT;
+        rest = &rest[at + mark.len_utf8()..];
+    }
+    pieces.push((rest, force));
+    pieces
+}
+
+/// Greedy fill: take words while they fit, break at the last mark that
+/// did. A word longer than the width goes on its own line and overruns —
+/// breaking inside it would invent a break the text does not have.
+fn fill(line: &str, columns: usize, force_soft: bool, depth: &mut usize, out: &mut String) {
+    let base = line.chars().take_while(|c| *c == ' ').count();
+    let mut width = 0;
+    let mut closed = false;
+    // Which mark ended the previous word, so that a soft break can be
+    // forced where an ordinary space is only an opportunity.
+    for (index, (word, soft)) in split_marks(line).into_iter().enumerate() {
+        let force = soft && force_soft;
+        let clean: String = word.chars().filter(|c| *c != IN && *c != OUT).collect();
+        let word_width = clean.chars().count();
+        // The decision measures only as far as the **end of the region**
+        // the word closes, which is where the nested document it belongs
+        // to ends. A footnote's last word is measured without the text
+        // that follows its closing brace, and pandoc lets the line
+        // overrun rather than breaking one word earlier.
+        let measured = word
+            .split(OUT)
+            .next()
+            .map_or(word_width, |head| head.chars().filter(|c| *c != IN).count());
+        if index == 0 {
+            width = word_width;
+        } else if !force && width.saturating_add(1 + measured) <= columns {
+            out.push(' ');
+            width += 1 + word_width;
+        } else {
+            // **The deeper of the two**, not their sum: a footnote's
+            // wrapped lines sit at two, and a footnote inside a body
+            // already indented two stays at two rather than going to
+            // four. Measured on `corpus/gfm/footnotes.gfm` at 40 and 72.
+            //
+            // Once a region has **closed on this line**, its physical
+            // indentation is behind us and the text is back at the
+            // paragraph's own column: `\end{itemize}}, and a label…`
+            // continues at zero however far the footnote body was in.
+            let indent = if *depth == 0 && closed { 0 } else { base.max(2 * *depth) };
+            let _ = write!(out, "\n{}", " ".repeat(indent));
+            width = indent + word_width;
+        }
+        out.push_str(&clean);
+        closed |= word.contains(OUT);
+        *depth = depth
+            .saturating_add(word.matches(IN).count())
+            .saturating_sub(word.matches(OUT).count());
+    }
 }
 
 /// Render a complete document, with the smallest preamble that compiles.
@@ -252,8 +389,12 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
             // needs `\protect` — `\pandocbounded` is one, and without the
             // guard `hyperref` stops on the bookmark.
             let rendered = rendered.replace("\\pandocbounded{", "\\protect\\pandocbounded{");
+            // The rendered text carries break marks and the stringified
+            // text does not, so the two are compared with the marks taken
+            // out — otherwise every heading in the document acquired a
+            // `\texorpdfstring` the moment the writer learned to fill.
             let plain = escape(&stringify(list));
-            if plain == rendered {
+            if plain == rendered.replace([BREAK, SOFT], " ") {
                 out.push_str(&rendered);
             } else {
                 let _ = write!(out, "\\texorpdfstring{{{rendered}}}{{{plain}}}");
@@ -511,7 +652,9 @@ fn row_to(row: &Row, columns: usize, out: &mut String) {
     // `\\` and not `\tabularnewline`: both end a row, and pandoc writes
     // the short one. The row is trimmed first, so an empty cell at either
     // end leaves one space before the `\\` rather than two.
-    let _ = writeln!(out, "{} \\\\", cells.join(" & ").trim());
+    // The gap after each `&` is a break mark: pandoc fills a table row.
+    let row = cells.join(&format!(" &{BREAK}"));
+    let _ = writeln!(out, "{} \\\\", row.trim_matches(|c: char| c.is_whitespace() || c == BREAK));
 }
 
 fn cell_text(cell: &Cell) -> String {
@@ -523,8 +666,9 @@ fn cell_text(cell: &Cell) -> String {
         }
     }
     // A cell is one line: a newline inside `&`-separated content ends the
-    // row early and the table stops making sense.
-    out.replace('\n', " ").trim().to_owned()
+    // row early and the table stops making sense. It becomes a break mark
+    // rather than a space, because pandoc **does** fill a table row.
+    out.replace('\n', &BREAK.to_string()).trim().to_owned()
 }
 
 fn caption_text(caption: &Caption, out: &mut String) {
@@ -569,8 +713,8 @@ fn inline_to(inline: &Inline, out: &mut String) {
     };
     match inline {
         Inline::Str(text) => out.push_str(&escape(text)),
-        Inline::Space => out.push(' '),
-        Inline::SoftBreak => out.push('\n'),
+        Inline::Space => out.push(BREAK),
+        Inline::SoftBreak => out.push(SOFT),
         Inline::LineBreak => out.push_str("\\\\\n"),
         Inline::Emph(inner) => wrap("emph", inner, out),
         Inline::Strong(inner) => wrap("textbf", inner, out),
@@ -635,6 +779,10 @@ fn inline_to(inline: &Inline, out: &mut String) {
             // simply gone.
             let mut text = String::new();
             inlines(alt, &mut text);
+            // The whole picture is one unbreakable unit: pandoc never
+            // breaks inside `alt={…}` however narrow the column, so the
+            // marks come out of the alt text here.
+            let text = text.replace([BREAK, SOFT], " ");
             // `\pandocbounded` is pandoc's, defined in its default
             // template and in [`PREAMBLE`] here: it scales a picture down
             // to the text block when it would overflow and leaves it alone
@@ -653,6 +801,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
         }
         Inline::Note(blocks_in_note) => {
             out.push_str("\\footnote{");
+            out.push(IN);
             let mut text = String::new();
             blocks(blocks_in_note, 0, &mut text);
             // Every line but the first is indented two, the way an
@@ -667,6 +816,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
                 }
                 out.push_str(line);
             }
+            out.push(OUT);
             out.push('}');
         }
     }
