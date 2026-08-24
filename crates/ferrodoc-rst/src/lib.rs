@@ -30,13 +30,139 @@ use ferrodoc_ast::{
 };
 use std::fmt::Write as _;
 
+/// Marks a place a line may be broken. Chosen because no reader here can
+/// produce one inside text: `CommonMark` replaces NUL with U+FFFD by
+/// specification, and XML — which DOCX, ODT and EPUB are — forbids it.
+const BREAK: char = '\u{0}';
+/// The same, for a `SoftBreak`, which `--wrap=preserve` keeps as a
+/// newline where an ordinary space stays a space.
+const SOFT: char = '\u{1}';
+
+/// How the writer lays lines out, as pandoc's `--wrap` means it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wrap {
+    /// Every soft break becomes a space and no line is broken.
+    None,
+    /// A soft break stays a line break; nothing else is broken. This is
+    /// what the writer did before it could fill, and the default.
+    #[default]
+    Preserve,
+    /// Fill to this many columns, breaking at spaces and soft breaks.
+    Fill(usize),
+}
+
+/// Turn the break marks into whatever the mode asks for.
+///
+/// Filling is a **post-pass** over the finished text, and it can be:
+/// every line's own leading whitespace is the indentation its
+/// continuation lines take, and by the time a line exists that
+/// indentation has already been applied by the list, quote or directive
+/// it sits in.
+fn lay_out(text: &str, wrap: Wrap) -> String {
+    match wrap {
+        Wrap::None => text.replace([BREAK, SOFT], " "),
+        // A kept line break is still a break, and takes the indentation
+        // of the line it is in: a soft break inside a quote or a list
+        // item starts its line where that item's content starts. Same
+        // rule as the fill, with the column count out of the way and
+        // every soft break forced.
+        Wrap::Preserve => reflow(text, usize::MAX, true),
+        Wrap::Fill(columns) => reflow(text, columns, false),
+    }
+}
+
+fn reflow(text: &str, columns: usize, force_soft: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            out.push('\n');
+        }
+        fill(line, columns, force_soft, &mut out);
+    }
+    out
+}
+
+/// Greedy fill: take words while they fit, break at the last mark that
+/// did. A word longer than the width goes on its own line and overruns —
+/// breaking inside it would invent a break the text does not have.
+fn fill(line: &str, columns: usize, force_soft: bool, out: &mut String) {
+    let leading = line.chars().take_while(|c| *c == ' ').count();
+    // A line that **starts with a marker** continues under its content,
+    // not under the marker: a wrapped `- item` lines up two in, and a
+    // line block's `| ` the same. The marker is already in the text by
+    // the time this runs, so its width is read off rather than passed in.
+    let indent = " ".repeat(leading + marker_width(&line[leading..]));
+    let mut width = 0;
+    let mut rest = line;
+    let mut forced = false;
+    let mut index = 0;
+    loop {
+        let (word, next_forced, tail) = match rest.find([BREAK, SOFT]) {
+            Some(at) => {
+                let mark = rest[at..].chars().next().unwrap_or(BREAK);
+                (&rest[..at], mark == SOFT, Some(&rest[at + mark.len_utf8()..]))
+            }
+            None => (rest, false, None),
+        };
+        let word_width = word.chars().count();
+        if index == 0 {
+            width = word_width;
+        } else if !(forced && force_soft) && width.saturating_add(1 + word_width) <= columns {
+            out.push(' ');
+            width += 1 + word_width;
+        } else {
+            let _ = write!(out, "\n{indent}");
+            width = indent.chars().count() + word_width;
+        }
+        out.push_str(word);
+        index += 1;
+        forced = next_forced;
+        match tail {
+            Some(tail) => rest = tail,
+            None => return,
+        }
+    }
+}
+
+/// Trim whitespace **and break marks** from both ends. A mark is not
+/// whitespace to `str::trim`, so `*emph in \0*` kept its mark inside the
+/// emphasis and laid out as `*emph in *`.
+fn trimmed(text: &str) -> &str {
+    text.trim_matches(|c: char| c.is_whitespace() || c == BREAK || c == SOFT)
+}
+
+/// How wide the list or line-block marker at the start of `rest` is, or
+/// zero where there is none.
+fn marker_width(rest: &str) -> usize {
+    if rest.starts_with("- ") || rest.starts_with("| ") {
+        return 2;
+    }
+    // `1. `, `12) `, `iv. `, `a) ` — a run of label characters, a
+    // delimiter and a space.
+    let label = rest.chars().take_while(char::is_ascii_alphanumeric).count();
+    if label == 0 {
+        return 0;
+    }
+    let after = &rest[label..];
+    if after.starts_with(". ") || after.starts_with(") ") {
+        return label + 2;
+    }
+    0
+}
+
 /// Render a document as reStructuredText.
 pub fn write_rst(doc: &Pandoc) -> String {
+    write_rst_wrapped(doc, Wrap::Preserve)
+}
+
+/// The same, laid out the way `--wrap` asks for.
+#[must_use]
+pub fn write_rst_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
     let mut out = String::new();
     let mut def = Defs::default();
     blocks(&doc.blocks, &mut out, &mut def);
     def.flush(&mut out);
-    let text = out.trim_end().to_owned();
+    let text = lay_out(out.trim_end(), wrap);
     if text.is_empty() { text } else { text + "\n" }
 }
 
@@ -270,7 +396,10 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
         Block::Header(level, attr, list) => {
             let mut text = String::new();
             inlines(list, &mut text, def);
-            let text = text.trim().to_owned();
+            // **A heading is never filled.** Pandoc keeps one on a
+            // single line however narrow the column — and an underline
+            // as long as the title is what makes it a heading at all.
+            let text = trimmed(&text).replace([BREAK, SOFT], " ");
             // An explicit target above the heading is how RST names one —
             // but a heading is **already** a target under the name its own
             // text makes, so pandoc writes one only where the identifier
@@ -555,7 +684,7 @@ fn cell_text(cell: &Cell, def: &mut Defs) -> String {
             other => block_to(other, &mut out, def),
         }
     }
-    out.replace('\n', " ").trim().to_owned()
+    trimmed(&out.replace('\n', " ")).to_owned()
 }
 
 /// Render a run of inlines, collapsing the space a dropped inline leaves.
@@ -584,11 +713,12 @@ fn inlines(list: &[Inline], out: &mut String, def: &mut Defs) {
 fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
     match inline {
         Inline::Str(text) => out.push_str(&escape(text)),
-        Inline::Space => out.push(' '),
+        Inline::Space => out.push(BREAK),
         // RST has no inline hard break outside a line block, so a hard
         // break becomes a soft one rather than markup that would show as
         // text. `COMPATIBILITY.md` records the loss.
-        Inline::SoftBreak | Inline::LineBreak => out.push('\n'),
+        Inline::SoftBreak => out.push(SOFT),
+        Inline::LineBreak => out.push('\n'),
         Inline::Emph(inner) => wrap("*", inner, out, def),
         // RST has no underline and no small caps; both keep their content
         // rather than inventing a role a toolchain would not have. A
@@ -647,7 +777,7 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             // RST linkifies a bare URL, and pandoc writes one. The angle
             // form around the same string is what this wrote, and it is
             // what made every README's autolinks differ.
-            let bare = text.trim();
+            let bare = trimmed(&text);
             if bare == target.url || target.url.strip_prefix("mailto:") == Some(bare) {
                 out.push_str(bare);
                 return;
@@ -662,13 +792,13 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
         Inline::Image(_, alt, target) => {
             let mut text = String::new();
             inlines(alt, &mut text, def);
-            let name = def.image_name(text.trim(), &target.url);
+            let name = def.image_name(trimmed(&text), &target.url);
             let _ = write!(out, "|{name}|");
         }
         Inline::Note(blocks_in_note) => {
             let mut text = String::new();
             blocks(blocks_in_note, &mut text, def);
-            def.notes.push(text.trim().to_owned());
+            def.notes.push(trimmed(&text).to_owned());
             // Numbered, not `[#]_`: pandoc numbers them, and a numbered
             // label is what pairs a reference with its body when a
             // document is split.
@@ -758,7 +888,7 @@ fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
                 run.clear();
                 let mut text = String::new();
                 inline_to(item, &mut text, def);
-                let text = text.trim();
+                let text = trimmed(&text);
                 if !text.is_empty() {
                     pieces.push(text.to_owned());
                 }
@@ -767,16 +897,22 @@ fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
             }
         }
         push_run(marker, &run, &mut pieces, def);
-        out.push_str(&pieces.join(" "));
+        // The gaps **between** the pieces are break opportunities even
+        // though the pieces themselves are not: pandoc breaks after
+        // `*emph in*` and never inside it.
+        out.push_str(&pieces.join(&BREAK.to_string()));
         return;
     }
     let mut text = String::new();
     inlines(inner, &mut text, def);
-    if text.trim().is_empty() {
+    if trimmed(&text).is_empty() {
         out.push_str(&text);
         return;
     }
-    let _ = write!(out, "{marker}{}{marker}", text.trim());
+    // **RST inline markup cannot be split across lines**, so the whole
+    // span is one word to the fill: pandoc breaks after `*emph in*`, not
+    // inside it.
+    let _ = write!(out, "{marker}{}{marker}", trimmed(&text).replace([BREAK, SOFT], " "));
 }
 
 /// One run of un-nested inlines, wrapped in the marker its parent uses.
@@ -786,7 +922,9 @@ fn push_run(marker: &str, run: &[Inline], pieces: &mut Vec<String>, def: &mut De
     }
     let mut text = String::new();
     inlines(run, &mut text, def);
-    let text = text.trim();
+    // One unbreakable unit, like the un-nested form: RST inline markup
+    // cannot be split across lines.
+    let text = trimmed(&text).replace([BREAK, SOFT], " ");
     if !text.is_empty() {
         pieces.push(format!("{marker}{text}{marker}"));
     }
@@ -795,7 +933,7 @@ fn push_run(marker: &str, run: &[Inline], pieces: &mut Vec<String>, def: &mut De
 fn role(name: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
     let mut text = String::new();
     inlines(inner, &mut text, def);
-    let _ = write!(out, ":{name}:`{}`", text.trim());
+    let _ = write!(out, ":{name}:`{}`", trimmed(&text).replace([BREAK, SOFT], " "));
 }
 
 /// Escape the characters RST gives a meaning to at the start of a word.

@@ -222,7 +222,8 @@ impl Format {
             Format::Markdown | Format::Gfm | Format::Html | Format::Plain | Format::Latex => {
                 Wrapping::Fills
             }
-            Format::Rst | Format::Asciidoc => Wrapping::Preserved,
+            Format::Rst => Wrapping::Fills,
+            Format::Asciidoc => Wrapping::Preserved,
             // `pandoc --wrap=auto -t docx` is accepted and does nothing
             // there too, so ignoring it is the compatible answer.
             Format::Docx | Format::Odt | Format::Epub | Format::Ipynb | Format::Json => {
@@ -700,6 +701,15 @@ pub fn render_wrapped_with_media(
         #[cfg(feature = "text")]
         (None, Format::Plain) if wrap == Wrap::Preserve => {
             Ok(ferrodoc_text::write_text_preserved(doc).into_bytes())
+        }
+        #[cfg(feature = "rst")]
+        (_, Format::Rst) => {
+            let wrap = match wrap {
+                Wrap::None => ferrodoc_rst::Wrap::None,
+                Wrap::Preserve => ferrodoc_rst::Wrap::Preserve,
+                Wrap::Auto(columns) => ferrodoc_rst::Wrap::Fill(columns),
+            };
+            Ok(ferrodoc_rst::write_rst_wrapped(doc, wrap).into_bytes())
         }
         #[cfg(feature = "latex")]
         (_, Format::Latex) => {
@@ -1269,14 +1279,11 @@ mod tests {
         // plain-text conversion and got `NotCompiled`, which CI catches
         // and `verify.sh` — which only checks that the trimmed build
         // *compiles* — does not.
-        #[cfg(all(feature = "rst", feature = "asciidoc"))]
-        for (to, refused) in [
-            (Format::Rst, Wrap::Auto(72)),
-            (Format::Asciidoc, Wrap::None),
-        ] {
-            let error = out(to, refused).expect_err(&format!("{to} {refused}"));
+        #[cfg(feature = "asciidoc")]
+        {
+            let error = out(Format::Asciidoc, Wrap::None).expect_err("asciidoc joins nothing");
             let message = error.to_string();
-            assert!(message.contains(&to.to_string()), "{message}");
+            assert!(message.contains("asciidoc"), "{message}");
             assert!(matches!(error, Error::NotWrappable(..)), "{message}");
         }
         // HTML does all three, since 2026-08-24: `auto` fills to the
@@ -1303,6 +1310,15 @@ mod tests {
         assert_eq!(out(Format::Latex, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
         #[cfg(feature = "latex")]
         assert_eq!(out(Format::Latex, Wrap::Auto(72)).unwrap(), "one two\n");
+        // RST too, since 2026-08-24.
+        #[cfg(feature = "rst")]
+        assert_eq!(out(Format::Rst, Wrap::None).unwrap(), "one two\n");
+        #[cfg(feature = "rst")]
+        assert_eq!(out(Format::Rst, Wrap::Preserve).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "rst")]
+        assert_eq!(out(Format::Rst, Wrap::Auto(5)).unwrap(), "one\ntwo\n");
+        #[cfg(feature = "rst")]
+        assert_eq!(out(Format::Rst, Wrap::Auto(72)).unwrap(), "one two\n");
 
         // `pandoc --wrap=auto -t json` is accepted and does nothing;
         // refusing it would break a command line pandoc runs.
