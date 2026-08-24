@@ -145,6 +145,9 @@ impl Reader {
         let mut out = Vec::new();
         let mut loose: Vec<Inline> = Vec::new();
         for node in nodes {
+            if is_titlepage(node) {
+                continue;
+            }
             if let Some(name) = element_name(node)
                 && (is_block(&name) || holds_blocks(&name, node))
             {
@@ -1115,6 +1118,32 @@ fn attribute(node: &Handle, name: &str) -> Option<String> {
 
 /// An element's identifier, classes and remaining attributes, in the shape
 /// the AST wants them.
+/// Whether this element is an EPUB title page, which pandoc drops whole.
+///
+/// A title page is the book's metadata set as a page; pandoc's HTML
+/// reader throws the element and everything in it away rather than
+/// reading the title twice. Measured, and every part of it:
+///
+/// * it is the **value** that decides, not the element — a `<div>`, a
+///   `<section>` and a `<p>` are all dropped;
+/// * `epub:type` holds a list, and `titlepage` anywhere in it counts;
+/// * the parser lowercases the attribute name, so `EPUB:TYPE` arrives
+///   here as `epub:type`; the **value** keeps its case and is matched
+///   with it — `Titlepage` is not a title page;
+/// * what follows the element is untouched.
+///
+/// 34 of the 128 XHTML files in the corpus EPUBs are exactly this page,
+/// which is what `scripts/sweep-epub-xhtml.sh` exists to count.
+fn is_titlepage(node: &Handle) -> bool {
+    let NodeData::Element { attrs, .. } = &node.data else {
+        return false;
+    };
+    attrs.borrow().iter().any(|a| {
+        &*a.name.local == "epub:type"
+            && a.value.split_whitespace().any(|value| value == "titlepage")
+    })
+}
+
 /// Add each whitespace-separated value of `epub:type` as a class, keeping
 /// the attribute. Pandoc does this, and an EPUB's structure is carried in
 /// nothing else — `epub:type="pagebreak"` is how a book says where a page
@@ -1854,6 +1883,27 @@ mod tests {
                 Box::default(),
                 vec![Inline::Str("a".to_owned())]
             )])]])]
+        );
+    }
+
+    /// An EPUB title page is the book's metadata set as a page, and
+    /// pandoc's reader throws the element and everything in it away
+    /// rather than reading the title twice. 34 of the 128 XHTML files in
+    /// the corpus EPUBs are exactly this page — none of them reachable
+    /// by `diff-html-read`, which walks eight `corpus/*.html`.
+    #[test]
+    fn an_epub_titlepage_is_dropped_whole() {
+        assert!(blocks(r#"<section epub:type="titlepage"><p>x</p></section>"#).is_empty());
+        // The value decides, not the element, and `epub:type` is a list.
+        assert!(blocks(r#"<div epub:type="titlepage"><p>x</p></div>"#).is_empty());
+        assert!(blocks(r#"<p epub:type="cover titlepage">x</p>"#).is_empty());
+        // The value keeps its case, and nothing else is a title page.
+        assert_eq!(blocks(r#"<p epub:type="Titlepage">x</p>"#).len(), 1);
+        assert_eq!(blocks(r#"<p epub:type="cover">x</p>"#).len(), 1);
+        // What follows is untouched.
+        assert_eq!(
+            blocks(r#"<section epub:type="titlepage"><p>x</p></section><p>after</p>"#).len(),
+            1
         );
     }
 
