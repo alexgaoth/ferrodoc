@@ -77,7 +77,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
 | `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **14/20** over every markdown document, **498/652** over the spec |
-| `diff-html-read` | HTML reader produces pandoc's AST | **638/661** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **641/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -674,6 +674,13 @@ only where matching would mean reproducing a parse failure*:
 - An `<a href="…"></a>` with no text is **kept**. Dropping it would match
   pandoc on unclosed `<a>` tags but delete a well-formed empty anchor, which
   real pages use as jump targets.
+- **`<![CDATA[ … ]]>` is read as text and `<? … ?>` is dropped**, which is
+  what pandoc does and what the XML says. An HTML5 tokenizer reads both as
+  a bogus comment ending at the **first `>`** — inside the content whenever
+  the content is code, so `<?php echo '>'; ?>` left `';` and `?>` behind as
+  paragraphs and a block CDATA vanished entirely. Normalised in the source
+  before parsing, beside the self-closing rewrite; a comment is copied
+  through first so that one merely mentioning `<![CDATA[` is left alone.
 - A newline immediately after `<pre>` is **kept**, matching pandoc rather
   than the HTML spec, because a code block silently losing its first line is
   worse than disagreeing about an invisible character.
@@ -1369,7 +1376,9 @@ EPUB — the vocabulary pandoc's own writer emits, which is far wider than
 the eight `corpus/*.html` the gate walks — and reported **128 files, 77
 diverging** where `docs/divergences.md` named six. Two families it never
 mentioned dominated it, both **fixed on 2026-08-25**, taking the sweep to
-**12** and `diff-html-read` to 638/661:
+**12** and `diff-html-read` to 638/661 — and three more documents followed
+from reading `<![CDATA[ … ]]>` and `<? … ?>` as pandoc reads them, for
+641/661:
 
 - a **self-closing tag**. Pandoc's parser honours the slash on every
   element; an HTML5 tree builder ignores it on a non-void start tag, so

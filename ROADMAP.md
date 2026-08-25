@@ -645,7 +645,7 @@ between them.
 
 | gate | now | 0.6 |
 |---|---|---|
-| `diff-html-read` | 638/661 | every miss fixed or in the divergence table with a repro |
+| `diff-html-read` | 641/661 | every miss fixed or in the divergence table with a repro |
 | `diff-epub` | 10/12 | the raw-HTML mode decided, so the two are fixed or declared unreachable |
 | `diff-epub-write` | 8/11 | the three deliberate cases stated as the whole remainder |
 | `diff-docx` / `diff-odt` | 36/37, 32/34 | the non-deliberate misses fixed |

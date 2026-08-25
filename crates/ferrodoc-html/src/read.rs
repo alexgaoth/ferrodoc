@@ -1722,17 +1722,51 @@ const RAW_TEXT: &[&str] =
 /// Done on the source because the flag does not survive the tree builder:
 /// `RcDom` is handed `ElementFlags::self_closing` and drops it.
 fn close_self_closing(input: &str) -> String {
-    if !input.contains("/>") {
-        return input.to_owned();
-    }
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
     while let Some(at) = rest.find('<') {
-        out.push_str(&rest[..=at]);
-        rest = &rest[at + 1..];
-        // A comment, doctype or processing instruction has no tag name and
-        // no slash of its own to honour.
-        if rest.starts_with(['!', '?', '/']) {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        // `<![CDATA[ … ]]>` is character data: pandoc reads its content as
+        // text, and an HTML5 tokenizer reads the whole thing as a bogus
+        // comment that ends at the **first `>`** — which is inside the
+        // content whenever the content is XML or code. Escaped on the way
+        // through so the text survives as text.
+        if let Some(tail) = rest.strip_prefix("<![CDATA[") {
+            let (content, after) = tail.split_once("]]>").unwrap_or((tail, ""));
+            for ch in content.chars() {
+                match ch {
+                    '&' => out.push_str("&amp;"),
+                    '<' => out.push_str("&lt;"),
+                    _ => out.push(ch),
+                }
+            }
+            rest = after;
+            continue;
+        }
+        // A processing instruction pandoc drops whole. The same bogus
+        // comment rule would end it at the first `>`, which `<?php echo
+        // '>'; ?>` puts in the middle of a string.
+        if rest.starts_with("<?") {
+            rest = rest[2..].split_once("?>").map_or("", |(_, after)| after);
+            continue;
+        }
+        // A comment is copied through, so that nothing above reads a
+        // `<![CDATA[` or a `<?` that a comment merely mentions.
+        if let Some(tail) = rest.strip_prefix("<!--") {
+            let (body, after) = tail.split_once("-->").unwrap_or((tail, ""));
+            out.push_str("<!--");
+            out.push_str(body);
+            if !after.is_empty() || tail.contains("-->") {
+                out.push_str("-->");
+            }
+            rest = after;
+            continue;
+        }
+        out.push('<');
+        rest = &rest[1..];
+        // A doctype or an end tag has no tag name of its own to honour.
+        if rest.starts_with(['!', '/']) {
             continue;
         }
         let name: String = rest
