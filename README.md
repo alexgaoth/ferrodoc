@@ -309,13 +309,14 @@ stdout, output files and stderr. **11/48 command lines identical**, with
 `--attribute` turns that into work: it retries each miss with one of
 pandoc's own features switched off at a time — on **both** sides, since
 this now highlights too — and names the smallest set that makes the two
-agree. Reading `-f markdown` as pandoc's dialect rather than CommonMark
-accounts for **21** misses on its own and **9** more together with syntax
-highlighting, which accounts for **2** by itself. One row is a difference
-this project has decided to keep. That leaves **4**, and most of those
-are the same dialect decision from an angle the experiment cannot model — `markdown_github` naming it, a `.pmd` document written in
-it, or `-t markdown` being asked to *write* it. **The number is one
-decision away.**
+agree. Reading `markdown` as pandoc's dialect rather than CommonMark —
+on the way in, on the way out, and under the deprecated name
+`markdown_github` — accounts for **22** misses on its own and **10** more
+together with syntax highlighting, which accounts for **2** by itself.
+One row is a difference this project has decided to keep. **That leaves
+2**: a `--reference-doc` DOCX and a LaTeX document. It left eight before
+the experiment learned to switch a feature off on *both* sides. **The
+number is one decision away.**
 
 `--extract-media DIR` writes the input's embedded images under `DIR` and
 repoints the output at them, matching `pandoc --extract-media` file for

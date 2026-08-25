@@ -121,7 +121,16 @@ attribute_miss() {
     if [ -z "$from" ]; then
         case "$input" in *.md|*.markdown|*.pmd) from=markdown ;; esac
     fi
-    case "$from" in markdown|markdown[+-]*) dialect_applies=1 ;; esac
+    # `markdown_github` is pandoc's deprecated alias for the legacy
+    # GitHub dialect — it even warns — and this reads it as GFM. That is
+    # the same hypothesis as `markdown` vs CommonMark, so it neutralises
+    # the same way: make pandoc read it the way this does. Two rows sat
+    # in the remainder bucket being nothing else, and `dropin-043` is
+    # byte-identical the moment pandoc is given `-f gfm`.
+    case "$from" in
+        markdown|markdown[+-]*) dialect_applies=1 ;;
+        markdown_github|markdown_github[+-]*) dialect_applies=1 ;;
+    esac
     # …and wherever it is the **output** format, which the experiment did
     # not model until 2026-08-25. `-t markdown` gets pandoc's dialect on
     # the way out — heading identifiers, fenced divs, `smart`'s `---` and
@@ -157,17 +166,28 @@ attribute_miss() {
         case "$combination" in *wrap=none*) try_p="$try_p --wrap=none" ;;
                                *wrap=preserve*) try_p="$try_p --wrap=preserve" ;; esac
         case "$combination" in *dialect*)
-            case "$from" in markdown|markdown[+-]*) try_p="$try_p -f commonmark" ;; esac
+            case "$from" in
+                markdown|markdown[+-]*) try_p="$try_p -f commonmark" ;;
+                # Both sides again: naming `gfm` also silences pandoc's
+                # deprecation warning, and this reproduces that warning
+                # faithfully — so muting one side left the two differing
+                # on stderr alone and blamed the row on nothing.
+                markdown_github|markdown_github[+-]*)
+                    try_p="$try_p -f gfm"; try_f="$try_f -f gfm" ;;
+            esac
             case "$to" in markdown|markdown[+-]*) try_p="$try_p -t commonmark" ;; esac ;;
         esac
         rm -rf "$dir"; mkdir -p "$dir/p"
+        # Any neutralisation that changed ferrodoc's own command line
+        # has to be run on ferrodoc as well; comparing the new pandoc
+        # against the old ferrodoc asks two different questions.
         mine="$f_out"
-        case "$combination" in *highlighting*)
+        if [ "$try_f" != "$f_args" ]; then
             mkdir -p "$dir/f"
             mine="$dir/f"
             local ff=${try_f//$f_out/$dir\/f}
-            eval "$FERRODOC $ff" < /dev/null > "$dir/f/stdout" 2> "$dir/f/stderr" || true ;;
-        esac
+            eval "$FERRODOC $ff" < /dev/null > "$dir/f/stdout" 2> "$dir/f/stderr" || true
+        fi
         local pp=${try_p//$p_out/$dir\/p}
         # stderr too: the main comparison includes it, so leaving it out
         # here made every file list differ and every row "remains".

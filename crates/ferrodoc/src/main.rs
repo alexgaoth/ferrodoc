@@ -418,6 +418,11 @@ fn defaults_key(key: &str, value: &str, items: &[String]) -> Option<Vec<String>>
 struct Parsed {
     from: Option<Format>,
     to: Option<Format>,
+    /// The names those two were spelled with, kept so a deprecated
+    /// spelling is reported for the format actually used — a later
+    /// `-f gfm` replaces an earlier `-f markdown_github`, and pandoc
+    /// says nothing about the one it did not use.
+    deprecated: Vec<String>,
     output: Option<PathBuf>,
     input: Option<PathBuf>,
     stdin_requested: bool,
@@ -453,8 +458,24 @@ fn take_flag(
     out: &mut Parsed,
 ) -> Result<bool, String> {
     match arg {
-        "-f" | "--from" => out.from = Some(format(&value(arg)?)?),
-        "-t" | "--to" => out.to = Some(format(&value(arg)?)?),
+        "-f" | "--from" | "-t" | "--to" => {
+            let name = value(arg)?;
+            let parsed = format(&name)?;
+            let slot = usize::from(matches!(arg, "-t" | "--to"));
+            if out.deprecated.len() <= slot {
+                out.deprecated.resize(slot + 1, String::new());
+            }
+            // The base name, because `markdown_github-hard_line_breaks`
+            // is the same deprecated format wearing an extension.
+            let base = name.split(['+', '-']).next().unwrap_or(&name);
+            out.deprecated[slot] =
+                if base.eq_ignore_ascii_case("markdown_github") { name } else { String::new() };
+            if slot == 0 {
+                out.from = Some(parsed);
+            } else {
+                out.to = Some(parsed);
+            }
+        }
         "-o" | "--output" => out.output = Some(PathBuf::from(value(arg)?)),
         // `--quiet` and `--fail-if-warnings` are read before the loop
         // starts — see `diagnostics`. `--verbose` adds `[INFO]` lines in
@@ -591,6 +612,16 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
     }
 
     out.page.template = read_template(out.page.template.take(), out.data_dir.as_deref())?;
+
+    // Pandoc's own wording, byte for byte, because a Makefile that has
+    // said `markdown_github` for ten years is where this came from and a
+    // silent acceptance is the one answer that helps nobody. `dropin/`
+    // found it: two rows differ in nothing but this line. It is said
+    // **after** parsing, once per side, for the spelling that survived —
+    // `-f markdown_github -f gfm` uses `gfm` and pandoc says nothing.
+    for _ in out.deprecated.iter().filter(|name| !name.is_empty()) {
+        warn("[WARNING] Deprecated: markdown_github. Use gfm instead.");
+    }
 
     // Formats not given explicitly come from the file extensions; that
     // resolution needs the input path, so it happens in `run`.
@@ -1483,13 +1514,6 @@ fn format(name: &str) -> Result<Format, String> {
     };
     let format = Format::parse(name)
         .ok_or_else(|| format!("unknown format {name:?}; known formats: {}", known()))?;
-    // Pandoc's own wording, byte for byte, because a Makefile that has
-    // said `markdown_github` for ten years is where this came from and a
-    // silent acceptance is the one answer that helps nobody. `dropin/`
-    // found it: two rows differ in nothing but this line.
-    if name.eq_ignore_ascii_case("markdown_github") {
-        warn("[WARNING] Deprecated: markdown_github. Use gfm instead.");
-    }
     // Only a build trimmed with cargo features can reach this: the name is
     // real, the code for it was not compiled in. Saying so beats "unknown
     // format", which would send someone looking for a typo.

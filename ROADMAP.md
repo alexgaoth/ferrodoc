@@ -345,21 +345,28 @@ name standalone HTML as an exception the way it names citations.
 Updated 2026-08-24, after the writers were brought to pandoc's bytes and
 the wrap default flipped. **`8/48`, with no refusals at all**, and —
 the number that matters more — `scripts/dropin.sh --attribute` puts
-**32 of the 37 misses** on one of two remaining global decisions:
+**34 of the 37 misses** on one of two remaining global decisions:
 
 | decision | rows it alone would fix |
 |---|---|
 | ~~pandoc's 72-column fill (D4.3)~~ | **done** — it was 23 |
-| `markdown` meaning pandoc's dialect (D4.4) | 21 |
+| `markdown` meaning pandoc's dialect (D4.4) | 22 |
 | ~~syntax highlighting (0.7)~~ | **done for C, Python and bash** — 2 |
-| both together | 9 |
+| both together | 10 |
 
-The dialect row counts the **writer** side since 2026-08-25: `-t markdown`
-gets pandoc's dialect on the way out as surely as `-f markdown` does on
-the way in, and the experiment had only ever neutralised the reader.
+The dialect row counts the **writer** side since 2026-08-25 — `-t markdown`
+gets pandoc's dialect on the way out as surely as `-f markdown` does on the
+way in, and the experiment had only ever neutralised the reader — and it
+counts `markdown_github`, the same hypothesis under pandoc's own deprecated
+name.
 
-The remaining 4 need something neither explains, plus one difference this
-project keeps on purpose. That bucket is the useful signal: it is a
+**The remainder is 2**, plus one difference this project keeps on purpose:
+a `--reference-doc` DOCX and a LaTeX document. It was 19 when this section
+was written and 7 on the morning of 2026-08-25; what emptied it was not
+conversion work but the experiment learning to switch a feature off on
+**both** sides. Muting pandoc alone had been blaming rows on differences
+that no longer existed — and in one case on a deprecation warning that
+vanished from pandoc's stderr the moment the dialect was neutralised. That bucket is the useful signal: it is a
 **third** cause rather than more of the first two, and nobody has looked
 at what it is.
 
