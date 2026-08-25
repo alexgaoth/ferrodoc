@@ -645,12 +645,12 @@ between them.
 
 | gate | now | 0.6 |
 |---|---|---|
-| `diff-html-read` | 635/661 | every miss fixed or in the divergence table with a repro |
+| `diff-html-read` | 638/661 | every miss fixed or in the divergence table with a repro |
 | `diff-epub` | 10/12 | the raw-HTML mode decided, so the two are fixed or declared unreachable |
 | `diff-epub-write` | 8/11 | the three deliberate cases stated as the whole remainder |
 | `diff-docx` / `diff-odt` | 36/37, 32/34 | the non-deliberate misses fixed |
 | EPUB spec chunks | 8/22 | resolved by the raw-HTML decision, or the gate retired as measuring the wrong thing |
-| `scripts/sweep-epub-xhtml.sh` | 77 of 128 differ | **zero unrecorded**, which is the real number for the HTML reader |
+| `scripts/sweep-epub-xhtml.sh` | 12 of 128 differ | **zero unrecorded**, which is the real number for the HTML reader |
 
 #### The writer half of this version is **done**, 2026-08-23
 

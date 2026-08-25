@@ -77,7 +77,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
 | `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **14/20** over every markdown document, **498/652** over the spec |
-| `diff-html-read` | HTML reader produces pandoc's AST | **635/661** |
+| `diff-html-read` | HTML reader produces pandoc's AST | **638/661** |
 
 The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
@@ -647,20 +647,25 @@ disagreement on input that is merely unusual, and `<a/>` self-closing syntax
 sends the two parsers down different recovery paths.
 
 **An EPUB title page is dropped whole**, element and content, wherever
-`epub:type` lists `titlepage` — the value decides rather than the element,
-`titlepage` anywhere in the list counts, and the value keeps its case. A
-title page is the book's metadata set as a page and pandoc declines to read
-the title twice.
+`epub:type` contains `titlepage` — matched as a **substring**, so
+`halftitlepage` counts too, and case-sensitively, so `Titlepage` does not.
+**The element decides as much as the value**: eleven of them drop it
+(`blockquote div dl figure hr main ol p pre section ul`) and everything
+else keeps it, which was probed one element name at a time over the whole
+HTML vocabulary because the set is not nameable — `<table>` and `<h1>`
+keep it, `<hr>` loses it, and `<li>`, `<dd>`, `<dt>` and `<figcaption>`
+only look dropped standing alone. A title page is the book's metadata set
+as a page and pandoc declines to read the title twice.
 
-**The wider count is `scripts/sweep-epub-xhtml.sh`, and it is 46 of 128.**
+**The wider count is `scripts/sweep-epub-xhtml.sh`, and it is 12 of 128.**
 `diff-html-read` walks eight `corpus/*.html`; the corpus EPUBs hold 128
 XHTML files written by pandoc's own writer, which is a far wider
-vocabulary. That sweep found the title-page rule and stood at 77 before it.
-What is left in it is **two named families and nothing else**: 34
-`nav.xhtml` on `<a … />`, which is XHTML — where that syntax closes the
-element — read as HTML, where it does not; and 11 chapters on the
-`doc-noteref` divergence this reader keeps on purpose, because resolving a
-note eagerly costs `diff-epub` two documents.
+vocabulary. That sweep stood at 77, then 46, and is 12 since 2026-08-25.
+What is left is **two families, in both of which this reader is the one
+following the standard**: an unclosed `<a>` with no slash, which HTML5
+reconstructs into every following block and TagSoup does not, and the
+`doc-noteref` divergence this reader keeps on purpose — pandoc answers an
+unresolvable reference with a warning and an empty `Note`.
 
 Four deliberate divergences, all chosen on the same principle — *match
 pandoc wherever pandoc has a describable rule on well-formed input; diverge
@@ -1361,20 +1366,29 @@ authors into the head, and reading that page back dropped them.
 **`scripts/sweep-epub-xhtml.sh` is how the remainder is counted**, and it
 contradicts the census. It compares every XHTML file inside every corpus
 EPUB — the vocabulary pandoc's own writer emits, which is far wider than
-the eight `corpus/*.html` the gate walks — and reports **128 files, 77
-diverging**, where `docs/divergences.md` names six divergences. Two
-families it never mentioned dominate:
+the eight `corpus/*.html` the gate walks — and reported **128 files, 77
+diverging** where `docs/divergences.md` named six. Two families it never
+mentioned dominated it, both **fixed on 2026-08-25**, taking the sweep to
+**12** and `diff-html-read` to 638/661:
 
-- an **empty `<section epub:type="titlepage">`**: pandoc emits nothing,
-  this reader keeps an empty `Div`. 34 files. An empty `<section>` or
-  `<div id>` without that `epub:type` keeps its `Div` for pandoc too, so
-  the rule is narrower than "drop empty containers" and is not guessed at
-  here;
-- a **link with no text** in `nav.xhtml`: pandoc drops it, this reader
-  keeps an empty `Link`. 31 files.
+- a **self-closing tag**. Pandoc's parser honours the slash on every
+  element; an HTML5 tree builder ignores it on a non-void start tag, so
+  `<a href="…" />` — which pandoc's *own* EPUB writer emits for a
+  navigation entry with no text — stayed open here and swallowed the rest
+  of the document. The source is now rewritten `<x … ></x>` before
+  parsing, skipping void elements and raw-text ones, because
+  `ElementFlags::self_closing` does not survive `RcDom`;
+- an **`<li id>` with a sub-list**. The identifier becomes a `Span` when
+  the item opens with text or an inline element and a `Div` when it opens
+  with a block one — the *first child* decides, not the number of blocks,
+  so `<li id>text<p>p</p>` is the `Span` case with two paragraphs and
+  `<li id><p>p</p>` is the `Div` case with one. Requiring a single `Plain`
+  gave a `Div` to every contents entry that had children.
 
-Both are recorded rather than fixed. Re-run the sweep before believing any
-count of what this reader diverges on.
+The title-page family was the third, and it was **over-applied**: the drop
+ran on any element, which deleted the `<a epub:type="titlepage">` in every
+EPUB's landmarks nav. Re-run the sweep before believing any count of what
+this reader diverges on.
 
 ### Footnotes in HTML — resolved, with two stated divergences
 

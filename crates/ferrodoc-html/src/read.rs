@@ -51,7 +51,7 @@ pub fn read_html_without_generated_identifiers(input: &str) -> Result<Pandoc, Er
 }
 
 fn read(input: &str, generate_identifiers: bool) -> Result<Pandoc, Error> {
-    let source = restore_verbatim_newline(&expand_tabs(input));
+    let source = close_self_closing(&restore_verbatim_newline(&expand_tabs(input)));
     // Scripting off, so a `<noscript>` holds markup rather than the raw
     // text a browser would leave unparsed. Its content is content — it is
     // what the page says to a reader who will never run the script — and
@@ -928,16 +928,34 @@ fn drop_space_before_break(inlines: &mut Vec<Inline>) {
 /// Keep a `<li id>`'s identifier, which is the only thing a link into the
 /// middle of a list has to aim at.
 ///
-/// Pandoc wraps it in whichever container can hold the item's content: a
-/// `Span` inside the single `Plain` of an inline item, a `Div` around the
-/// blocks otherwise — **one `<p>` is already the `Div` case**. The
-/// attribute merely being present is the trigger; `id=""` still wraps,
-/// with an empty identifier. Both forms probed; the census printed only
-/// the `Span` half.
+/// **The item's first child decides, not how many blocks it has.** An
+/// item that opens with text or an inline element takes a `Span` around
+/// that leading run and leaves everything after it a sibling; one that
+/// opens with a block element — a `<p>`, a nested `<ul>` — takes a `Div`
+/// around the whole item. So `<li id>text<p>p</p>` is the `Span` case
+/// with two paragraphs, and `<li id><p>p</p>` is the `Div` case with
+/// one. Requiring a *single* `Plain` gave a `Div` to every table-of-
+/// contents entry with a sub-list under it, which is nine of the
+/// `nav.xhtml` files in the corpus EPUBs.
+///
+/// The attribute merely being present is the trigger; `id=""` still
+/// wraps, with an empty identifier. Every form here was probed.
 fn carry_item_identifier(node: &Handle, blocks: &mut Vec<Block>) {
     let Some(id) = attribute(node, "id") else { return };
     let attr = Attr { identifier: id, ..Attr::default() };
-    if let [Block::Plain(inlines)] = blocks.as_mut_slice() {
+    let opens_inline = children(node)
+        .iter()
+        .find(|child| match &child.data {
+            NodeData::Text { contents } => !contents.borrow().trim().is_empty(),
+            NodeData::Element { .. } => true,
+            _ => false,
+        })
+        .is_some_and(|child| element_name(child).is_none_or(|name| !is_block(&name)));
+    let leading = match blocks.first_mut() {
+        Some(Block::Plain(inlines) | Block::Para(inlines)) if opens_inline => Some(inlines),
+        _ => None,
+    };
+    if let Some(inlines) = leading {
         let inner = std::mem::take(inlines);
         *inlines = vec![Inline::Span(Box::new(attr), inner)];
         return;
@@ -1120,13 +1138,26 @@ fn attribute(node: &Handle, name: &str) -> Option<String> {
 /// the AST wants them.
 /// Whether this element is an EPUB title page, which pandoc drops whole.
 ///
+/// The elements pandoc drops an `epub:type="titlepage"` on. Probed one
+/// name at a time over every element in the HTML vocabulary, because the
+/// set is neither "block elements" nor anything else nameable: `<table>`
+/// and `<h1>` keep it, `<hr>` loses it, and `<li>`, `<dd>`, `<dt>` and
+/// `<figcaption>` look dropped standing alone only because a bare one
+/// parses into something else — inside their real parent all four stay.
+const TITLEPAGE_DROPS: &[&str] = &[
+    "blockquote", "div", "dl", "figure", "hr", "main", "ol", "p", "pre", "section", "ul",
+];
+
 /// A title page is the book's metadata set as a page; pandoc's HTML
 /// reader throws the element and everything in it away rather than
 /// reading the title twice. Measured, and every part of it:
 ///
-/// * it is the **value** that decides, not the element — a `<div>`, a
-///   `<section>` and a `<p>` are all dropped;
-/// * `epub:type` holds a list, and `titlepage` anywhere in it counts;
+/// * **the element decides as much as the value.** This dropped on any
+///   element until 2026-08-25, which took `<a epub:type="titlepage">`
+///   out of every EPUB's landmarks nav — pandoc keeps that link, class
+///   and attribute and all;
+/// * the value is matched as a **substring**, not as a word: pandoc
+///   drops `halftitlepage` and `titlepagex` too;
 /// * the parser lowercases the attribute name, so `EPUB:TYPE` arrives
 ///   here as `epub:type`; the **value** keeps its case and is matched
 ///   with it — `Titlepage` is not a title page;
@@ -1135,13 +1166,16 @@ fn attribute(node: &Handle, name: &str) -> Option<String> {
 /// 34 of the 128 XHTML files in the corpus EPUBs are exactly this page,
 /// which is what `scripts/sweep-epub-xhtml.sh` exists to count.
 fn is_titlepage(node: &Handle) -> bool {
-    let NodeData::Element { attrs, .. } = &node.data else {
+    let NodeData::Element { name, attrs, .. } = &node.data else {
         return false;
     };
-    attrs.borrow().iter().any(|a| {
-        &*a.name.local == "epub:type"
-            && a.value.split_whitespace().any(|value| value == "titlepage")
-    })
+    if !TITLEPAGE_DROPS.contains(&&*name.local) {
+        return false;
+    }
+    attrs
+        .borrow()
+        .iter()
+        .any(|a| &*a.name.local == "epub:type" && a.value.contains("titlepage"))
 }
 
 /// Add each whitespace-separated value of `epub:type` as a class, keeping
@@ -1662,6 +1696,81 @@ fn restore_verbatim_newline(input: &str) -> String {
 
 /// The offset of the `>` closing a start tag that begins at `after`,
 /// skipping quoted attribute values, which may contain one.
+/// Elements that are empty by definition, whose `/>` needs no help and
+/// whose `</br>` would be an error.
+const VOID: &[&str] = &[
+    "area", "base", "basefont", "bgsound", "br", "col", "embed", "frame", "hr", "img", "input",
+    "keygen", "link", "meta", "param", "source", "track", "wbr",
+];
+
+/// Elements whose content is text rather than markup, so a `<a/>` inside
+/// one of them is characters and not a tag.
+const RAW_TEXT: &[&str] =
+    &["script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "plaintext"];
+
+/// Rewrite `<x … />` as `<x … ></x>` for an element that is not void.
+///
+/// **Pandoc honours the self-closing slash on every element** — its
+/// parser is `TagSoup`, not an HTML5 tree builder — so `<a href="x" />`
+/// closes there and stays open here, where the HTML5 rules say the slash
+/// on a non-void start tag is ignored. The cost is not one empty link: an
+/// anchor left open swallows the rest of the document into itself, and
+/// pandoc's *own* EPUB writer emits `<a href="…" />` for a navigation
+/// entry with no text. It was 31 of the 46 files `sweep-epub-xhtml.sh`
+/// found diverging.
+///
+/// Done on the source because the flag does not survive the tree builder:
+/// `RcDom` is handed `ElementFlags::self_closing` and drops it.
+fn close_self_closing(input: &str) -> String {
+    if !input.contains("/>") {
+        return input.to_owned();
+    }
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(at) = rest.find('<') {
+        out.push_str(&rest[..=at]);
+        rest = &rest[at + 1..];
+        // A comment, doctype or processing instruction has no tag name and
+        // no slash of its own to honour.
+        if rest.starts_with(['!', '?', '/']) {
+            continue;
+        }
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == ':')
+            .collect();
+        if name.is_empty() {
+            continue;
+        }
+        let Some(close) = end_of_tag(rest) else {
+            break;
+        };
+        let tag = &rest[..close];
+        out.push_str(tag);
+        out.push('>');
+        rest = &rest[close + 1..];
+        // Inside a raw-text element the next `<` that matters is its own
+        // end tag; everything before that is characters.
+        let bare = name.rsplit(':').next().unwrap_or(&name).to_ascii_lowercase();
+        if RAW_TEXT.contains(&bare.as_str()) {
+            let end = rest
+                .to_ascii_lowercase()
+                .find(&format!("</{bare}"))
+                .map_or(rest.len(), |index| index);
+            out.push_str(&rest[..end]);
+            rest = &rest[end..];
+            continue;
+        }
+        if tag.ends_with('/') && !VOID.contains(&bare.as_str()) {
+            out.push_str("</");
+            out.push_str(&name);
+            out.push('>');
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn end_of_tag(after: &str) -> Option<usize> {
     let mut quote = None;
     for (offset, ch) in after.char_indices() {
