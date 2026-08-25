@@ -724,7 +724,14 @@ highlighting now mutes this one too** — `flags.sh`, `writers.sh`,
 different questions, and that trap was live the moment the first language
 landed.
 
-**Two things are still open, and neither is a tokenizer.**
+**Python followed C** — four in-tree files, 459 lines, byte-identical,
+and every `.py` in the repository. Its table was probed over *python's
+own* vocabulary (`dir(builtins)` plus `keyword.kwlist`, 211 names),
+because choosing a probe set by hand is how `file` came to be missing on
+the first attempt and only a real file caught it. **Drop-in 10/48 to
+11/48.**
+
+**Three things are still open, and only one is a tokenizer.**
 
 1. **The exit test needs `ruby`, not C.** Of the three spec examples with
    a known language, one is inside an HTML block and never reaches the
@@ -733,7 +740,14 @@ landed.
    `at`, `true` is a `dv`, a single-quoted string is `vs` — and there is
    no real Ruby in this repository to gate it on. Writing some would be
    the fixture-fitting this card just avoided.
-2. **The stylesheet is a licence question.** A standalone page with a
+2. **`bash` is the next language and a harder kind.** Its classes are
+   positional rather than lexical — the first word of a command is `fu`,
+   `bu` or `ex` depending on what it is, `-x` after it is `at`, and
+   `;`/`|`/`&&` are `kw` that return the scanner to command position —
+   with `$(…)`, `${…}`, backticks and heredocs on top. It is worth one
+   drop-in row and `samples/06`, and it deserves the same treatment C and
+   Python got rather than a quick one.
+3. **The stylesheet is a licence question.** A standalone page with a
    highlighted block wants 66 lines of CSS, and that CSS is skylighting's
    style rather than `data/templates` — so the BSD carve-out the template
    is vendored under does not reach it. The spans are written; the

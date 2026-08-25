@@ -999,6 +999,18 @@ It costs **27.7 KB, 0.39% of the binary** for the first language, and is
 a cargo feature (`highlight`, on by default) so a trimmed build can drop
 it.
 
+**Why the list stops here.** The next language by value is `bash`, and it
+is not the same kind of job: its classes are **positional** rather than
+lexical — the first word of a command is `fu` if pandoc knows the
+command, `bu` if it is a shell builtin and `ex` otherwise, a word after
+it is `at` when it starts with `-`, and `;`/`|`/`&&` are `kw` that put
+the scanner back at command position. On top of that sit `$(…)`, `${…}`,
+backticks and heredocs, and a list of known commands that is long and
+arbitrary. A bash highlighter that is *nearly* right is the failure this
+whole approach is built to avoid — plausible colour that is wrong — so it
+waits for the same treatment C and Python got rather than a quick one.
+`samples/06-markdown-to-html` is one bash block and nothing else.
+
 **There is a second oracle, and it had never been used.** Pandoc *writes*
 LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared
 directly without asking its reader to survive anything.
