@@ -24,7 +24,7 @@ excluded on purpose: pandoc itself scores 1/13 and 4/13 on the same
 corpus, so their failures measure the format, not this project, and 20
 more rows of "the format cannot hold it" would drown the signal.
 
-That leaves **43 documents** across nine gates, re-counted 2026-08-25:
+That leaves **42 documents** across nine gates, re-counted 2026-08-25:
 
 | gate | score | failing documents |
 |---|---|---|
@@ -34,7 +34,7 @@ That leaves **43 documents** across nine gates, re-counted 2026-08-25:
 | EPUB reader (`diff-epub`) | 10/12 | 2 |
 | ODT reader (`diff-odt`) | 32/34 | 2 |
 | GFM reader, spec (`diff-gfm`) | 651/652 | 1 |
-| DOCX reader (`diff-docx`) | 36/37 | 1 |
+| DOCX reader (`diff-docx`) | 37/37 | 0 |
 | DOCX reader, LibreOffice (`diff-docx`) | 7/8 | 1 |
 | DOCX writer (`diff-write`) | 12/13 | 1 |
 
@@ -68,7 +68,7 @@ $H diff-epub-write corpus > epubwrite.txt
 | **G7** | Pandoc reads every ODT list twice, so its identifier suffix is one higher | **2** | **declared deliberate** |
 | — | eleven groups of one (listed in full below) | **11** | 2 deliberate, 9 actionable |
 
-**Largest group: G1, 13 of 43 documents.** But 13 of those 16 rest
+**Largest group: G1, 13 of 42 documents.** But 13 of those 16 rest
 on a *declared deliberate* decision — `COMPATIBILITY.md`, "HTML reader":
 an `<a href="…"></a>` with no text is kept, because dropping it would
 match pandoc on unclosed `<a>` tags at the price of deleting the
@@ -341,12 +341,11 @@ cannot be made to hang is the worse trade.
 | `corpus/odt/spec-03.odt` | `/blocks/4/c/0/0/c/1/0` | `foo-1` here, `foo-2` in pandoc — *deliberate* |
 | `corpus/odt/spec-09.odt` | `/blocks/27/c/0/0/c/1/0` | `foo` here, `foo-1` in pandoc — *deliberate* |
 
-### The five singletons in other gates
+### The four singletons in other gates
 
 | gate | document | first diverging path | cause |
 |---|---|---|---|
 | GFM reader (spec) | example 98 (Setext headings) | `/blocks` (2 vs 0) | `---\n---\n` is an empty YAML metadata block to pandoc's `gfm` and two `HorizontalRule`s here; YAML metadata is a pandoc extension the GFM specification does not define — *deliberate*, `COMPATIBILITY.md` "GFM" |
-| DOCX reader | `corpus/docx/spec-09.docx` | `/blocks/32/c` (1 vs 2) | a list nested inside a table cell is flattened; the `BulletList` is lost |
 | DOCX reader (LO) | `corpus/docx-libreoffice/minutes.docx` | `/blocks/7/c` (one side only) | LibreOffice writes a horizontal rule as a paragraph with nothing but a bottom border; ferrodoc reads `HorizontalRule`, pandoc reads nothing — *deliberate* |
 | DOCX writer | `corpus/nested-structures.md` | `/blocks/1/c/0` (1 vs 3) | a quotation nested in a way the DOCX round trip does not preserve |
 

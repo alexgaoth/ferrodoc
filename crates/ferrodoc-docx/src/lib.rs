@@ -1274,7 +1274,13 @@ impl Ctx {
             _ => ListKind::Bullet,
         };
         let continuation = info.text.trim().is_empty();
-        let block = self.styled_block(p, state)?;
+        // **An empty list paragraph is still an item.** Word writes one to
+        // hold a place a deeper paragraph then nests into, and dropping it
+        // broke the list in two: `corpus/docx/spec-09.docx` had a nested
+        // list start a second top-level list of its own. `Plain []` is the
+        // marker, and `build_lists_at` gives such an item no content of
+        // its own — which is what pandoc's own reader does with it.
+        let block = self.styled_block(p, state).unwrap_or_else(|| Block::Plain(Vec::new()));
         Some(ListItem { level, num_id: num_id.to_owned(), kind, continuation, block })
     }
 
@@ -1800,13 +1806,19 @@ struct LevelInfo {
 /// its first item or share its (level, `numId`); within a list,
 /// continuation items (blank marker text) extend the previous item, and
 /// deeper runs recurse into it.
+/// An item that held nothing but its own marker: it exists so that a
+/// deeper paragraph has something to nest into, and contributes no block.
+fn is_placeholder(block: &Block) -> bool {
+    matches!(block, Block::Plain(inlines) if inlines.is_empty())
+}
+
 fn build_lists(items: &[ListItem]) -> Vec<Block> {
     build_lists_at(items, 0)
 }
 
 fn build_lists_at(items: &[ListItem], depth: usize) -> Vec<Block> {
     if depth >= MAX_NESTING {
-        return items.iter().map(|i| i.block.clone()).collect();
+        return items.iter().filter(|i| !is_placeholder(&i.block)).map(|i| i.block.clone()).collect();
     }
     let mut lists = Vec::new();
     let mut i = 0;
@@ -1826,12 +1838,14 @@ fn build_lists_at(items: &[ListItem], depth: usize) -> Vec<Block> {
         while j < children.len() {
             let item = &children[j];
             if item.level == level {
+                let content =
+                    if is_placeholder(&item.block) { Vec::new() } else { vec![item.block.clone()] };
                 if item.continuation
                     && let Some(last) = list_items.last_mut()
                 {
-                    last.push(item.block.clone());
+                    last.extend(content);
                 } else {
-                    list_items.push(vec![item.block.clone()]);
+                    list_items.push(content);
                 }
                 j += 1;
             } else {

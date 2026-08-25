@@ -113,7 +113,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
 | `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **14/20** over every markdown document in `corpus/`, and **498/652** over the CommonMark spec — which is why `-f markdown` is still CommonMark here |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
-| `ferrodoc-docx` reader | **36/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
+| `ferrodoc-docx` reader | **37/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-odt` reader | **32/34** corpus documents produce identical ASTs, and **8/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-odt` writer | **640/652** spec examples survive an ODT round trip identically, with embedded images |

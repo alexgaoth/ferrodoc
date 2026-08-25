@@ -60,7 +60,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-spec` | markdown reader produces pandoc's AST | **652/652** |
 | `diff-ast` | any pandoc JSON round-trips to an equal value | **13/13** |
 | `diff-html` | HTML writer produces pandoc's HTML | **652/652** |
-| `diff-docx` | DOCX reader produces pandoc's AST | **36/37** |
+| `diff-docx` | DOCX reader produces pandoc's AST | **37/37** |
 | `diff-docx` (LibreOffice) | ...on documents *another* writer produced | **7/8** |
 | `diff-write` | DOCX writer survives a round trip through pandoc | **12/13** |
 | `diff-odt` | ODT reader produces pandoc's AST | **32/34** |
