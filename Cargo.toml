@@ -43,7 +43,10 @@ categories = ["text-processing", "parser-implementations", "command-line-utiliti
 # so without both, every crate above ferrodoc-ast is unpublishable.
 ferrodoc-ast = { path = "crates/ferrodoc-ast", version = "0.2.0" }
 ferrodoc-markdown = { path = "crates/ferrodoc-markdown", version = "0.2.0" }
-ferrodoc-html = { path = "crates/ferrodoc-html", version = "0.2.0" }
+# `default-features = false` here, so `highlight` is a choice each
+# dependent makes: `ferrodoc` forwards its own feature, and the EPUB
+# writer does not want it. See ROADMAP 0.7.
+ferrodoc-html = { path = "crates/ferrodoc-html", version = "0.2.0", default-features = false }
 ferrodoc-text = { path = "crates/ferrodoc-text", version = "0.2.0" }
 ferrodoc-docx = { path = "crates/ferrodoc-docx", version = "0.2.0" }
 ferrodoc-odt = { path = "crates/ferrodoc-odt", version = "0.2.0" }

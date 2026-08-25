@@ -36,7 +36,7 @@ pub use ferrodoc_ast::Pandoc;
 use ferrodoc_ast::Block;
 /// What goes into a standalone HTML page besides the document.
 #[cfg(feature = "html")]
-pub use ferrodoc_html::{Page, Wrap as HtmlWrap};
+pub use ferrodoc_html::{Highlighting, Page, Wrap as HtmlWrap};
 
 use std::fmt;
 use std::fmt::Write as _;
@@ -887,6 +887,19 @@ pub fn render_html_with_id_prefix(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> 
         Wrap::Auto(columns) => ferrodoc_html::Wrap::Fill(columns),
     };
     ferrodoc_html::write_html_wrapped(doc, id_prefix, wrap).into_bytes()
+}
+
+/// The same fragment with code left uncoloured, which is what
+/// `--syntax-highlighting=none` asks for.
+#[cfg(feature = "html")]
+#[must_use]
+pub fn render_html_unhighlighted(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> Vec<u8> {
+    let wrap = match wrap {
+        Wrap::None => ferrodoc_html::Wrap::None,
+        Wrap::Preserve => ferrodoc_html::Wrap::Preserve,
+        Wrap::Auto(columns) => ferrodoc_html::Wrap::Fill(columns),
+    };
+    ferrodoc_html::write_html_unhighlighted(doc, id_prefix, wrap).into_bytes()
 }
 
 /// Shift every heading, as pandoc's `--shift-heading-level-by` does.

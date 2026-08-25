@@ -27,7 +27,8 @@
 #                            choice of what to compare rather than a
 #                            workaround: `none` and `preserve` are the
 #                            modes these numbers have always been taken at
-#   --syntax-highlighting=none  pandoc colours code by default (0.7)
+#   --syntax-highlighting=none  pandoc colours code by default, and so
+#                               does this — both sides are muted (0.7)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -105,7 +106,8 @@ for format in html markdown gfm latex rst asciidoc plain; do
             ( ulimit -v 6000000
               pandoc "$doc" -f "$from" -t "$format" --wrap="$wrap" \
                   --syntax-highlighting=none ) > "$work/p" 2>/dev/null
-            "$FERRODOC" "$doc" -f "$from" -t "$format" --wrap="$wrap" > "$work/f" 2>/dev/null
+            "$FERRODOC" "$doc" -f "$from" -t "$format" --wrap="$wrap" \
+                  --no-highlight > "$work/f" 2>/dev/null
             if diff -q "$work/p" "$work/f" >/dev/null; then
                 same=$((same + 1))
             elif [ "$verbose" = 1 ]; then

@@ -11,7 +11,10 @@
 //! comparing bytes, not from the manual.
 
 use crate::template::{Context, Value, render};
-use crate::{Wrap, escape_text, meta_text, meta_texts, toc_list_wrapped, write_html_wrapped};
+use crate::{
+    Highlighting, Wrap, escape_text, meta_text, meta_texts, toc_list_wrapped,
+    write_html_unhighlighted, write_html_wrapped,
+};
 use ferrodoc_ast::{MetaValue, Pandoc};
 
 /// Pandoc's default HTML template, verbatim. See `templates/LICENSE`.
@@ -51,6 +54,8 @@ pub struct Page<'a> {
     /// How the body and the contents lay their lines out. The template
     /// itself is never filled — it is not the document.
     pub wrap: Wrap,
+    /// Whether code is coloured, as `--syntax-highlighting` asks.
+    pub highlighting: Highlighting,
 }
 
 impl Page<'_> {
@@ -174,7 +179,11 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
 
     // The prefix reaches the body because the footnote identifiers are
     // invented while writing, not carried by the tree.
-    set("body", Value::Text(trimmed(&write_html_wrapped(doc, &page.id_prefix, page.wrap))));
+    let body = match page.highlighting {
+        Highlighting::Default => write_html_wrapped(doc, &page.id_prefix, page.wrap),
+        Highlighting::None => write_html_unhighlighted(doc, &page.id_prefix, page.wrap),
+    };
+    set("body", Value::Text(trimmed(&body)));
 
     // A template reads the document's own metadata too: `-M
     // linkcolor="#007bff"` colours the links and `-M pagetitle=Home`

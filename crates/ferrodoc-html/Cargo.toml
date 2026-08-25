@@ -12,6 +12,13 @@ categories.workspace = true
 
 readme = "../../README.md"
 
+[features]
+# Syntax highlighting is a **size** decision as much as a fidelity one —
+# see ROADMAP 0.7 — so it is a feature, and the trimmed build measures
+# what it costs.
+default = ["highlight"]
+highlight = []
+
 [dependencies]
 ferrodoc-ast = { workspace = true }
 html5ever = "0.39.0"

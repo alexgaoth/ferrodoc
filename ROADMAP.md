@@ -702,7 +702,45 @@ holds its floor.
 
 **Not this version:** `--listings`, KaTeX/MathJax/MathML output modes.
 
-#### This is a decision, not a card — measured 2026-08-24
+#### Where this stands, 2026-08-24 — **C ships, and the method is (c)**
+
+There was a third option, and it is the one this repository already uses
+everywhere else: **derive the tables by probing the pinned binary**, and
+hold the result to *real source files* rather than to fixtures. No
+vendoring, no licence question, and the corpus cannot be chosen to
+flatter the result because it was not chosen at all — `scripts/highlight.sh`
+runs the C binding's own example and header, 150 lines that exist here
+for other reasons.
+
+**C is byte-identical on both, whole output**: wrapper, line anchors and
+tokens. It cost **27.7 KB, 0.39% of the binary**, and it is a cargo
+feature so a trimmed build drops it — which is the size discipline this
+card asked for, satisfied rather than promised.
+
+`--no-highlight` and `--syntax-highlighting=none` turn it off, any other
+style value is refused by name, and **every gate that mutes pandoc's
+highlighting now mutes this one too** — `flags.sh`, `writers.sh`,
+`diff-html` and the EPUB writer. Muting one side would have compared two
+different questions, and that trap was live the moment the first language
+landed.
+
+**Two things are still open, and neither is a tokenizer.**
+
+1. **The exit test needs `ruby`, not C.** Of the three spec examples with
+   a known language, one is inside an HTML block and never reaches the
+   writer, so `diff-html` turns entirely on `def foo(x) / return 3 / end`.
+   Ruby's rules are a different order of hair — `[` is a `kw`, `.s` is an
+   `at`, `true` is a `dv`, a single-quoted string is `vs` — and there is
+   no real Ruby in this repository to gate it on. Writing some would be
+   the fixture-fitting this card just avoided.
+2. **The stylesheet is a licence question.** A standalone page with a
+   highlighted block wants 66 lines of CSS, and that CSS is skylighting's
+   style rather than `data/templates` — so the BSD carve-out the template
+   is vendored under does not reach it. The spans are written; the
+   colours are not. **That one is the owner's call**, and it is the only
+   thing between `-s` output and parity.
+
+#### What the measurement said before any of it — 2026-08-24
 
 The wrapper is easy and the tokenizer is not, and the exit test hides
 which is which. **Only three of the spec's 652 examples hold a fence in a

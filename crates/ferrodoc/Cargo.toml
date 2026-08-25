@@ -24,7 +24,14 @@ path = "src/main.rs"
 # Every format, which is what a plain `cargo add ferrodoc` gets: nothing
 # below changes for a caller who does not ask for it.
 default = ["all"]
-all = ["markdown", "html", "text", "docx", "odt", "epub", "ipynb", "latex", "rst", "asciidoc"]
+all = [
+    "markdown", "html", "text", "docx", "odt", "epub", "ipynb", "latex", "rst",
+    "asciidoc", "highlight",
+]
+
+# Syntax highlighting, for the languages `COMPATIBILITY.md` names. Off in
+# a trimmed build so its cost is measurable: see `claims.sh --sizes`.
+highlight = ["ferrodoc-html?/highlight"]
 
 markdown = ["dep:ferrodoc-markdown"]
 html = ["dep:ferrodoc-html"]

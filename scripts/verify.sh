@@ -261,6 +261,11 @@ if [ "$want_gates" = 1 ]; then
     # file with mixed line endings. `diff-html` sees none of this — it
     # scores one conversion with the flags it chose itself.
     gate "flags vs pandoc"      ./scripts/flags.sh
+    # Highlighting, over **real source files** rather than the spec's
+    # nine lines of it — see the script for why that distinction is the
+    # whole point. A language is named in COMPATIBILITY.md only while
+    # this is at 100.
+    gate "highlighting vs pandoc" ./scripts/highlight.sh
 
     # Each text writer against pandoc's own writer, on the same AST.
     # The gates for these are *fidelity* runs — write it, read it back —

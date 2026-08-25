@@ -73,6 +73,8 @@ OPTIONS:
                             document's own metadata
         --template FILE     Use this template instead of pandoc's default
         --toc-depth N       How deep the contents go [3]
+        --no-highlight      Do not colour code (see COMPATIBILITY.md for
+                            the languages that are coloured)
     -H, --include-in-header FILE    Verbatim into <head>   } each implies
     -B, --include-before-body FILE  Verbatim after <body>  } --standalone,
     -A, --include-after-body FILE   Verbatim before </body>} as in pandoc
@@ -460,6 +462,22 @@ fn take_flag(
         // it would fail a command line pandoc runs, so its absence is a
         // row in COMPATIBILITY.md instead.
         "--quiet" | "--fail-if-warnings" | "--verbose" => {}
+        // Pandoc colours code by default and so does this, for the
+        // languages `COMPATIBILITY.md` names. `none` is the only value
+        // reproducible here, so any other is refused **by name** rather
+        // than accepted and ignored — a style that silently does nothing
+        // is worse than one that says so.
+        "--no-highlight" => out.page.highlighting = ferrodoc::Highlighting::None,
+        "--syntax-highlighting" | "--highlight-style" => {
+            let given = value(arg)?;
+            if given != "none" {
+                return Err(format!(
+                    "{arg}={given}: only `none` is available here; \
+                     COMPATIBILITY.md names the languages that are highlighted"
+                ));
+            }
+            out.page.highlighting = ferrodoc::Highlighting::None;
+        }
         "-s" | "--standalone" => out.framing.standalone = true,
         "--toc" | "--table-of-contents" => out.framing.toc = true,
         "-N" | "--number-sections" => out.framing.number_sections = true,
@@ -735,6 +753,17 @@ fn render_fragment(
 ) -> Result<Vec<u8>, String> {
     if !page.css.is_empty() {
         return Err("--css needs --standalone: a fragment has no <head>".to_owned());
+    }
+    // Highlighting is a property of the HTML writer, and a fragment
+    // reaches it through neither the page nor the wrap resolver — so
+    // `--no-highlight` on a fragment went through this function and did
+    // nothing at all until it was asked here.
+    if to == Format::Html && page.highlighting == ferrodoc::Highlighting::None {
+        return Ok(ferrodoc::render_html_unhighlighted(
+            doc,
+            &page.id_prefix,
+            wrap.unwrap_or(ferrodoc::Wrap::Auto(72)),
+        ));
     }
     // A fragment with `--id-prefix` needs the prefix on the footnote
     // identifiers too, and those are invented by the writer rather than
@@ -1063,6 +1092,8 @@ struct PageFlags {
     template: Option<String>,
     /// `--id-prefix`.
     id_prefix: String,
+    /// `--no-highlight` / `--syntax-highlighting=none`.
+    highlighting: ferrodoc::Highlighting,
 }
 
 impl Default for PageFlags {
@@ -1078,6 +1109,7 @@ impl Default for PageFlags {
             variables: Vec::new(),
             template: None,
             id_prefix: String::new(),
+            highlighting: ferrodoc::Highlighting::default(),
         }
     }
 }
@@ -1099,6 +1131,7 @@ impl PageFlags {
             template: self.template.as_deref(),
             id_prefix: self.id_prefix.clone(),
             pagetitle: Some(stem),
+            highlighting: self.highlighting,
             // A page's body fills like a fragment's; the template around
             // it never does, because it is not the document.
             wrap: match wrap {

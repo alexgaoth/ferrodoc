@@ -930,10 +930,57 @@ nothing at all**, not an empty `<nav>`; **`-H`, `-B` and `-A` imply
 document's metadata as variables**, so `-M linkcolor="#007bff"` colours
 the links, with `-V` beating `-M` where both name one.
 
-What `-s` still differs on is **syntax highlighting**: a document with a
-labelled code block makes pandoc add 65 lines of highlighting CSS, which
-is the 0.7 item. `samples/15-markdown-to-html-page` is exactly that
-difference and nothing else.
+What `-s` still differs on is the **highlighting stylesheet**: a page
+with a highlighted code block makes pandoc add 66 lines of CSS, and that
+CSS comes from skylighting's style rather than from `data/templates`, so
+the BSD carve-out this repository vendors the template under does not
+reach it. The spans are written; the colours that would style them are
+not. `samples/15-markdown-to-html-page` is exactly that difference.
+
+### Syntax highlighting — C, and why the list is short
+
+**Code is highlighted, in pandoc's shape, for the languages named here
+and no others.** A language not on the list degrades to exactly what this
+writer emitted before there was a highlighter — `<pre class="whatever">
+<code>` — so a short list costs nothing but colour.
+
+| language | names accepted | gate |
+|---|---|---|
+| C | `c` | **2/2** real source files byte-identical |
+
+`./scripts/highlight.sh` is that gate, and the inputs are the C binding's
+own example and header — files that exist in this repository for other
+reasons and that nobody wrote to be highlighted. **That distinction is
+the point**: only three of the spec's 652 examples hold a fence in a
+language pandoc knows, nine lines between them, and a highlighter written
+to pass those would be fitted to the fixtures rather than to the
+language.
+
+Every rule was read off `pandoc -f commonmark -t html`, and the ones that
+would have been guessed wrong are worth naming: `NULL`, `printf` and
+`malloc` are **not** classed; adjacent operator characters are one span
+(`);` and `};`); a numeric suffix is a `bu` beside the number rather than
+part of it; a `printf` conversion inside a string is a `sc`, as an escape
+is, and the two merge when adjacent; `#include` splits into a `pp` and an
+`im`; and a comment ends a directive rather than belonging to it.
+
+The wrapper is pandoc's too: `<div class="sourceCode" id="cbN">` — with
+the block's key-value attributes on **that div**, and `class` before `id`,
+which is not the order the writer uses anywhere else — then `<pre>`
+carrying the block's classes untouched, `<code>` carrying the syntax's
+**canonical** name, and one `<span id="cbN-M">` per line with an anchor
+in it. `cbN` numbers every code block in the document, highlighted or
+not; an explicit identifier replaces it; `.numberLines` adds
+`numberSource` and takes `aria-hidden`/`tabindex` off the anchors.
+
+**`--no-highlight` and `--syntax-highlighting=none` turn it off.** Any
+other style value is refused by name — a style that silently does nothing
+is worse than one that says so. Every gate that mutes pandoc's
+highlighting mutes this one too, because muting one side would compare
+two different questions.
+
+It costs **27.7 KB, 0.39% of the binary**, and is a cargo feature
+(`highlight`, on by default) so a trimmed build can drop it.
 
 **There is a second oracle, and it had never been used.** Pandoc *writes*
 LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared

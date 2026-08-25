@@ -1559,7 +1559,13 @@ fn diff_html(paths: &[String], verbose: bool, fail_under: Option<f64>) -> Result
     let mut matched = 0usize;
     let mut failures = Vec::new();
     for case in &cases {
-        let ours = ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?);
+        // Highlighting **off on both sides**: pandoc is muted below, and
+        // muting only one side would compare two different questions.
+        let ours = ferrodoc_html::write_html_unhighlighted(
+            &ferrodoc_markdown::read_commonmark(&case.markdown).map_err(|e| anyhow::anyhow!("{e}"))?,
+            "",
+            ferrodoc_html::Wrap::None,
+        );
         let theirs = run_pandoc(&case.markdown, &["-f", "commonmark", "-t", "html", "--syntax-highlighting=none", "--wrap=none"])
             .with_context(|| format!("pandoc failed on {}", case.name))?;
         let theirs = String::from_utf8(theirs).context("pandoc emitted invalid UTF-8")?;
@@ -1611,7 +1617,13 @@ fn bench(paths: &[String], iters: u32) -> Result<()> {
         sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?).len();
         let start = std::time::Instant::now();
         for _ in 0..iters {
-            sink += ferrodoc_html::write_html(&ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?).len();
+            // Muted on both sides, as the comparison below is.
+            sink += ferrodoc_html::write_html_unhighlighted(
+                &ferrodoc_markdown::read_commonmark(&markdown).map_err(|e| anyhow::anyhow!("{e}"))?,
+                "",
+                ferrodoc_html::Wrap::None,
+            )
+            .len();
         }
         let ours = start.elapsed() / iters;
 

@@ -1563,11 +1563,22 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
             // for the language and every block came out classed `{.rust`.
             let attr = data.attrs.as_ref().map_or_else(
                 || Attr {
+                    // Pandoc's own dialect **lowercases** a fence's info
+                    // string and `gfm` does not: `` ```C `` is classed
+                    // `c` there and `C` in both the others, and it is the
+                    // whole word rather than only a language it knows —
+                    // `aaBB` comes out `aabb`. Probed on all three.
                     classes: cb
                         .info
                         .split_whitespace()
                         .next()
-                        .map(|lang| vec![lang.to_owned()])
+                        .map(|lang| {
+                            vec![if dialect == Dialect::Pandoc {
+                                lang.to_lowercase()
+                            } else {
+                                lang.to_owned()
+                            }]
+                        })
                         .unwrap_or_default(),
                     ..Attr::default()
                 },

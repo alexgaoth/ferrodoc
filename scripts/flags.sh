@@ -42,6 +42,9 @@ A=dropin/assets
 # 72 since 2026-08-24, so the comparison is now made at the layout a user
 # actually gets rather than at one chosen to make the two agree.
 HANDED="--syntax-highlighting=none -f commonmark"
+# And the same to **this** binary, now that it highlights too: muting one
+# side only would compare two different questions. See ROADMAP 0.7.
+MUTED="--no-highlight"
 
 same=0 total=0
 while IFS= read -r flags; do
@@ -50,7 +53,7 @@ while IFS= read -r flags; do
         # shellcheck disable=SC2086
         ( ulimit -v 6000000; pandoc "$doc" -t html $HANDED $flags ) > "$work/p" 2>/dev/null
         # shellcheck disable=SC2086
-        "$FERRODOC" "$doc" -t html -f commonmark $flags > "$work/f" 2>/dev/null
+        "$FERRODOC" "$doc" -t html -f commonmark $MUTED $flags > "$work/f" 2>/dev/null
         if diff -q "$work/p" "$work/f" >/dev/null; then
             same=$((same + 1))
             continue

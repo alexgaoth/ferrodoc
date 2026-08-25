@@ -21,6 +21,9 @@ mod read;
 mod template;
 
 pub use page::{Page, write_page};
+
+#[cfg(feature = "highlight")]
+mod highlight;
 pub use read::{MAX_NESTING, read_html, read_html_without_generated_identifiers};
 
 /// What can go wrong reading HTML.
@@ -88,6 +91,46 @@ enum Sections {
     Made,
 }
 
+/// Whether the writer colours code, as pandoc's `--syntax-highlighting`
+/// asks it to. A gate that mutes pandoc's highlighting must mute this
+/// one too, or it compares two different questions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Highlighting {
+    /// Colour every language the highlighter knows.
+    #[default]
+    Default,
+    /// Colour nothing: `<pre class="…"><code>`, as before there was a
+    /// highlighter at all.
+    None,
+}
+
+/// What the block writers carry between them: the section mode, and the
+/// running code-block number.
+struct Ctx {
+    sections: Sections,
+    #[cfg_attr(
+        not(feature = "highlight"),
+        expect(dead_code, reason = "only the highlighter reads it, and it is out of this build")
+    )]
+    highlighting: Highlighting,
+    /// `cb1`, `cb2`, … Pandoc numbers **every** code block, highlighted
+    /// or not, and shows the number only where it highlights — so the
+    /// counter cannot live in the highlighting path.
+    blocks: std::cell::Cell<usize>,
+}
+
+impl Ctx {
+    fn new(mode: Sections, highlighting: Highlighting) -> Ctx {
+        Ctx { sections: mode, highlighting, blocks: std::cell::Cell::new(0) }
+    }
+
+    /// The next code block's number.
+    fn next_block(&self) -> usize {
+        self.blocks.set(self.blocks.get() + 1);
+        self.blocks.get()
+    }
+}
+
 /// Render a document as HTML, matching pandoc's HTML writer with
 /// `--wrap=none` and no syntax highlighting.
 pub fn write_html(doc: &Pandoc) -> String {
@@ -99,7 +142,12 @@ pub fn write_html(doc: &Pandoc) -> String {
 /// [`Sections`] for what changes.
 #[must_use]
 pub fn write_html_section_divs(doc: &Pandoc) -> String {
-    write_body(doc, "", Wrap::None, Sections::Made)
+    // **Not highlighted.** Pandoc's EPUB writer colours code, and
+    // `diff-epub-write` mutes it on pandoc's side because scoring against
+    // skylighting would measure skylighting rather than this writer.
+    // Colouring here and not there would make that gate compare two
+    // different questions — see ROADMAP 0.7.
+    write_body(doc, "", Wrap::None, Sections::Made, Highlighting::None)
 }
 
 /// The same, with `--id-prefix` on the identifiers this writer *invents*.
@@ -121,13 +169,27 @@ pub fn write_html_with_id_prefix(doc: &Pandoc, id_prefix: &str) -> String {
 /// in. `Wrap::None` is what [`write_html`] does.
 #[must_use]
 pub fn write_html_wrapped(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> String {
-    write_body(doc, id_prefix, wrap, Sections::Given)
+    write_body(doc, id_prefix, wrap, Sections::Given, Highlighting::Default)
 }
 
-fn write_body(doc: &Pandoc, id_prefix: &str, wrap: Wrap, sections: Sections) -> String {
+/// The same, with highlighting off — what `--syntax-highlighting=none`
+/// asks for, and what a gate comparing against a muted pandoc needs.
+#[must_use]
+pub fn write_html_unhighlighted(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> String {
+    write_body(doc, id_prefix, wrap, Sections::Given, Highlighting::None)
+}
+
+fn write_body(
+    doc: &Pandoc,
+    id_prefix: &str,
+    wrap: Wrap,
+    sections: Sections,
+    highlighting: Highlighting,
+) -> String {
+    let ctx = &Ctx::new(sections, highlighting);
     let mut out = String::new();
     let (blocks, notes) = take_notes(&doc.blocks, id_prefix);
-    write_blocks(&mut out, &blocks, sections);
+    write_blocks(&mut out, &blocks, ctx);
     if out.is_empty() {
         out.push('\n'); // pandoc's output always ends with a newline
     }
@@ -136,7 +198,7 @@ fn write_body(doc: &Pandoc, id_prefix: &str, wrap: Wrap, sections: Sections) -> 
     if out.ends_with("\n\n") {
         out.pop();
     }
-    write_notes(&mut out, &notes, id_prefix, sections);
+    write_notes(&mut out, &notes, id_prefix, ctx);
     lay_out(&out, wrap)
 }
 
@@ -653,7 +715,7 @@ fn walk_inlines(blocks: &mut [Block], f: &mut impl FnMut(&mut Vec<Inline>)) {
 /// Two rules, both probed: the backlink goes **inside** the last block
 /// when that block is a paragraph and on a line of its own when it is
 /// not, and a note with an empty body gets **no backlink at all**.
-fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str, sections: Sections) {
+fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str, ctx: &Ctx) {
     if notes.is_empty() {
         return;
     }
@@ -671,7 +733,7 @@ fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str, sections: S
         );
         let _ = write!(out, "<li{BREAK}id=\"{prefix}fn{number}\">");
         let mut rendered = String::new();
-        write_blocks(&mut rendered, body, sections);
+        write_blocks(&mut rendered, body, ctx);
         let rendered = rendered.trim_end_matches('\n');
         if rendered.is_empty() {
             out.push_str("</li>\n");
@@ -686,27 +748,27 @@ fn write_notes(out: &mut String, notes: &[Vec<Block>], prefix: &str, sections: S
     out.push_str("</ol>\n</section>\n");
 }
 
-fn write_blocks(out: &mut String, blocks: &[Block], sections: Sections) {
+fn write_blocks(out: &mut String, blocks: &[Block], ctx: &Ctx) {
     for block in blocks {
-        write_block(out, block, sections);
+        write_block(out, block, ctx);
         out.push('\n');
     }
 }
 
 /// Like [`write_blocks`] but without the trailing newline after the last
 /// block — the form used inside container elements.
-fn write_blocks_joined(out: &mut String, blocks: &[Block], sections: Sections) {
+fn write_blocks_joined(out: &mut String, blocks: &[Block], ctx: &Ctx) {
     let mut first = true;
     for block in blocks {
         if !first {
             out.push('\n');
         }
         first = false;
-        write_block(out, block, sections);
+        write_block(out, block, ctx);
     }
 }
 
-fn write_block(out: &mut String, block: &Block, sections: Sections) {
+fn write_block(out: &mut String, block: &Block, ctx: &Ctx) {
     match block {
         Block::Plain(inlines) => write_inlines(out, inlines),
         Block::Para(inlines) => {
@@ -721,23 +783,7 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
             write_inlines(out, inlines);
             let _ = write!(out, "</h{level}>");
         }
-        Block::CodeBlock(attr, text) => {
-            out.push_str("<pre");
-            write_attr(out, attr);
-            out.push_str("><code>");
-            // The **code itself** is one unbreakable piece, and its width
-            // does not enter the decision at the gap before it: pandoc
-            // measures a tag against the column and then appends the
-            // element's content whatever its width. The mark goes after
-            // `<code>`, which is still tag text — measured against 20
-            // columns, `<pre class="bash"><code>` breaks and
-            // `<pre class="bash">` alone does not. Without the mark at
-            // all, `<pre class="rust">` broke on any long code line,
-            // which pandoc never does.
-            out.push(STOP);
-            escape_code_block(out, text);
-            out.push_str("</code></pre>");
-        }
+        Block::CodeBlock(attr, text) => write_code_block(out, attr, text, ctx),
         Block::RawBlock(format, text) => {
             if format.0 == "html" {
                 // The literal keeps its own trailing newline; with the block
@@ -748,7 +794,7 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
         }
         Block::BlockQuote(blocks) => {
             out.push_str("<blockquote>\n");
-            write_blocks_joined(out, blocks, sections);
+            write_blocks_joined(out, blocks, ctx);
             out.push_str("\n</blockquote>");
         }
         Block::BulletList(items) => {
@@ -764,7 +810,7 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
             } else {
                 out.push_str("<ul>\n");
             }
-            write_list_items(out, items, sections);
+            write_list_items(out, items, ctx);
             out.push_str("</ul>");
         }
         Block::OrderedList(attrs, items) => {
@@ -776,7 +822,7 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
                 let _ = write!(out, "{BREAK}type=\"{t}\"");
             }
             out.push_str(">\n");
-            write_list_items(out, items, sections);
+            write_list_items(out, items, ctx);
             out.push_str("</ol>");
         }
         Block::DefinitionList(items) => {
@@ -787,7 +833,7 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
                 out.push_str("</dt>\n");
                 for definition in definitions {
                     out.push_str("<dd>\n");
-                    write_blocks_joined(out, definition, sections);
+                    write_blocks_joined(out, definition, ctx);
                     out.push_str("\n</dd>\n");
                 }
             }
@@ -806,16 +852,16 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
             }
             out.push_str("</div>");
         }
-        Block::Div(attr, blocks) => write_div(out, attr, blocks, sections),
+        Block::Div(attr, blocks) => write_div(out, attr, blocks, ctx),
         Block::Figure(attr, caption, blocks) => {
             out.push_str("<figure");
             write_attr(out, attr);
             out.push_str(">\n");
-            write_blocks_joined(out, blocks, sections);
-            write_figcaption(out, caption, sections);
+            write_blocks_joined(out, blocks, ctx);
+            write_figcaption(out, caption, ctx);
             out.push_str("\n</figure>");
         }
-        Block::Table(table) => write_table(out, table, sections),
+        Block::Table(table) => write_table(out, table, ctx),
     }
 }
 
@@ -838,10 +884,10 @@ fn write_block(out: &mut String, block: &Block, sections: Sections) {
 /// EPUB and DOCX wrap every heading in one of these, so it is most of
 /// what `ferrodoc -t html` writes from either — and it wrote `<div>`
 /// for all of them until 2026-08-24.
-fn write_div(out: &mut String, attr: &Attr, blocks: &[Block], sections: Sections) {
+fn write_div(out: &mut String, attr: &Attr, blocks: &[Block], ctx: &Ctx) {
     let head = match blocks.first() {
         Some(Block::Header(_, header, _))
-            if header.identifier.is_empty() && sections == Sections::Given =>
+            if header.identifier.is_empty() && ctx.sections == Sections::Given =>
         {
             Some(header)
         }
@@ -854,10 +900,10 @@ fn write_div(out: &mut String, attr: &Attr, blocks: &[Block], sections: Sections
         // header carries it and the wrapper goes.
         let Some(Block::Header(level, _, inlines)) = blocks.first() else { unreachable!() };
         let promoted = Attr { identifier: attr.identifier.clone(), ..head.clone() };
-        write_block(out, &Block::Header(*level, promoted, inlines.clone()), sections);
+        write_block(out, &Block::Header(*level, promoted, inlines.clone()), ctx);
         for block in &blocks[1..] {
             out.push('\n');
-            write_block(out, block, sections);
+            write_block(out, block, ctx);
         }
         return;
     }
@@ -883,11 +929,120 @@ fn write_div(out: &mut String, attr: &Attr, blocks: &[Block], sections: Sections
     let _ = write!(out, "<{tag}");
     write_attr(out, &merged);
     out.push_str(">\n");
-    write_blocks_joined(out, blocks, sections);
+    write_blocks_joined(out, blocks, ctx);
     let _ = write!(out, "\n</{tag}>");
 }
 
-fn write_list_items(out: &mut String, items: &[Vec<Block>], sections: Sections) {
+/// A code block: highlighted where the language is one the highlighter
+/// knows, and otherwise exactly the `<pre class="…"><code>` this wrote
+/// before there was a highlighter at all.
+fn write_code_block(out: &mut String, attr: &Attr, text: &str, ctx: &Ctx) {
+    let number = ctx.next_block();
+    #[cfg(feature = "highlight")]
+    if let Some(language) = attr
+        .classes
+        .iter()
+        .find(|class| highlight::known(class))
+        .filter(|_| ctx.highlighting == Highlighting::Default)
+    {
+        write_highlighted(out, attr, text, language, number);
+        return;
+    }
+    let _ = number;
+    out.push_str("<pre");
+    write_attr(out, attr);
+    out.push_str("><code>");
+    // The **code itself** is one unbreakable piece, and its width does
+    // not enter the decision at the gap before it: pandoc measures a tag
+    // against the column and then appends the element's content whatever
+    // its width. The mark goes after `<code>`, which is still tag text —
+    // measured against 20 columns, `<pre class="bash"><code>` breaks and
+    // `<pre class="bash">` alone does not. Without the mark at all,
+    // `<pre class="rust">` broke on any long code line, which pandoc
+    // never does.
+    out.push(STOP);
+    escape_code_block(out, text);
+    out.push_str("</code></pre>");
+}
+
+/// A code block in a language the highlighter knows, in the shape
+/// pandoc's writer emits. Every part of it was read off the binary:
+///
+/// * the wrapper is `<div class="sourceCode" id="cbN">`, and **the block's
+///   own key-value attributes go on that div** rather than the `<pre>`;
+/// * `cbN` numbers every code block in the document, highlighted or not,
+///   and an explicit identifier replaces it — the line anchors then read
+///   `myid-1` rather than `cb1-1`;
+/// * the `<pre>` carries `sourceCode` and then the block's classes in
+///   the order they were written, untouched — matching a syntax is
+///   case-insensitive but writing the class back is not;
+/// * the `<code>` carries `sourceCode` and the syntax's **canonical**
+///   name, which is not always the one written — `sh` is `bash` there;
+/// * `.numberLines` adds `numberSource` before the classes and takes
+///   `aria-hidden`/`tabindex` off every anchor;
+/// * and an empty block has no line spans at all.
+#[cfg(feature = "highlight")]
+fn write_highlighted(out: &mut String, attr: &Attr, text: &str, language: &str, number: usize) {
+    let numbered = attr.classes.iter().any(|class| class == "numberLines");
+    let id = if attr.identifier.is_empty() {
+        format!("cb{number}")
+    } else {
+        attr.identifier.clone()
+    };
+    // **Class before id on this div**, which is not the order
+    // `write_attr` uses everywhere else — measured, and the one place
+    // pandoc's writer builds the attributes itself.
+    out.push_str("<div");
+    write_classes(out, &Attr { classes: vec!["sourceCode".to_owned()], ..Attr::default() });
+    write_id(out, &Attr { identifier: id.clone(), ..Attr::default() });
+    for (key, value) in &attr.attributes {
+        write_kv(out, key, value);
+    }
+    out.push('>');
+
+    let mut classes = vec!["sourceCode".to_owned()];
+    if numbered {
+        classes.push("numberSource".to_owned());
+    }
+    // The classes as they were written: the *reader* lowercases a
+    // fence's info string, the writer does not touch it, and `{.C}`
+    // written out by hand stays `C` here and matches `c` all the same.
+    classes.extend(attr.classes.iter().cloned());
+    out.push_str("<pre");
+    write_attr(out, &Attr { classes, ..Attr::default() });
+    out.push_str("><code");
+    write_attr(
+        out,
+        &Attr {
+            classes: vec!["sourceCode".to_owned(), highlight::canonical(language).to_owned()],
+            ..Attr::default()
+        },
+    );
+    out.push('>');
+    // The code is one unbreakable piece, as it is without highlighting.
+    out.push(STOP);
+
+    let body = text.strip_suffix('\n').unwrap_or(text);
+    if !body.is_empty() {
+        let mut state = highlight::State::default();
+        for (index, source) in body.split('\n').enumerate() {
+            if index > 0 {
+                out.push('\n');
+            }
+            let anchor = format!("{id}-{}", index + 1);
+            let _ = write!(out, "<span id=\"{anchor}\"><a href=\"#{anchor}\"");
+            if !numbered {
+                out.push_str(" aria-hidden=\"true\" tabindex=\"-1\"");
+            }
+            out.push_str("></a>");
+            highlight::write_line(out, &highlight::line(source, language, &mut state), escape_code_block);
+            out.push_str("</span>");
+        }
+    }
+    out.push_str("</code></pre></div>");
+}
+
+fn write_list_items(out: &mut String, items: &[Vec<Block>], ctx: &Ctx) {
     for item in items {
         out.push_str("<li>");
         match item.first().and_then(task_box) {
@@ -914,10 +1069,10 @@ fn write_list_items(out: &mut String, items: &[Vec<Block>], sections: Sections) 
                 }
                 for block in &item[1..] {
                     out.push('\n');
-                    write_block(out, block, sections);
+                    write_block(out, block, ctx);
                 }
             }
-            None => write_blocks_joined(out, item, sections),
+            None => write_blocks_joined(out, item, ctx),
         }
         out.push_str("</li>\n");
     }
@@ -952,16 +1107,16 @@ fn list_type(style: ListNumberStyle) -> Option<&'static str> {
     }
 }
 
-fn write_figcaption(out: &mut String, caption: &Caption, sections: Sections) {
+fn write_figcaption(out: &mut String, caption: &Caption, ctx: &Ctx) {
     if caption.blocks.is_empty() {
         return;
     }
     out.push_str("\n<figcaption>");
-    write_blocks_joined(out, &caption.blocks, sections);
+    write_blocks_joined(out, &caption.blocks, ctx);
     out.push_str("</figcaption>");
 }
 
-fn write_table(out: &mut String, table: &Table, sections: Sections) {
+fn write_table(out: &mut String, table: &Table, ctx: &Ctx) {
     out.push_str("<table");
     write_attr(out, &table.attr);
     // A table whose columns carry relative widths says so on the element,
@@ -975,7 +1130,7 @@ fn write_table(out: &mut String, table: &Table, sections: Sections) {
     out.push('>');
     if !table.caption.blocks.is_empty() {
         out.push_str("\n<caption>");
-        write_blocks_joined(out, &table.caption.blocks, sections);
+        write_blocks_joined(out, &table.caption.blocks, ctx);
         out.push_str("</caption>");
     }
     // The column widths a word processor set. Dropping them made every
@@ -997,21 +1152,21 @@ fn write_table(out: &mut String, table: &Table, sections: Sections) {
     if !table.head.rows.is_empty() {
         out.push_str("\n<thead>");
         for row in &table.head.rows {
-            write_table_row(out, row, "th", &table.colspecs, sections);
+            write_table_row(out, row, "th", &table.colspecs, ctx);
         }
         out.push_str("\n</thead>");
     }
     for body in &table.bodies {
         out.push_str("\n<tbody>");
         for row in body.head.iter().chain(&body.body) {
-            write_table_row(out, row, "td", &table.colspecs, sections);
+            write_table_row(out, row, "td", &table.colspecs, ctx);
         }
         out.push_str("\n</tbody>");
     }
     if !table.foot.rows.is_empty() {
         out.push_str("\n<tfoot>");
         for row in &table.foot.rows {
-            write_table_row(out, row, "td", &table.colspecs, sections);
+            write_table_row(out, row, "td", &table.colspecs, ctx);
         }
         out.push_str("\n</tfoot>");
     }
@@ -1023,14 +1178,14 @@ fn write_table_row(
     row: &Row,
     cell_tag: &str,
     colspecs: &[ColSpec],
-    sections: Sections,
+    ctx: &Ctx,
 ) {
     out.push_str("\n<tr>");
     // The column a cell sits in is its position *after* the spans before
     // it, which is what makes the column's alignment findable.
     let mut column = 0usize;
     for cell in &row.cells {
-        write_table_cell(out, cell, cell_tag, colspecs.get(column), sections);
+        write_table_cell(out, cell, cell_tag, colspecs.get(column), ctx);
         column += usize::try_from(cell.col_span).unwrap_or(1).max(1);
     }
     out.push_str("\n</tr>");
@@ -1041,7 +1196,7 @@ fn write_table_cell(
     cell: &Cell,
     tag: &str,
     colspec: Option<&ColSpec>,
-    sections: Sections,
+    ctx: &Ctx,
 ) {
     let _ = write!(out, "\n<{tag}");
     if cell.row_span != 1 {
@@ -1064,7 +1219,7 @@ fn write_table_cell(
         let _ = write!(out, "{BREAK}style=\"text-align: {align};\"");
     }
     out.push('>');
-    write_blocks_joined(out, &cell.blocks, sections);
+    write_blocks_joined(out, &cell.blocks, ctx);
     let _ = write!(out, "</{tag}>");
 }
 
