@@ -104,6 +104,33 @@ documents are proven to have nothing behind the first cause:
 For the other eight `epub-spec` chunks, G2 is a *prerequisite* rather
 than a fix: a second divergence is measurably behind it (table below).
 
+**What `raw_html` actually preserves, measured 2026-08-25.** The name
+suggests a different reading model, and the probe above — a deliberately
+malformed `<p>a <a href="/bar">b</p>` — makes it look like one. Over the
+real chunks it is not: `pandoc -f epub` on `spec-00` emits **3 raw nodes
+out of 186**, and on `corpus-readme-style.epub` **none at all**. Every
+raw node in all twelve failing chunks is one of
+
+| what pandoc kept raw | chunks |
+|---|---|
+| an unclosed or unknown tag — `<foo>`, `<bar attr="](baz)">`, `<warning>`, `<5001 foo>`, and the `<p>`/`<a>` around it | 00, 01, 04, 05, 06, 11, 15, 16, 17, 20, 21 |
+| a stray `</div>` the tree builder discards | 05 |
+| an HTML comment | 06, 10 |
+
+So `raw_html` is **parse-failure recovery with a wider reach**: where
+pandoc cannot structure an inline it stops structuring that whole block
+and emits the surrounding tags verbatim too. Ordinary `<em>` and
+`<div class="foo">` are structured exactly as with the extension off.
+
+That matters for the decision, because it means the `epub-spec` gate is
+measuring the same thing the HTML reader's twenty are — how two parsers
+repair malformed input — and not a capability this reader lacks. **The
+one part that is not parse-failure recovery is the HTML comment**, which
+is a real DOM node and reachable; `spec-10`'s only raw nodes are two of
+them. The stray `</div>` is not reachable at all: `html5ever` discards an
+unmatched end tag before this crate is handed a tree, the same way it
+drops `ElementFlags::self_closing`.
+
 ---
 
 ## Is `epub-spec` 10/22 really the HTML reader? No — not as stated

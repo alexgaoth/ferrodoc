@@ -646,11 +646,40 @@ between them.
 | gate | now | 0.6 |
 |---|---|---|
 | `diff-html-read` | 641/661 | every miss fixed or in the divergence table with a repro |
-| `diff-epub` | 10/12 | the raw-HTML mode decided, so the two are fixed or declared unreachable |
+| `diff-epub` | 10/12 | the raw-HTML mode decided, so the two are fixed or declared unreachable — **measured 2026-08-25**, below |
 | `diff-epub-write` | 8/11 | the three deliberate cases stated as the whole remainder |
 | `diff-docx` / `diff-odt` | **37/37**, 32/34 | ~~the non-deliberate misses fixed~~ — **done 2026-08-25**: the one DOCX miss was an empty list paragraph breaking a list in two; both ODT misses are the declared `G7` |
-| EPUB spec chunks | 8/22 | resolved by the raw-HTML decision, or the gate retired as measuring the wrong thing |
+| EPUB spec chunks | 10/22 | resolved by the raw-HTML decision, or the gate retired as measuring the wrong thing — the measurement says the second |
 | `scripts/sweep-epub-xhtml.sh` | 12 of 128 differ | **zero unrecorded**, which is the real number for the HTML reader |
+
+#### The raw-HTML mode, measured rather than argued — 2026-08-25
+
+The two rows above have waited on one question since this card was
+written, and it was stated as a choice about *output shape*: whether an
+EPUB read here should carry raw HTML the way `pandoc -f epub` does.
+Measured over the real chunks, that is not what the extension does.
+
+`pandoc -f epub` emits **3 raw nodes out of 186** on `spec-00` and
+**none** on `corpus-readme-style.epub`. Ordinary `<em>` and
+`<div class="foo">` are structured with the extension on exactly as with
+it off. Every raw node across all twelve failing chunks is an unclosed or
+unknown tag (`<foo>`, `<bar attr="](baz)">`, `<5001 foo>` — plus the
+`<p>`/`<a>` around it, because pandoc stops structuring the whole block),
+a stray `</div>`, or an HTML comment.
+
+So `raw_html` is **parse-failure recovery with a wider reach**, and this
+gate is measuring the same thing the HTML reader's remaining twenty
+measure — how two parsers repair a malformed document. That is the one
+place this project has a standing decision to diverge, which makes the
+honest resolution *retire the claim that these chunks measure the reader*
+rather than build a mode to chase them.
+
+Two details decide how far it could go if the owner wants it anyway:
+**the HTML comment is reachable** — it is a real DOM node, and
+`spec-10`'s only raw nodes are two of them — and **the stray `</div>` is
+not**, because `html5ever` discards an unmatched end tag before this
+crate is handed a tree, exactly as it drops `ElementFlags::self_closing`.
+`docs/divergences.md` has the per-chunk table.
 
 #### The writer half of this version is **done**, 2026-08-23
 
