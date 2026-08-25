@@ -66,7 +66,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-odt` | ODT reader produces pandoc's AST | **32/34** |
 | `diff-odt` (LibreOffice) | ...on documents *another* writer produced | **8/8** |
 | `diff-odt-write` | ODT writer survives a round trip through pandoc | **13/13** |
-| `diff-epub` | EPUB reader produces pandoc's AST | **10/12** |
+| `diff-epub` | EPUB reader produces pandoc's AST | **11/12** |
 | `diff-epub` (hand-authored) | ...on books in shapes pandoc's writer never emits | **3/3** |
 | `diff-epub-write` | EPUB writer survives a round trip through pandoc | **10/13** |
 | `diff-ipynb` | notebook reader produces pandoc's AST | **8/8** |
@@ -274,9 +274,9 @@ Three corpora, because they measure three different things:
 
 | corpus | what it is | score |
 |---|---|---|
-| `corpus/epub` | pandoc's own output, 12 documents | **10/12** |
+| `corpus/epub` | pandoc's own output, 12 documents | **11/12** |
 | `corpus/epub-handmade` | books in shapes pandoc's writer never emits | **3/3** |
-| `corpus/epub-spec` | 22 files of 30 spec examples each | 10/22 |
+| `corpus/epub-spec` | 22 files of 30 spec examples each | 11/22 |
 
 The last is not a fidelity claim and is not averaged into the others. Each
 of its files bundles 30 spec examples, so **one** of the HTML reader's 26
@@ -674,6 +674,14 @@ only where matching would mean reproducing a parse failure*:
 - An `<a href="…"></a>` with no text is **kept**. Dropping it would match
   pandoc on unclosed `<a>` tags but delete a well-formed empty anchor, which
   real pages use as jump targets.
+- **An HTML comment is kept when reading an EPUB and dropped when
+  reading a page.** That is where pandoc puts the line — its EPUB reader
+  runs the HTML reader with `raw_html` enabled and `-f html` does not, so
+  a comment survives one and not the other — and it is the only part of
+  that extension this reader can reach, a comment being a real DOM node
+  where a stray `</div>` is discarded before the tree exists. It is worth
+  `diff-epub` 10/12 → **11/12** and the spec chunks 10/22 → **11/22**;
+  `docs/divergences.md` has what the rest of `raw_html` would cost.
 - **`<![CDATA[ … ]]>` is read as text and `<? … ?>` is dropped**, which is
   what pandoc does and what the XML says. An HTML5 tokenizer reads both as
   a bogus comment ending at the **first `>`** — inside the content whenever

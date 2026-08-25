@@ -117,7 +117,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-odt` reader | **32/34** corpus documents produce identical ASTs, and **8/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-odt` writer | **640/652** spec examples survive an ODT round trip identically, with embedded images |
-| `ferrodoc-epub` reader | **10/12** corpus documents produce identical ASTs, and **3/3** hand-authored books in layouts pandoc never emits (validated by `epubcheck`) |
+| `ferrodoc-epub` reader | **11/12** corpus documents produce identical ASTs, and **3/3** hand-authored books in layouts pandoc never emits (validated by `epubcheck`) |
 | `ferrodoc-latex` writer | every corpus document **compiles with `pdflatex`** in CI |
 | `ferrodoc-rst` writer | every corpus document is accepted by **`sphinx-build -W`** |
 | `ferrodoc-asciidoc` writer | every corpus document is accepted by **`asciidoctor --failure-level=WARN`** |

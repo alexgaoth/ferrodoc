@@ -24,14 +24,14 @@ excluded on purpose: pandoc itself scores 1/13 and 4/13 on the same
 corpus, so their failures measure the format, not this project, and 20
 more rows of "the format cannot hold it" would drown the signal.
 
-That leaves **42 documents** across nine gates, re-counted 2026-08-25:
+That leaves **40 documents** across nine gates, re-counted 2026-08-25:
 
 | gate | score | failing documents |
 |---|---|---|
 | HTML reader (`diff-html-read`) | 641/661 | 20 |
-| EPUB reader, spec chunks (`diff-epub`) | 10/22 | 12 |
+| EPUB reader, spec chunks (`diff-epub`) | 11/22 | 11 |
 | EPUB writer (`diff-epub-write`) | 10/13 | 3 |
-| EPUB reader (`diff-epub`) | 10/12 | 2 |
+| EPUB reader (`diff-epub`) | 11/12 | 1 |
 | ODT reader (`diff-odt`) | 32/34 | 2 |
 | GFM reader, spec (`diff-gfm`) | 651/652 | 1 |
 | DOCX reader (`diff-docx`) | 37/37 | 0 |

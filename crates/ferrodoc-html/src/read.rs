@@ -33,7 +33,7 @@ pub const MAX_NESTING: usize = 200;
 /// [`MAX_NESTING`]. Malformed markup is not an error — it is repaired the
 /// way a browser repairs it.
 pub fn read_html(input: &str) -> Result<Pandoc, Error> {
-    read(input, true)
+    read(input, true, false)
 }
 
 /// Read HTML **without generating identifiers for headings**.
@@ -47,10 +47,10 @@ pub fn read_html(input: &str) -> Result<Pandoc, Error> {
 ///
 /// The same as [`read_html`].
 pub fn read_html_without_generated_identifiers(input: &str) -> Result<Pandoc, Error> {
-    read(input, false)
+    read(input, false, true)
 }
 
-fn read(input: &str, generate_identifiers: bool) -> Result<Pandoc, Error> {
+fn read(input: &str, generate_identifiers: bool, keep_comments: bool) -> Result<Pandoc, Error> {
     let source = close_self_closing(&restore_verbatim_newline(&expand_tabs(input)));
     // Scripting off, so a `<noscript>` holds markup rather than the raw
     // text a browser would leave unparsed. Its content is content — it is
@@ -69,7 +69,7 @@ fn read(input: &str, generate_identifiers: bool) -> Result<Pandoc, Error> {
     // Endnotes are collected first: a reference almost always precedes
     // the section that defines it, so one pass cannot resolve them.
     let notes = endnotes(&dom.document, generate_identifiers);
-    let mut reader = Reader { generate_identifiers, notes, ..Reader::default() };
+    let mut reader = Reader { generate_identifiers, keep_comments, notes, ..Reader::default() };
     let body = body(&dom.document).unwrap_or_else(|| dom.document.clone());
     // A page that marks its main content is read as that content alone,
     // which is how pandoc reads one — and the whole reason this is useful
@@ -98,6 +98,12 @@ struct Reader {
     /// when reading an EPUB's chapters — see
     /// [`read_html_without_generated_identifiers`].
     generate_identifiers: bool,
+    /// Whether an HTML comment is kept as a `RawInline`. **On for an
+    /// EPUB and off for a page**, because that is where pandoc puts the
+    /// line: its EPUB reader runs the HTML reader with `raw_html`
+    /// enabled and `-f html` does not, so a comment survives one and not
+    /// the other. Two documents in the corpus differ in nothing else.
+    keep_comments: bool,
     /// Whether the nodes being read sit below a `<li>`, where an
     /// `<input type="checkbox">` is a task-list box — see [`Reader::items`].
     inside_a_list_item: bool,
@@ -114,6 +120,7 @@ impl Default for Reader {
             used_idents: HashSet::new(),
             next_suffix: HashMap::new(),
             generate_identifiers: true,
+            keep_comments: false,
             inside_a_list_item: false,
             notes: HashMap::new(),
         }
@@ -418,6 +425,13 @@ impl Reader {
                 let result = self.element(&tag, node, &kids, out);
                 self.depth -= 1;
                 return result;
+            }
+            NodeData::Comment { contents } if self.keep_comments => {
+                out.push(Inline::RawInline(
+                    Box::new(ferrodoc_ast::Format("html".into())),
+                    format!("<!--{contents}-->"),
+                ));
+                return Ok(());
             }
             _ => {}
         }

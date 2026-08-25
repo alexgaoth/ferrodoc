@@ -187,7 +187,7 @@ if [ "$want_gates" = 1 ]; then
     gate "ODT reader"           $HARNESS diff-odt        corpus/odt --fail-under 94
     gate "ODT reader (LO)"      $HARNESS diff-odt        corpus/odt-libreoffice --fail-under 100
     gate "ODT writer"           $HARNESS diff-odt-write  corpus --fail-under 100
-    gate "EPUB reader"          $HARNESS diff-epub       corpus/epub --fail-under 83
+    gate "EPUB reader"          $HARNESS diff-epub       corpus/epub --fail-under 91
     # Books in shapes pandoc's own writer never emits: EPUB 2, an OEBPS
     # layout, a spine that is not the file order, a non-linear cover, a
     # percent-encoded href. Gated at 100 because it is small and every one
@@ -196,7 +196,7 @@ if [ "$want_gates" = 1 ]; then
     # The spec chunks measure the HTML reader compounding, not the EPUB
     # layer — see corpus/epub-spec/generate.sh. A *drop* is still a
     # regression, so the level is held.
-    gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 36
+    gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 50
     # Notebooks in the shape Jupyter and Colab write them — nbformat
     # 4.5 with cell ids, streams, execute_results, a base64 `image/png`
     # display_data and an ANSI-coloured traceback — none of which
