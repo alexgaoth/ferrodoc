@@ -70,10 +70,17 @@ floor_for() {
         latex)    echo 11 ;;
         asciidoc) echo 11 ;;
         gfm)      echo 7 ;;
-        # `-t markdown` here is CommonMark and there is pandoc's own
-        # dialect, so this row measures the dialect gap on the writer
-        # side. It moves when `pandoc_markdown` does, not when the writer
-        # does — see ROADMAP card D4.4.
+        # The like-for-like row: `-t markdown` here **is** CommonMark, so
+        # pandoc's `commonmark` writer is the writer to compare it with.
+        # Its two misses are pandoc losing a code block that opens a
+        # blockquote or a list item — both come back as paragraphs
+        # through pandoc's own round trip, and through neither of this
+        # one's. Added 2026-08-25.
+        commonmark) echo 6 ;;
+        # And the row that keeps the other question honest: a real
+        # `pandoc -t markdown` command line gets pandoc's dialect, and
+        # this is how far that is. It moves when `pandoc_markdown` does,
+        # not when the writer does — see ROADMAP card D4.4.
         markdown) echo 3 ;;
         *)        echo 0 ;;
     esac
@@ -93,11 +100,15 @@ summary=""
 # bug class: a gate cannot fail on a construct its corpus lacks. The `gfm`
 # pass is the same comparison over `corpus/gfm/*.gfm`, which holds tables
 # with every alignment, task lists, and footnotes.
-for format in html markdown gfm latex rst asciidoc plain; do
+# `commonmark` and `markdown` are the same ferrodoc writer measured
+# against two different pandoc writers — see `floor_for` above.
+for format in html commonmark markdown gfm latex rst asciidoc plain; do
     case "$format" in
         html|plain) wrap=none ;;
         *) wrap=preserve ;;
     esac
+    mine=$format
+    [ "$format" != commonmark ] || mine=markdown
     same=0 total=0
     for source in "commonmark corpus/*.md" "gfm corpus/gfm/*.gfm"; do
         read -r from pattern <<<"$source"
@@ -106,7 +117,7 @@ for format in html markdown gfm latex rst asciidoc plain; do
             ( ulimit -v 6000000
               pandoc "$doc" -f "$from" -t "$format" --wrap="$wrap" \
                   --syntax-highlighting=none ) > "$work/p" 2>/dev/null
-            "$FERRODOC" "$doc" -f "$from" -t "$format" --wrap="$wrap" \
+            "$FERRODOC" "$doc" -f "$from" -t "$mine" --wrap="$wrap" \
                   --no-highlight > "$work/f" 2>/dev/null
             if diff -q "$work/p" "$work/f" >/dev/null; then
                 same=$((same + 1))

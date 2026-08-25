@@ -657,6 +657,7 @@ in that order:
 | `latex` | 0/8 | 11/12 | 11 |
 | `asciidoc` | 2/8 | 11/12 | 11 |
 | `gfm` | 3/8 | 7/12 | 7 |
+| `commonmark` | — | 6/12 | 6 |
 | `markdown` | 1/8 | 3/12 | 3 |
 
 The corpus grew from eight documents to twelve on the way, and that is

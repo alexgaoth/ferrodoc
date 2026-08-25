@@ -577,12 +577,15 @@ impl Writer {
             let inner = if self.columns.is_some() { indent.as_str() } else { "" };
             let mut body = String::new();
             self.depth += 1;
-            // An item of **one** block has nothing after it to be
-            // confused with, so a code block there can be indented; an
-            // item with more blocks cannot, because the content after the
-            // marker's own column reads back a space wider than it was.
-            // `CommonMark` examples 273, 274 and 324 are the documents.
-            self.item_start = item.len() > 1;
+            // A code block cannot open a list item as four spaces,
+            // whatever else the item holds: the marker is padded to its
+            // own column (`3.  `), and four spaces past a padded marker
+            // read back one space wider than they were written. An item
+            // of one block was exempt from this until 2026-08-25, and
+            // `corpus/truncation-cases.md` is where the lost space
+            // showed — in this writer's own round trip, not pandoc's.
+            // `CommonMark` examples 273, 274 and 324 are the rest.
+            self.item_start = true;
             if tight {
                 let mut previous: Option<&Block> = None;
                 for block in item {

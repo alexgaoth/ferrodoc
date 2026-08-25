@@ -1053,6 +1053,7 @@ directly without asking its reader to survive anything.
 | `latex` | 11/12 | 11 |
 | `asciidoc` | 11/12 | 11 |
 | `gfm` | 7/12 | 7 |
+| `commonmark` | 6/12 | 6 |
 | `markdown` | 3/12 | 3 |
 
 Twelve documents: the eight in `corpus/` read as CommonMark, and the four
@@ -1070,10 +1071,19 @@ this printed a number and gated nothing while the numbers were low; it is
 a contract now that five of the seven are at the whole corpus or one
 document from it.
 
-`markdown` is the odd row and stays low for a stated reason: `-t markdown`
-is CommonMark here and pandoc's own dialect there, so that row measures
-the dialect gap on the writer side and moves when `pandoc_markdown` does
-rather than when the writer does — ROADMAP card D4.4.
+`commonmark` and `markdown` are **the same ferrodoc writer** measured
+against two different pandoc writers, and the pair is the honest way to
+report it. `-t markdown` is CommonMark here and pandoc's own dialect
+there, so the `markdown` row measures the dialect gap on the writer side
+and moves when `pandoc_markdown` does rather than when the writer does —
+ROADMAP card D4.4. The `commonmark` row asks the writer's own question,
+and its two misses are **pandoc losing information**: a code block that
+opens a blockquote or a list item comes back from pandoc's own round trip
+as a paragraph, and from this one as a code block. The list-item half of
+that was this writer's bug too until 2026-08-25 — four spaces past a
+marker padded to `3.  ` read back one space wider than they were
+written — and `corpus/truncation-cases.md` is the document that showed
+it.
 
 Six writers went from 2/12–7/12 to where they are on **fifty-one measured
 spellings**, each probed against the pinned binary a character or a
