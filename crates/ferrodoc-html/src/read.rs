@@ -1756,7 +1756,7 @@ fn close_self_closing(input: &str) -> String {
             let end = rest
                 .to_ascii_lowercase()
                 .find(&format!("</{bare}"))
-                .map_or(rest.len(), |index| index);
+                .unwrap_or(rest.len());
             out.push_str(&rest[..end]);
             rest = &rest[end..];
             continue;
