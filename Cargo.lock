@@ -192,6 +192,7 @@ version = "0.2.0"
 dependencies = [
  "comrak",
  "ferrodoc-ast",
+ "ferrodoc-html",
  "serde_json",
 ]
 

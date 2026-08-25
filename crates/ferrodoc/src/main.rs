@@ -121,8 +121,8 @@ const USAGE_TAIL: &str = "    `markdown` here is **CommonMark**, which is not wh
 
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
     and bare-URL links. Prefer it over `markdown` for anything with a
-    table — CommonMark has no table syntax, so a table degrades there to
-    one paragraph per cell.
+    table — CommonMark has no table syntax, so a table is written there
+    as the raw `<table>`, which keeps it but is not pretty.
 
 EXAMPLES:
     ferrodoc README.md -o readme.html

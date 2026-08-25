@@ -308,7 +308,7 @@ measuring went:
 `dropin.sh` went **4/48 to 8/48** the day the default flipped, and the
 fill left its attribution entirely: what `--attribute` blamed on 23 of 44
 misses is gone, leaving the dialect (18) and highlighting (9).
-`samples/` went from four byte-identical to **nine of fifteen**, and
+`samples/` went from four byte-identical to **ten of fifteen**, and
 `samples/generate.sh` no longer runs pandoc twice and keeps the closer
 output — a workaround it needed for exactly this.
 
@@ -345,16 +345,20 @@ name standalone HTML as an exception the way it names citations.
 Updated 2026-08-24, after the writers were brought to pandoc's bytes and
 the wrap default flipped. **`8/48`, with no refusals at all**, and —
 the number that matters more — `scripts/dropin.sh --attribute` puts
-**29 of the 37 misses** on one of two remaining global decisions:
+**32 of the 37 misses** on one of two remaining global decisions:
 
 | decision | rows it alone would fix |
 |---|---|
 | ~~pandoc's 72-column fill (D4.3)~~ | **done** — it was 23 |
-| `-f markdown` meaning pandoc's dialect (D4.4) | 18 |
+| `markdown` meaning pandoc's dialect (D4.4) | 21 |
 | ~~syntax highlighting (0.7)~~ | **done for C, Python and bash** — 2 |
 | both together | 9 |
 
-The remaining 7 need something neither explains, plus one difference this
+The dialect row counts the **writer** side since 2026-08-25: `-t markdown`
+gets pandoc's dialect on the way out as surely as `-f markdown` does on
+the way in, and the experiment had only ever neutralised the reader.
+
+The remaining 4 need something neither explains, plus one difference this
 project keeps on purpose. That bucket is the useful signal: it is a
 **third** cause rather than more of the first two, and nobody has looked
 at what it is.

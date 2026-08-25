@@ -14,6 +14,10 @@ readme = "../../README.md"
 
 [dependencies]
 ferrodoc-ast = { workspace = true }
+# A table has no CommonMark spelling, so the writer falls back to the raw
+# HTML pandoc falls back to — which is this crate's own writer, byte for
+# byte. No cycle: `ferrodoc-html` does not depend on this.
+ferrodoc-html = { workspace = true, default-features = false }
 comrak = { workspace = true }
 
 [dev-dependencies]

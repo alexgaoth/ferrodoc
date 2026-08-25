@@ -84,7 +84,11 @@ A bare autolink: <https://example.com/status>. An email:
 
 An image: ![the logo](logo.png "Project logo")
 
+<div class="callout">
+
 Raw HTML block, which not every target format can hold.
+
+</div>
 
 Nested quoting:
 

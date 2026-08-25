@@ -72,11 +72,12 @@ floor_for() {
         gfm)      echo 7 ;;
         # The like-for-like row: `-t markdown` here **is** CommonMark, so
         # pandoc's `commonmark` writer is the writer to compare it with.
-        # Its two misses are pandoc losing a code block that opens a
-        # blockquote or a list item — both come back as paragraphs
-        # through pandoc's own round trip, and through neither of this
-        # one's. Added 2026-08-25.
-        commonmark) echo 6 ;;
+        # It went 3 to 8 the day it was asked separately, and all four
+        # misses left are pandoc losing information — a code block that
+        # opens a blockquote or a list item comes back from its own round
+        # trip as a paragraph, and its `<!-- -->` list separator comes
+        # back as a `RawBlock` that was never in the document.
+        commonmark) echo 8 ;;
         # And the row that keeps the other question honest: a real
         # `pandoc -t markdown` command line gets pandoc's dialect, and
         # this is how far that is. It moves when `pandoc_markdown` does,

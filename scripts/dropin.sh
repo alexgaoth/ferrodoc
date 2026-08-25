@@ -122,6 +122,20 @@ attribute_miss() {
         case "$input" in *.md|*.markdown|*.pmd) from=markdown ;; esac
     fi
     case "$from" in markdown|markdown[+-]*) dialect_applies=1 ;; esac
+    # …and wherever it is the **output** format, which the experiment did
+    # not model until 2026-08-25. `-t markdown` gets pandoc's dialect on
+    # the way out — heading identifiers, fenced divs, `smart`'s `---` and
+    # `\'` — and two rows sat in the remainder bucket being nothing else.
+    local to=
+    to=$(printf '%s\n' $args | awk '
+        /^--to=/ { sub(/^--to=/, ""); t = $0; next }
+        take     { t = $0; take = 0; next }
+        $0 == "-t" || $0 == "--to" { take = 1 }
+        END { print t }')
+    if [ -z "$to" ]; then
+        case " $args " in *-o*) case "$args" in *.md*|*.markdown*) to=markdown ;; esac ;; esac
+    fi
+    case "$to" in markdown|markdown[+-]*) dialect_applies=1 ;; esac
     for combination in \
         "highlighting" "wrap=none" "wrap=preserve" "dialect" \
         "highlighting+wrap=none" "highlighting+wrap=preserve" \
@@ -142,7 +156,10 @@ attribute_miss() {
         esac
         case "$combination" in *wrap=none*) try_p="$try_p --wrap=none" ;;
                                *wrap=preserve*) try_p="$try_p --wrap=preserve" ;; esac
-        case "$combination" in *dialect*) try_p="$try_p -f commonmark" ;; esac
+        case "$combination" in *dialect*)
+            case "$from" in markdown|markdown[+-]*) try_p="$try_p -f commonmark" ;; esac
+            case "$to" in markdown|markdown[+-]*) try_p="$try_p -t commonmark" ;; esac ;;
+        esac
         rm -rf "$dir"; mkdir -p "$dir/p"
         mine="$f_out"
         case "$combination" in *highlighting*)

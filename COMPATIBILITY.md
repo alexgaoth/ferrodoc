@@ -448,12 +448,26 @@ what keeps it measuring the writer:
 - `nbformat_minor` is forced to 5, whatever the document said;
 - a raw cell's `format` metadata is rewritten to `raw_mimetype`.
 
-### Markdown writer — 4 limits of CommonMark itself
+### Markdown writer — the limits of CommonMark itself
 
-**Use `-t gfm`, not `-t markdown`, for anything with a table.** CommonMark
-has no table syntax, so a table becomes one paragraph per cell there and
-the row/column relationship is gone — not recoverable afterwards. GFM
-output keeps it.
+**A construct CommonMark cannot spell is written as the raw HTML pandoc
+writes for it**, and that now covers every one of them. A table used to
+become **one paragraph per cell**, which destroyed the row-and-column
+relationship the document was about; a `Div` used to lose its identifier,
+its classes and every key-value silently. Both are raw HTML since
+2026-08-25, byte-identical to pandoc's, and both round-trip. `-t gfm` is
+still the better answer for a table — a real pipe table beats a `<table>`
+in a markdown file — but the choice is about legibility now rather than
+about losing the document.
+
+One div is pandoc's own and is not written out: classes exactly
+`sourceCode` with a single code block inside is the wrapper pandoc's
+highlighter puts there, and it is unwrapped.
+
+A **footnote** has no CommonMark spelling either, and degrades the way
+pandoc degrades it: `[1]` where the reference stood, the body as ordinary
+blocks after the document. Writing GFM's `[^1]:` into CommonMark output
+produced a file this reader would not read back as a footnote.
 
 Superscript, subscript, underline, small caps and a span carrying
 attributes have no markdown syntax, and are written as raw HTML —
@@ -1053,7 +1067,7 @@ directly without asking its reader to survive anything.
 | `latex` | 11/12 | 11 |
 | `asciidoc` | 11/12 | 11 |
 | `gfm` | 7/12 | 7 |
-| `commonmark` | 6/12 | 6 |
+| `commonmark` | 8/12 | 8 |
 | `markdown` | 3/12 | 3 |
 
 Twelve documents: the eight in `corpus/` read as CommonMark, and the four
@@ -1077,13 +1091,22 @@ report it. `-t markdown` is CommonMark here and pandoc's own dialect
 there, so the `markdown` row measures the dialect gap on the writer side
 and moves when `pandoc_markdown` does rather than when the writer does —
 ROADMAP card D4.4. The `commonmark` row asks the writer's own question,
-and its two misses are **pandoc losing information**: a code block that
-opens a blockquote or a list item comes back from pandoc's own round trip
-as a paragraph, and from this one as a code block. The list-item half of
-that was this writer's bug too until 2026-08-25 — four spaces past a
-marker padded to `3.  ` read back one space wider than they were
-written — and `corpus/truncation-cases.md` is the document that showed
-it.
+and it went 3 to 8 the day it was asked separately: tables, divs and
+footnotes were being lost or mis-spelled where no gate was looking.
+
+**All four misses left are pandoc losing information, each checked by
+round-tripping pandoc's own output through pandoc:**
+
+- A code block that opens a blockquote or a list item comes back from
+  pandoc as a **paragraph**. The list-item half was this writer's bug
+  too until 2026-08-25 — four spaces past a marker padded to `3.  ` read
+  back one space wider than they were written, and
+  `corpus/truncation-cases.md` is the document that showed it.
+- Two adjacent bullet lists need something between them or they merge.
+  Pandoc writes `<!-- -->`; this switches the bullet from `-` to `*`.
+  Pandoc's separator **is a `RawBlock` its own reader gives back**, so
+  `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
+  where a two-block one went in. The bullet switch returns the two.
 
 Six writers went from 2/12–7/12 to where they are on **fifty-one measured
 spellings**, each probed against the pinned binary a character or a

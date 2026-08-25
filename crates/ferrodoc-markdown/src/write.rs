@@ -187,6 +187,25 @@ impl Writer {
         }
     }
 
+    /// One footnote: its label here, its body kept for the end.
+    ///
+    /// GFM spells a footnote `[^1]` and its body `[^1]: …` under a
+    /// continuation indent. `CommonMark` has no footnote at all, so pandoc
+    /// degrades one to a bracketed number, and so does this — writing
+    /// GFM's spelling into `CommonMark` output made a file this reader
+    /// would not read back as a footnote.
+    fn note(&mut self, out: &mut String, blocks: &[Block]) {
+        // Reserve the number before rendering: a note nested inside this
+        // one would otherwise take this one's label.
+        let index = self.notes.len();
+        self.notes.push(String::new());
+        let mut body = String::new();
+        self.blocks(&mut body, blocks, if self.gfm { INDENT } else { "" });
+        self.notes[index] = body;
+        let caret = if self.gfm { "^" } else { "" };
+        let _ = write!(out, "[{caret}{}]", index + 1);
+    }
+
     /// Write the collected footnote bodies, which belong at the very end of
     /// the document.
     ///
@@ -200,11 +219,20 @@ impl Writer {
     fn flush_notes(&mut self, out: &mut String) {
         for (index, body) in std::mem::take(&mut self.notes).iter().enumerate() {
             let body = body.trim_end();
-            // The body was rendered under `INDENT`; pandoc puts the first
-            // line on the label's line and leaves the rest indented.
-            let first = body.strip_prefix(INDENT).unwrap_or(body);
             out.push('\n');
-            let _ = writeln!(out, "[^{}]: {first}", index + 1);
+            if self.gfm {
+                // The body was rendered under `INDENT`; pandoc puts the
+                // first line on the label's line and leaves the rest
+                // indented.
+                let first = body.strip_prefix(INDENT).unwrap_or(body);
+                let _ = writeln!(out, "[^{}]: {first}", index + 1);
+            } else {
+                // CommonMark has no footnote at all, so pandoc degrades
+                // one to a bracketed number and its body to ordinary
+                // blocks after the document — no caret, no colon and no
+                // indent, because none of them would be read back.
+                let _ = writeln!(out, "[{}] {body}", index + 1);
+            }
         }
     }
 
@@ -353,13 +381,37 @@ impl Writer {
                     }
                 }
             }
-            Block::Div(_, blocks) => self.blocks(out, blocks, prefix),
+            // Neither CommonMark nor GFM has a syntax for a div, so
+            // pandoc falls back to the raw HTML tag — for a bare `<div>`
+            // as much as for one carrying attributes, which is where this
+            // differs from a `Span`. Writing only the contents dropped
+            // the identifier, the classes and every key-value silently:
+            // `samples/inputs/attributes.html` is three divs, and the
+            // round trip lost all three until 2026-08-25.
+            // …but not for the wrapper pandoc's *own* highlighting puts
+            // round a code block. Classes exactly `sourceCode` and one
+            // `CodeBlock` inside is that wrapper and nothing else, so it
+            // is unwrapped — a `sourceCode x` div, or one holding a
+            // paragraph, is a document's own div and stays.
+            Block::Div(attr, blocks)
+                if attr.classes == ["sourceCode"]
+                    && matches!(blocks.as_slice(), [Block::CodeBlock(..)]) =>
+            {
+                self.blocks(out, blocks, prefix);
+            }
+            Block::Div(attr, blocks) => {
+                push_line(out, prefix, &format!("<div{}>", html_attributes(attr)));
+                push_line(out, prefix, "");
+                self.blocks(out, blocks, prefix);
+                push_line(out, prefix, "");
+                push_line(out, prefix, "</div>");
+            }
             // A table with no columns has no pipe-table spelling at all —
             // not even an empty one — so it degrades like the rest.
             Block::Table(table) if self.gfm && !table.colspecs.is_empty() => {
                 self.pipe_table(out, table, prefix);
             }
-            Block::Figure(..) | Block::Table(_) => self.unrepresentable(out, block, prefix),
+            Block::Figure(..) | Block::Table(_) => Self::unrepresentable(out, block, prefix),
         }
     }
 
@@ -497,39 +549,21 @@ impl Writer {
 
     /// Blocks `CommonMark` has no syntax for: emit their content rather
     /// than dropping it.
-    fn unrepresentable(&mut self, out: &mut String, block: &Block, prefix: &str) {
-        match block {
-            Block::Figure(_, caption, blocks) => {
-                self.blocks(out, blocks, prefix);
-                if !caption.blocks.is_empty() {
-                    push_line(out, prefix, "");
-                    self.blocks(out, &caption.blocks, prefix);
-                }
-            }
-            Block::Table(table) => {
-                let rows = table
-                    .head
-                    .rows
-                    .iter()
-                    .chain(
-                        table
-                            .bodies
-                            .iter()
-                            .flat_map(|b| b.head.iter().chain(&b.body)),
-                    )
-                    .chain(&table.foot.rows);
-                let mut first = true;
-                for row in rows {
-                    for cell in &row.cells {
-                        if !first {
-                            push_line(out, prefix, "");
-                        }
-                        first = false;
-                        self.blocks(out, &cell.blocks, prefix);
-                    }
-                }
-            }
-            _ => {}
+    /// A block with no markdown spelling at all. Pandoc writes the raw
+    /// HTML for these rather than losing them, and the HTML is this
+    /// crate's own writer's, byte for byte.
+    ///
+    /// A table used to come out as **one paragraph per cell** here,
+    /// which destroyed the row-and-column relationship the document was
+    /// about — "not recoverable afterwards", as `COMPATIBILITY.md` said
+    /// while it was true. The same argument had already been accepted
+    /// for superscript, small caps and a span carrying attributes: they
+    /// degraded to their content until raw HTML replaced it. This is
+    /// that argument, carried to the two blocks it had not reached.
+    fn unrepresentable(out: &mut String, block: &Block, prefix: &str) {
+        let html = ferrodoc_html::write_html(&Pandoc::new(vec![block.clone()]));
+        for line in html.trim_end_matches('\n').split('\n') {
+            push_line(out, prefix, line);
         }
     }
 
@@ -834,16 +868,7 @@ impl Writer {
                     out.push_str(text);
                 }
             }
-            Inline::Note(blocks) => {
-                // Reserve the number before rendering: a note nested inside
-                // this one would otherwise take this one's label.
-                let index = self.notes.len();
-                self.notes.push(String::new());
-                let mut body = String::new();
-                self.blocks(&mut body, blocks, INDENT);
-                self.notes[index] = body;
-                let _ = write!(out, "[^{}]", index + 1);
-            }
+            Inline::Note(blocks) => self.note(out, blocks),
         }
     }
 }
@@ -1670,13 +1695,14 @@ mod tests {
 
     #[test]
     fn gfm_degrades_rather_than_drops() {
-        // A table with no columns has no pipe-table spelling; its content
-        // must still come out.
+        // A table with no columns has no pipe-table spelling, so it is
+        // written as the raw HTML every other unspellable block is.
+        // Pandoc writes `||` here and loses the cell; this keeps it.
         let empty_grid = Pandoc::new(vec![Block::Table(Box::new(Table {
             colspecs: Vec::new(),
             ..one_by_one()
         }))]);
-        assert_eq!(write_gfm(&empty_grid), "a\n");
+        assert!(write_gfm(&empty_grid).contains("<th>a</th>"));
         // `~~` will not open or close against whitespace, so the spaces
         // move outside the delimiters instead of stranding them.
         let spaced = Pandoc::new(vec![Block::Para(vec![

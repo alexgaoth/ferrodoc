@@ -282,7 +282,8 @@ the BSD-3 licence pandoc offers for it: byte-identical output across
 third-party `--template`, checked by `./scripts/flags.sh`.
 
 Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
-no table syntax, so a table degrades to one paragraph per cell there.
+no table syntax, so a table is written there as the raw `<table>` pandoc
+writes, which keeps the document but is not markdown anybody wants to read.
 
 **Line layout is pandoc's**, as of 2026-08-24. Every text writer fills to
 `--columns` (72 by default), keeps the document's own breaks under
@@ -309,9 +310,9 @@ stdout, output files and stderr. **11/48 command lines identical**, with
 pandoc's own features switched off at a time — on **both** sides, since
 this now highlights too — and names the smallest set that makes the two
 agree. Reading `-f markdown` as pandoc's dialect rather than CommonMark
-accounts for **18** misses on its own and **9** more together with syntax
+accounts for **21** misses on its own and **9** more together with syntax
 highlighting, which accounts for **2** by itself. One row is a difference
-this project has decided to keep. That leaves **7**, and most of those
+this project has decided to keep. That leaves **4**, and most of those
 are the same dialect decision from an angle the experiment cannot model — `markdown_github` naming it, a `.pmd` document written in
 it, or `-t markdown` being asked to *write* it. **The number is one
 decision away.**
