@@ -1128,6 +1128,21 @@ round-tripping pandoc's own output through pandoc:**
   `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
   where a two-block one went in. The bullet switch returns the two.
 
+**The `gfm` row's five are the same story**, checked the same way:
+`code-and-raw.md` and `truncation-cases.md` are the code block pandoc
+loses; `extensions.gfm` and `task-list-runs.gfm` are the `<!-- -->`
+separator; and `tables.gfm` is a **pipe inside a cell**. Pandoc writes
+`` `x|y` `` and `[t](u|v)` unescaped, which its own reader then splits at
+the pipe — round-trip `corpus/gfm/tables.gfm` through
+`pandoc -f gfm -t gfm -f gfm` and the code span and the link
+**disappear**. This escapes them, and round-trips.
+
+One `gfm` difference is neither: `[www.example.com](…)` is written with
+the dot escaped here and bare by pandoc. That escape is deliberate and
+load-bearing — **pandoc's own reader linkifies inside link text**, so
+pandoc reads its own output back as a `Link` wrapped around a `Link`,
+and the escape is what holds `diff-gfm-md` at 656/656.
+
 Six writers went from 2/12–7/12 to where they are on **fifty-one measured
 spellings**, each probed against the pinned binary a character or a
 construct at a time rather than read out of the manual. The commit
