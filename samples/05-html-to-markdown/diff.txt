@@ -1,5 +1,5 @@
---- samples/05-html-to-markdown/pandoc.md	2026-08-24 18:04:07.361846153 -0700
-+++ samples/05-html-to-markdown/ferrodoc.md	2026-08-24 18:04:07.323846218 -0700
+--- samples/05-html-to-markdown/pandoc.md	2026-08-24 20:53:39.091918997 -0700
++++ samples/05-html-to-markdown/ferrodoc.md	2026-08-24 20:53:39.060919048 -0700
 @@ -84,12 +84,8 @@
  
  An image: ![the logo](logo.png "Project logo")

@@ -937,7 +937,7 @@ the BSD carve-out this repository vendors the template under does not
 reach it. The spans are written; the colours that would style them are
 not. `samples/15-markdown-to-html-page` is exactly that difference.
 
-### Syntax highlighting — C, and why the list is short
+### Syntax highlighting — C, Python, bash
 
 **Code is highlighted, in pandoc's shape, for the languages named here
 and no others.** A language not on the list degrades to exactly what this
@@ -948,11 +948,13 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 |---|---|---|
 | C | `c` | **2/2** real source files byte-identical |
 | Python | `python`, `python3`, `py` | **4/4** |
+| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines |
 
 `./scripts/highlight.sh` is that gate, and the inputs are the C binding's
-own example and header and every Python file in the tree — 609 lines that
-exist in this repository for other reasons and that nobody wrote to be
-highlighted. **That distinction is
+own example and header and every Python and shell file in the tree —
+2,650 lines that exist in this repository for other reasons and that
+nobody wrote to be highlighted, this project's own harness among them.
+**That distinction is
 the point**: only three of the spec's 652 examples hold a fence in a
 language pandoc knows, nine lines between them, and a highlighter written
 to pass those would be fitted to the fixtures rather than to the
@@ -995,21 +997,47 @@ probed over **python's own vocabulary** — `dir(builtins)` plus
 how `file` came to be missing on the first attempt, and only a real file
 caught it.
 
-It costs **27.7 KB, 0.39% of the binary** for the first language, and is
-a cargo feature (`highlight`, on by default) so a trimmed build can drop
-it.
+All three cost **80.4 KB, 1.16% of the binary** — most of it bash's table
+of 204 command names — and it is a cargo feature (`highlight`, on by
+default) so a trimmed build can drop it.
 
-**Why the list stops here.** The next language by value is `bash`, and it
-is not the same kind of job: its classes are **positional** rather than
-lexical — the first word of a command is `fu` if pandoc knows the
-command, `bu` if it is a shell builtin and `ex` otherwise, a word after
-it is `at` when it starts with `-`, and `;`/`|`/`&&` are `kw` that put
-the scanner back at command position. On top of that sit `$(…)`, `${…}`,
-backticks and heredocs, and a list of known commands that is long and
-arbitrary. A bash highlighter that is *nearly* right is the failure this
-whole approach is built to avoid — plausible colour that is wrong — so it
-waits for the same treatment C and Python got rather than a quick one.
-`samples/06-markdown-to-html` is one bash block and nothing else.
+**bash is a different kind of job, and that is what made it worth
+doing.** Its classes are **positional** rather than lexical: the same
+word is `fu` at the start of a command and plain text one word later, so
+the scanner tracks *where in a command it stands* rather than what it is
+reading. What that costs is a list of rules no amount of reasoning would
+have produced, every one of them read off the pinned binary:
+
+- The first word is `fu` if pandoc knows the command, `bu` for a shell
+  builtin, `ex` otherwise; `;`, `|`, `&&`, `{` and `}` put the scanner
+  back at command position, and so do `if`, `then`, `do` and `!` — but
+  **not `for`**.
+- A bare number is plain text. `exit 1` leaves the `1` uncoloured; only
+  `return`'s number and a number beside a redirection (`2>`, `>&2`) are
+  `dv`, and only inside `$(( … ))` do the ordinary rules for numbers and
+  operators apply.
+- `LANG=C sort file` names a variable, gives its value as plain text, and
+  is **still at command position** for `sort`. `env FOO=1 ./x` on a
+  continuation line is plain throughout, because a line ending in `\`
+  does not start a command.
+- A `case` label is a pattern: `--verbose` is an `ss` there and an `ex`
+  everywhere else, `*` in it is a `pp`, and the `)` closing it is a `kw`
+  while the `)` closing a `$( … )` is a `va`. Telling those apart across
+  lines needs the open-parenthesis and open-substitution counts kept in
+  the scanner's state.
+- `${name}` is five different things depending on its punctuation, and
+  `${x/pat/sub}` colours the pattern `ss` and the replacement plain.
+  `${2:?message}`'s operator is `:?` and stops there; the message is not
+  part of it.
+- A here-document is `st` until its delimiter returns, and expands
+  variables only when the delimiter was unquoted. `$'…'` is a string
+  whose escapes are `dt`; inside `"…"` only `\"`, `\$`, `\\` and
+  `` \` `` are escapes, so `"\t"` is all string.
+
+The command table was probed **one word at a time** — 204 rows — after a
+batched probe came back misaligned and would have coloured 69 words
+wrongly. `samples/06-markdown-to-html` is one bash block and nothing
+else, and it is now byte-identical to pandoc's.
 
 **There is a second oracle, and it had never been used.** Pandoc *writes*
 LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared
@@ -1787,7 +1815,7 @@ Measured on this machine, at the commit that added the features:
     ./bindings/wasm/build.sh --no-default-features --features ferrodoc/markdown,ferrodoc/html
     target/wasm32-unknown-unknown/release/ferrodoc_wasm.wasm  1162137 bytes (402019 gzipped)
 
-That is **59%** of the gzipped module for markdown plus HTML, and 60% of
+That is **58%** of the gzipped module for markdown plus HTML, and 60% of
 the CLI binary (6,408,248 → 3,871,424). comrak and html5ever are what
 remains and neither can be dropped while those two formats are wanted, so
 this is close to the floor for a build that still converts anything.

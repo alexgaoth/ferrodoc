@@ -308,7 +308,7 @@ measuring went:
 `dropin.sh` went **4/48 to 8/48** the day the default flipped, and the
 fill left its attribution entirely: what `--attribute` blamed on 23 of 44
 misses is gone, leaving the dialect (18) and highlighting (9).
-`samples/` went from four byte-identical to **eight of fifteen**, and
+`samples/` went from four byte-identical to **nine of fifteen**, and
 `samples/generate.sh` no longer runs pandoc twice and keeps the closer
 output — a workaround it needed for exactly this.
 
@@ -345,18 +345,19 @@ name standalone HTML as an exception the way it names citations.
 Updated 2026-08-24, after the writers were brought to pandoc's bytes and
 the wrap default flipped. **`8/48`, with no refusals at all**, and —
 the number that matters more — `scripts/dropin.sh --attribute` puts
-**21 of the 40 misses** on one of two remaining global decisions:
+**29 of the 37 misses** on one of two remaining global decisions:
 
 | decision | rows it alone would fix |
 |---|---|
 | ~~pandoc's 72-column fill (D4.3)~~ | **done** — it was 23 |
 | `-f markdown` meaning pandoc's dialect (D4.4) | 18 |
-| syntax highlighting (0.7) | 9 |
+| ~~syntax highlighting (0.7)~~ | **done for C, Python and bash** — 2 |
+| both together | 9 |
 
-Some rows need both, which is why the column sums past 21. The remaining
-19 need something neither explains, and that bucket has not moved since
-the writer work — which is the useful signal: it is a **third** cause
-rather than more of the first two, and nobody has looked at what it is.
+The remaining 7 need something neither explains, plus one difference this
+project keeps on purpose. That bucket is the useful signal: it is a
+**third** cause rather than more of the first two, and nobody has looked
+at what it is.
 
 So the order that follows from the measurement is: **the dialect, then
 highlighting, then read the nineteen**. Neither of the two is a flag any
@@ -702,7 +703,7 @@ holds its floor.
 
 **Not this version:** `--listings`, KaTeX/MathJax/MathML output modes.
 
-#### Where this stands, 2026-08-24 — **C ships, and the method is (c)**
+#### Where this stands, 2026-08-24 — **C, Python and bash ship; the method is (c)**
 
 There was a third option, and it is the one this repository already uses
 everywhere else: **derive the tables by probing the pinned binary**, and
@@ -713,9 +714,10 @@ runs the C binding's own example and header, 150 lines that exist here
 for other reasons.
 
 **C is byte-identical on both, whole output**: wrapper, line anchors and
-tokens. It cost **27.7 KB, 0.39% of the binary**, and it is a cargo
-feature so a trimmed build drops it — which is the size discipline this
-card asked for, satisfied rather than promised.
+tokens. All three languages together cost **80.4 KB, 1.16% of the
+binary**, and it is a cargo feature so a trimmed build drops it — which
+is the size discipline this card asked for, satisfied rather than
+promised.
 
 `--no-highlight` and `--syntax-highlighting=none` turn it off, any other
 style value is refused by name, and **every gate that mutes pandoc's
@@ -731,7 +733,18 @@ because choosing a probe set by hand is how `file` came to be missing on
 the first attempt and only a real file caught it. **Drop-in 10/48 to
 11/48.**
 
-**Three things are still open, and only one is a tokenizer.**
+**bash followed Python, and it is a different kind of job.** Its classes
+are positional rather than lexical: the same word is `fu` at the start of
+a command and plain text one word later, so the scanner carries *where in
+a command it stands* — plus the open-parenthesis and open-substitution
+counts, which is what tells a `case` label's `)` from a `$( … )`'s across
+lines. **20/20 shell scripts, 2,065 lines, byte-identical**, this
+project's own harness among them; `samples/06` is now identical too.
+The command table was probed **one word at a time**, 204 rows, after a
+batched probe came back misaligned and would have coloured 69 words
+wrongly. The gate is now **26/26 files, 2,650 lines**.
+
+**Two things are still open, and neither is a tokenizer.**
 
 1. **The exit test needs `ruby`, not C.** Of the three spec examples with
    a known language, one is inside an HTML block and never reaches the
@@ -740,14 +753,7 @@ the first attempt and only a real file caught it. **Drop-in 10/48 to
    `at`, `true` is a `dv`, a single-quoted string is `vs` — and there is
    no real Ruby in this repository to gate it on. Writing some would be
    the fixture-fitting this card just avoided.
-2. **`bash` is the next language and a harder kind.** Its classes are
-   positional rather than lexical — the first word of a command is `fu`,
-   `bu` or `ex` depending on what it is, `-x` after it is `at`, and
-   `;`/`|`/`&&` are `kw` that return the scanner to command position —
-   with `$(…)`, `${…}`, backticks and heredocs on top. It is worth one
-   drop-in row and `samples/06`, and it deserves the same treatment C and
-   Python got rather than a quick one.
-3. **The stylesheet is a licence question.** A standalone page with a
+2. **The stylesheet is a licence question.** A standalone page with a
    highlighted block wants 66 lines of CSS, and that CSS is skylighting's
    style rather than `data/templates` — so the BSD carve-out the template
    is vendored under does not reach it. The spans are written; the

@@ -99,7 +99,7 @@ deliberate() {
 # decision exists — measure before adding one.
 attribute_miss() {
     local id="$1" p_args="$2" f_args="$3"
-    local dir="$work/$id.try" combination try_p
+    local dir="$work/$id.try" combination try_p try_f mine
     # The hypothesis is about pandoc's `markdown`, so it applies wherever
     # *that* is the input format however it was named — on the command
     # line, in a defaults file, or inferred from the extension. Skipping
@@ -131,17 +131,32 @@ attribute_miss() {
         case "$combination" in *dialect*) [ "$dialect_applies" = 1 ] || continue ;; esac
         case "$combination" in *wrap*) case " $args " in *--wrap*) continue ;; esac ;; esac
         try_p="$p_args"
-        case "$combination" in *highlighting*) try_p="$try_p --syntax-highlighting=none" ;; esac
+        # Highlighting is switched off on **both** sides. Muting pandoc
+        # alone was right while ferrodoc highlighted nothing; once it
+        # highlighted C, Python and bash the one-sided version blamed
+        # eight rows on a difference that no longer existed.
+        try_f="$f_args"
+        case "$combination" in *highlighting*)
+            try_p="$try_p --syntax-highlighting=none"
+            try_f="$try_f --no-highlight" ;;
+        esac
         case "$combination" in *wrap=none*) try_p="$try_p --wrap=none" ;;
                                *wrap=preserve*) try_p="$try_p --wrap=preserve" ;; esac
         case "$combination" in *dialect*) try_p="$try_p -f commonmark" ;; esac
         rm -rf "$dir"; mkdir -p "$dir/p"
+        mine="$f_out"
+        case "$combination" in *highlighting*)
+            mkdir -p "$dir/f"
+            mine="$dir/f"
+            local ff=${try_f//$f_out/$dir\/f}
+            eval "$FERRODOC $ff" < /dev/null > "$dir/f/stdout" 2> "$dir/f/stderr" || true ;;
+        esac
         local pp=${try_p//$p_out/$dir\/p}
         # stderr too: the main comparison includes it, so leaving it out
         # here made every file list differ and every row "remains".
         eval "( ulimit -v 6000000; pandoc $pp )" \
             < /dev/null > "$dir/p/stdout" 2> "$dir/p/stderr" || continue
-        if diff -rq "$dir/p" "$f_out" >/dev/null 2>&1; then
+        if diff -rq "$dir/p" "$mine" >/dev/null 2>&1; then
             printf 'identical once pandoc drops: %s' "$combination"
             return
         fi

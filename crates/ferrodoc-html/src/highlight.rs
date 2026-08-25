@@ -37,6 +37,8 @@ pub(crate) enum Class {
     Attribute,
     SpecialString,
     Function,
+    Extension,
+    Other,
 }
 
 impl Class {
@@ -61,6 +63,8 @@ impl Class {
             Class::Attribute => "at",
             Class::SpecialString => "ss",
             Class::Function => "fu",
+            Class::Extension => "ex",
+            Class::Other => "ot",
         })
     }
 }
@@ -422,7 +426,100 @@ static PYTHON: Syntax = Syntax {
     escape: Class::Char,
 };
 
-static SYNTAXES: &[&Syntax] = &[&C, &PYTHON];
+/// Bash's words. `fu` is a command pandoc knows and `ex` is one it does
+/// not, so the table decides only the first of those — everything absent
+/// from it is an `ex`, which is why a missing name is a visible
+/// divergence on a real script rather than a silent one.
+static BASH: Syntax = Syntax {
+    canonical: "bash",
+    names: &["bash", "sh", "shell", "zsh", "ksh"],
+    keywords: &[
+        ("alias", Class::BuiltIn), ("apropos", Class::Function), ("ar", Class::Function),
+        ("awk", Class::Function), ("base64", Class::Function),
+        ("basename", Class::Function), ("bash", Class::Function), ("bc", Class::Function), ("bg", Class::BuiltIn),
+        ("bind", Class::BuiltIn), ("break", Class::ControlFlow),
+        ("builtin", Class::BuiltIn), ("cal", Class::Function), ("caller", Class::BuiltIn),
+        ("case", Class::ControlFlow), ("cat", Class::Function), ("cc", Class::Function), ("cd", Class::BuiltIn),
+        ("chattr", Class::Function), ("chgrp", Class::Function),
+        ("chmod", Class::Function), ("chown", Class::Function), ("clear", Class::Function),
+        ("cmp", Class::Function), ("comm", Class::Function), ("command", Class::BuiltIn),
+        ("compgen", Class::BuiltIn), ("complete", Class::BuiltIn),
+        ("continue", Class::ControlFlow), ("coproc", Class::BuiltIn),
+        ("cp", Class::Function), ("cpio", Class::Function), ("crontab", Class::Function),
+        ("csplit", Class::Function), ("cut", Class::Function), ("date", Class::Function),
+        ("dc", Class::Function), ("dd", Class::Function), ("declare", Class::BuiltIn),
+        ("df", Class::Function), ("diff", Class::Function), ("dirname", Class::Function),
+        ("dirs", Class::BuiltIn), ("disown", Class::BuiltIn), ("do", Class::ControlFlow),
+        ("done", Class::ControlFlow), ("du", Class::Function), ("echo", Class::BuiltIn),
+        ("elif", Class::ControlFlow), ("else", Class::ControlFlow),
+        ("enable", Class::BuiltIn), ("env", Class::Function), ("esac", Class::ControlFlow), ("eval", Class::BuiltIn),
+        ("exec", Class::BuiltIn), ("exit", Class::BuiltIn), ("expand", Class::Function),
+        ("export", Class::BuiltIn), ("expr", Class::Function), ("false", Class::Function),
+        ("fc", Class::BuiltIn), ("fg", Class::BuiltIn), ("fi", Class::ControlFlow),
+        ("file", Class::Function), ("find", Class::Function), ("fmt", Class::Function),
+        ("fold", Class::Function), ("for", Class::ControlFlow), ("free", Class::Function),
+        ("ftp", Class::Function), ("function", Class::Keyword), ("fuser", Class::Function),
+        ("gdb", Class::Function), ("getopts", Class::BuiltIn), ("git", Class::Function),
+        ("grep", Class::Function), ("groups", Class::Function), ("gzip", Class::Function),
+        ("hash", Class::BuiltIn), ("head", Class::Function), ("help", Class::BuiltIn),
+        ("hexdump", Class::Function), ("history", Class::BuiltIn),
+        ("iconv", Class::Function), ("id", Class::Function), ("if", Class::ControlFlow),
+        ("install", Class::Function), ("jobs", Class::BuiltIn), ("join", Class::Function),
+        ("kill", Class::BuiltIn), ("killall", Class::Function), ("last", Class::Function),
+        ("ldd", Class::Function), ("less", Class::Function), ("let", Class::BuiltIn),
+        ("ln", Class::Function), ("local", Class::BuiltIn), ("locate", Class::Function),
+        ("logout", Class::BuiltIn), ("lpr", Class::Function), ("ls", Class::Function),
+        ("lsattr", Class::Function), ("make", Class::Function), ("man", Class::Function),
+        ("md5sum", Class::Function), ("mesg", Class::Function), ("mkdir", Class::Function),
+        ("mkfifo", Class::Function), ("mknod", Class::Function),
+        ("mktemp", Class::Function), ("more", Class::Function), ("mount", Class::Function),
+        ("mv", Class::Function), ("nano", Class::Function), ("netstat", Class::Function),
+        ("nice", Class::Function), ("nl", Class::Function), ("nm", Class::Function),
+        ("nohup", Class::Function), ("od", Class::Function), ("paste", Class::Function),
+        ("pathchk", Class::Function), ("perl", Class::Function), ("ping", Class::Function),
+        ("popd", Class::BuiltIn), ("pr", Class::Function), ("printf", Class::BuiltIn),
+        ("ps", Class::Function), ("ptx", Class::Function), ("pushd", Class::BuiltIn),
+        ("pwd", Class::BuiltIn), ("read", Class::BuiltIn), ("readlink", Class::Function),
+        ("readonly", Class::BuiltIn), ("realpath", Class::Function),
+        ("return", Class::ControlFlow), ("rev", Class::Function), ("rm", Class::Function),
+        ("rmdir", Class::Function), ("rsync", Class::Function), ("scp", Class::Function),
+        ("sed", Class::Function), ("select", Class::ControlFlow), ("seq", Class::Function),
+        ("set", Class::BuiltIn), ("sh", Class::Function), ("sha1sum", Class::Function),
+        ("sha256sum", Class::Function), ("shift", Class::BuiltIn),
+        ("shopt", Class::BuiltIn), ("shuf", Class::Function), ("size", Class::Function),
+        ("sleep", Class::Function), ("sort", Class::Function), ("source", Class::BuiltIn),
+        ("split", Class::Function), ("ssh", Class::Function), ("stat", Class::Function),
+        ("strings", Class::Function), ("strip", Class::Function),
+        ("stty", Class::Function), ("sudo", Class::Function), ("suspend", Class::BuiltIn),
+        ("sync", Class::Function), ("tac", Class::Function), ("tail", Class::Function),
+        ("tar", Class::Function), ("tee", Class::Function), ("test", Class::BuiltIn),
+        ("then", Class::ControlFlow), ("time", Class::BuiltIn), ("times", Class::BuiltIn),
+        ("touch", Class::Function), ("tr", Class::Function), ("trap", Class::BuiltIn),
+        ("true", Class::Function), ("tsort", Class::Function), ("tty", Class::Function),
+        ("type", Class::BuiltIn), ("typeset", Class::BuiltIn), ("ulimit", Class::BuiltIn),
+        ("umask", Class::BuiltIn), ("umount", Class::Function),
+        ("unalias", Class::BuiltIn), ("uname", Class::Function),
+        ("unexpand", Class::Function), ("uniq", Class::Function),
+        ("unset", Class::BuiltIn), ("until", Class::ControlFlow),
+        ("unzip", Class::Function), ("updatedb", Class::Function),
+        ("users", Class::Function), ("valgrind", Class::Function), ("vi", Class::Function),
+        ("wait", Class::BuiltIn), ("wall", Class::Function), ("wc", Class::Function),
+        ("wget", Class::Function), ("whatis", Class::Function), ("which", Class::Function),
+        ("while", Class::ControlFlow), ("who", Class::Function),
+        ("whoami", Class::Function), ("write", Class::Function),
+        ("xargs", Class::Function), ("yes", Class::Function), ("zip", Class::Function)
+    ],
+    line_comment: &["#"],
+    block_comment: None,
+    quotes: &[('"', Class::Str), ('\'', Class::Str)],
+    quirks: 0,
+    operators: "",
+    string_prefixes: "",
+    digit_separator: None,
+    escape: Class::SpecialChar,
+};
+
+static SYNTAXES: &[&Syntax] = &[&C, &PYTHON, &BASH];
 
 /// The syntax a fence's language name asks for, if this knows it.
 fn syntax(name: &str) -> Option<&'static Syntax> {
@@ -446,17 +543,51 @@ pub(crate) fn canonical(name: &str) -> &'static str {
 /// Whether the scanner is inside a block comment when the next line
 /// starts. A run of code is highlighted line by line, so the state has
 /// to survive between them.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct State {
     in_block_comment: bool,
     /// Inside a `"""`/`'''` run: the quote character and the class the
     /// run took where it opened, which is a `co` for a docstring.
     open_string: Option<(char, Class)>,
+    /// Bash only: where in a command the scanner stands. Carried
+    /// between lines because a line ending in `\\`, `|` or `&&`
+    /// continues one.
+    position: Position,
+    /// Bash only: inside `[ … ]`, where `-x` is an `ot` rather than the
+    /// `at` it would be after a command.
+    in_test: bool,
+    /// Bash only: between a `case … in` and its `esac`.
+    in_case: bool,
+    /// Bash only: the delimiter of an open here-document, and whether it
+    /// expands variables — which an unquoted delimiter does.
+    heredoc: Option<(String, bool)>,
+    /// Bash only: how many `$( … )` substitutions and how many plain
+    /// `( … )` groups are still open, which together tell a `)` on a
+    /// later line whose it is.
+    subst: usize,
+    parens: usize,
     /// How many `(`, `[` or `{` are still open. A string that opens a
     /// line is a docstring **only at depth zero** — inside a bracket run
     /// it is an ordinary string, which is what a `__all__ = [` list is
     /// full of. Measured three ways round.
     brackets: usize,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            in_block_comment: false,
+            open_string: None,
+            // A code block opens at the start of a command.
+            position: Position::Command,
+            in_test: false,
+            in_case: false,
+            heredoc: None,
+            subst: 0,
+            parens: 0,
+            brackets: 0,
+        }
+    }
 }
 
 /// One line, as a run of `(class, text)` pieces with adjacent pieces of
@@ -465,6 +596,11 @@ pub(crate) fn line(text: &str, name: &str, state: &mut State) -> Vec<(Class, Str
     let Some(syntax) = syntax(name) else {
         return vec![(Class::Normal, text.to_owned())];
     };
+    if std::ptr::eq(syntax, &raw const BASH) {
+        let mut out = Vec::new();
+        bash(text, state, &mut out);
+        return out;
+    }
     let mut out: Vec<(Class, String)> = Vec::new();
     let mut at = 0;
     if let Some((quote, class)) = state.open_string {
@@ -803,6 +939,508 @@ fn interior(rest: &str, syntax: &Syntax, state: &mut State, out: &mut Vec<(Class
     code
 }
 
+/// Bash, which is not table-driven the way C and Python are: **its
+/// classes are positional.** The first word of a command is a `fu` when
+/// pandoc knows the command, a `bu` when it is a shell builtin and an
+/// `ex` when it is neither; a word after it is an `at` when it starts
+/// with `-`, and plain otherwise. `;`, `|`, `&&`, `||`, `&`, `{` and `}`
+/// are `kw` that put the scanner back at command position, and so do
+/// `if`, `then`, `else`, `elif`, `do`, `while` and `until` — but **not**
+/// `for`, whose next word is the loop variable and stays plain.
+///
+/// Every one of those was measured, and so were the corners: `[` and `]`
+/// are `bu` and turn `-x` between them into an `ot`; `name()` is one `fu`
+/// including the parentheses; after `export`, `local`, `read` and their
+/// kind a bare word is a `va`; `>&` is an `op` and the `2` after it a
+/// `dv`.
+fn bash(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
+    if let Some((delimiter, expands)) = state.heredoc.clone() {
+        if text.trim() == delimiter {
+            push(out, Class::Operator, text);
+            state.heredoc = None;
+            return;
+        }
+        let mut at = 0;
+        while at < text.len() {
+            let rest = &text[at..];
+            if expands && rest.starts_with('$') {
+                at = bash_dollar(text, at, state, out);
+                continue;
+            }
+            let stop = if expands { rest.find('$').unwrap_or(rest.len()) } else { rest.len() };
+            push(out, Class::Str, &rest[..stop.max(1)]);
+            at += stop.max(1);
+        }
+        return;
+    }
+    let mut from = 0;
+    if state.open_string.is_some() {
+        let Some(end) = text.find('\'').map(|index| index + 1) else {
+            push(out, Class::Str, text);
+            return;
+        };
+        push(out, Class::Str, &text[..end]);
+        state.open_string = None;
+        from = end;
+    }
+    if !text.trim_end().ends_with('\\') {
+        // A line that does not continue starts a command on the next.
+        bash_code(text, from, state, out, 0);
+        if state.open_string.is_none() {
+            // A pattern the `)` has not closed yet outlives the line.
+            if state.position != Position::Pattern {
+                state.position = Position::Command;
+            }
+            state.in_test = false;
+        }
+        return;
+    }
+    bash_code(text, from, state, out, 0);
+}
+
+/// Words after which a bare word is a variable name rather than a value.
+fn names_variables(word: &str) -> bool {
+    matches!(
+        word,
+        "export" | "local" | "declare" | "readonly" | "typeset" | "read" | "unset"
+    )
+}
+
+/// Words that put the scanner back at command position.
+fn resumes_command(word: &str) -> bool {
+    matches!(
+        word,
+        "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "break" | "continue"
+    )
+}
+
+/// Scan bash code from `at`, stopping at an unmatched `)` when `depth`
+/// is above zero — which is how a `$( … )` substitution ends.
+/// Where in a command the bash scanner stands. A word is classified
+/// only at the start of a command; between a `case` label's `;;` and
+/// its `)` it is a pattern instead.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Position {
+    Command,
+    Pattern,
+    Word,
+}
+
+/// What one line of bash has said so far — none of it survives the line.
+#[derive(Default)]
+struct Cursor {
+    /// A naming word (`export`, `read`) makes the bare words after it
+    /// variable names rather than values.
+    naming: bool,
+    /// The scanner is in the value of a `name=`, which is plain text.
+    valued: bool,
+    /// That value is a `name=( … )` array, so its whitespace does not
+    /// end it and its parentheses belong to the name.
+    in_array: bool,
+    /// Parentheses opened on this line: a `$( ( … ) | cmd )` closes on
+    /// its own, and one left open at the end closes on a later line.
+    open: usize,
+}
+
+/// Scan bash code from `at`, stopping at an unmatched `)` when `depth`
+/// is above zero — which is how a `$( … )` substitution ends.
+fn bash_code(
+    text: &str,
+    from: usize,
+    state: &mut State,
+    out: &mut Vec<(Class, String)>,
+    depth: usize,
+) -> usize {
+    let mut at = from;
+    let mut cursor = Cursor::default();
+    while at < text.len() {
+        let rest = &text[at..];
+        if depth > 0 && cursor.open == 0 && state.parens == 0 && rest.starts_with(')') {
+            return at;
+        }
+        let byte = rest.as_bytes()[0];
+        if rest.starts_with("esac") && !rest[4..].starts_with(|c: char| c.is_alphanumeric()) {
+            state.position = Position::Command;
+        }
+        if state.position == Position::Pattern && !byte.is_ascii_whitespace() && byte != b'#' {
+            at = bash_pattern(text, at, state, out);
+            continue;
+        }
+        if byte.is_ascii_whitespace() {
+            let run = rest.find(|c: char| !c.is_ascii_whitespace()).unwrap_or(rest.len());
+            push(out, Class::Normal, &rest[..run]);
+            at += run;
+            if cursor.valued && !cursor.in_array {
+                cursor.valued = false;
+                state.position = if cursor.naming { Position::Word } else { Position::Command };
+            }
+            continue;
+        }
+        if byte == b'#' && (out.is_empty() || out.last().is_some_and(|(_, r)| r.ends_with(' '))) {
+            push(out, Class::Comment, rest);
+            return text.len();
+        }
+        if let Some(next) = bash_punctuation(text, at, state, out, depth) {
+            at = next;
+            continue;
+        }
+        // The operators that end a command and start another.
+        let ends_command = ["&&", "||", ";;", ";", "|", "&"]
+            .into_iter()
+            .find(|word| rest.starts_with(word));
+        if let Some(word) = ends_command {
+            let class = if word == ";;" { Class::ControlFlow } else { Class::Keyword };
+            push(out, class, word);
+            state.position = if word == ";;" && state.in_case {
+                Position::Pattern
+            } else {
+                Position::Command
+            };
+            cursor.naming = false;
+            at += word.len();
+            continue;
+        }
+        if rest.starts_with('=') {
+            let assigns =
+                cursor.valued || out.last().is_some_and(|(class, _)| *class == Class::Attribute);
+            let class = match (state.in_test, assigns) {
+                (true, _) => Class::Other,
+                (false, true) => Class::Operator,
+                (false, false) => Class::Normal,
+            };
+            push(out, class, "=");
+            at += 1;
+            continue;
+        }
+        if byte.is_ascii_digit() {
+            let run = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            if returning(out) || rest[run..].starts_with(['>', '<']) {
+                push(out, Class::DecVal, &rest[..run]);
+                at += run;
+                continue;
+            }
+        }
+        let word: String = rest
+            .chars()
+            .take_while(|c| !c.is_ascii_whitespace() && !"'\"$;|&<>=()#\\*?".contains(*c))
+            .collect();
+        if word.is_empty() {
+            at += bash_paren(rest, state, &mut cursor, out);
+            continue;
+        }
+        at += word.len();
+        at = bash_word(text, at, &word, state, &mut cursor, out);
+    }
+    state.parens += cursor.open;
+    text.len()
+}
+
+/// The punctuation that reads the same wherever it stands: quotes,
+/// substitutions, redirections and globs. `None` if `at` is not one.
+fn bash_punctuation(
+    text: &str,
+    at: usize,
+    state: &mut State,
+    out: &mut Vec<(Class, String)>,
+    depth: usize,
+) -> Option<usize> {
+    let rest = &text[at..];
+    let byte = rest.as_bytes()[0];
+    if byte == b'\\' {
+        let width = 1 + rest[1..].chars().next().map_or(0, char::len_utf8);
+        push(out, Class::DataType, &rest[..width]);
+        return Some(at + width);
+    }
+    if byte == b'\'' {
+        let Some(end) = rest[1..].find('\'').map(|index| index + 2) else {
+            push(out, Class::Str, rest);
+            state.open_string = Some(('\'', Class::Str));
+            return Some(text.len());
+        };
+        push(out, Class::Str, &rest[..end]);
+        state.position = Position::Word;
+        return Some(at + end);
+    }
+    if byte == b'"' || byte == b'$' {
+        let end = if byte == b'"' {
+            bash_string(text, at, state, out)
+        } else {
+            bash_dollar(text, at, state, out)
+        };
+        state.position = Position::Word;
+        return Some(end);
+    }
+    if rest.starts_with("<<") && !rest.starts_with("<<<") {
+        return Some(at + heredoc(rest, state, out));
+    }
+    if rest.starts_with("<(") || rest.starts_with(">(") {
+        push(out, Class::Operator, &rest[..2]);
+        let was = state.position;
+        state.position = Position::Command;
+        let mut end = bash_code(text, at + 2, state, out, depth + 1);
+        state.position = was;
+        if text[end..].starts_with(')') {
+            push(out, Class::Operator, ")");
+            end += 1;
+        }
+        return Some(end);
+    }
+    if rest.starts_with(['>', '<']) {
+        let run = rest.find(|c: char| !">&<".contains(c)).unwrap_or(rest.len());
+        push(out, Class::Operator, &rest[..run]);
+        let digits =
+            text[at + run..].find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len() - at - run);
+        push(out, Class::DecVal, &text[at + run..at + run + digits]);
+        return Some(at + run + digits);
+    }
+    if byte == b'*' || byte == b'?' {
+        let run = rest.find(|c: char| c != '*' && c != '?').unwrap_or(rest.len());
+        push(out, Class::Preprocessor, &rest[..run]);
+        return Some(at + run);
+    }
+    // `[0-9]` globs; a `[` with a space after it is the test builtin.
+    let bracket = rest
+        .strip_prefix('[')
+        .and_then(|tail| tail.find(']'))
+        .filter(|end| !rest[1..=*end].contains(char::is_whitespace))?;
+    push(out, Class::Preprocessor, "[");
+    for piece in rest[1..=bracket].split_inclusive('-') {
+        push(out, Class::SpecialString, piece.trim_end_matches('-'));
+        if piece.ends_with('-') {
+            push(out, Class::Preprocessor, "-");
+        }
+    }
+    push(out, Class::Preprocessor, "]");
+    state.position = Position::Word;
+    Some(at + bracket + 2)
+}
+
+/// A `(` or `)`, which either groups commands or holds an array.
+fn bash_paren(
+    rest: &str,
+    state: &mut State,
+    cursor: &mut Cursor,
+    out: &mut Vec<(Class, String)>,
+) -> usize {
+    let width = rest.chars().next().map_or(1, char::len_utf8);
+    if &rest[..width] == "(" {
+        let valued = cursor.valued;
+        push(out, if valued { Class::Variable } else { Class::Keyword }, "(");
+        cursor.in_array = valued;
+        state.position = if valued { Position::Word } else { Position::Command };
+        cursor.open += 1;
+    } else if &rest[..width] == ")" {
+        // A `)` closes the innermost thing still open: a group from this
+        // line, one from an earlier line, or the `$(` of a substitution,
+        // whose parentheses are its own.
+        let class = if cursor.open > 0 {
+            cursor.open -= 1;
+            if cursor.in_array { Class::Variable } else { Class::Keyword }
+        } else if state.parens > 0 {
+            state.parens -= 1;
+            Class::Keyword
+        } else if state.subst > 0 {
+            state.subst -= 1;
+            Class::Variable
+        } else {
+            Class::Keyword
+        };
+        push(out, class, ")");
+        if cursor.in_array {
+            cursor.in_array = false;
+            cursor.valued = false;
+            state.position = Position::Command;
+        }
+    } else {
+        push(out, Class::Normal, &rest[..width]);
+    }
+    width
+}
+
+/// One word, classified by where it stands. `at` has already passed it.
+fn bash_word(
+    text: &str,
+    at: usize,
+    word: &str,
+    state: &mut State,
+    cursor: &mut Cursor,
+    out: &mut Vec<(Class, String)>,
+) -> usize {
+    let commanding = state.position == Position::Command;
+    // `name()` is one piece, and it is the name of a function.
+    if commanding && text[at..].starts_with("()") {
+        push(out, Class::Function, &format!("{word}()"));
+        return at + 2;
+    }
+    if word == "!" && state.in_test {
+        if text[at..].starts_with('=') {
+            push(out, Class::Other, "!=");
+            return at + 1;
+        }
+        push(out, Class::Other, "!");
+        return at;
+    }
+    // `name=` names a variable; what follows the `=` is its value.
+    let appends = word.ends_with('+') && text[at..].starts_with('=');
+    if (commanding || cursor.naming) && (text[at..].starts_with('=') || appends) {
+        push(out, Class::Variable, word.trim_end_matches('+'));
+        if appends {
+            push(out, Class::Operator, "+");
+        }
+        state.position = Position::Word;
+        cursor.valued = true;
+        return at;
+    }
+    if cursor.naming && !cursor.valued && !word.starts_with('-') {
+        push(out, Class::Variable, word);
+        return at;
+    }
+    if word == "{" || word == "}" {
+        push(out, Class::Keyword, word);
+        state.position = Position::Command;
+        cursor.naming = false;
+        return at;
+    }
+    if word == "[" || word == "]" || word == "[[" || word == "]]" {
+        push(out, Class::BuiltIn, word);
+        state.in_test = word.starts_with('[');
+        state.position = Position::Word;
+        return at;
+    }
+    if commanding && word == "!" {
+        // `! cmd` negates the command, and takes the space with it.
+        let run = text[at..].find(|c: char| !c.is_ascii_whitespace()).unwrap_or(0);
+        push(out, Class::Other, &text[at - 1..at + run]);
+        return at + run;
+    }
+    if commanding {
+        let class = BASH
+            .keywords
+            .binary_search_by_key(&word, |(name, _)| name)
+            .map_or(Class::Extension, |index| BASH.keywords[index].1);
+        push(out, class, word);
+        cursor.naming = names_variables(word);
+        state.position = if resumes_command(word) { Position::Command } else { Position::Word };
+        if word == "case" {
+            state.in_case = true;
+        } else if word == "esac" {
+            state.in_case = false;
+        }
+        return at;
+    }
+    let opens = at == word.len() || text[..at - word.len()].ends_with(char::is_whitespace);
+    if opens && word.starts_with('-') {
+        push(out, if state.in_test { Class::Other } else { Class::Attribute }, word);
+        return at;
+    }
+    if word == "in" {
+        push(out, Class::Keyword, word);
+        state.position = if state.in_case { Position::Pattern } else { state.position };
+        return at;
+    }
+    push(out, Class::Normal, word);
+    at
+}
+
+/// Whether the pieces so far end in a `return`, whose bare number is the
+/// one bare number bash reads as a number.
+fn returning(out: &[(Class, String)]) -> bool {
+    out.iter()
+        .rev()
+        .find(|(_, run)| !run.trim().is_empty())
+        .is_some_and(|(class, run)| *class == Class::ControlFlow && run == "return")
+}
+
+/// A double-quoted run: the quotes and the text are `st`, a `$…` inside
+/// is a `va`, and a `$( … )` inside is code again.
+fn bash_string(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class, String)>) -> usize {
+    push(out, Class::Str, "\"");
+    let mut at = from + 1;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with('"') {
+            push(out, Class::Str, "\"");
+            return at + 1;
+        }
+        if rest.starts_with('$') {
+            at = bash_dollar(text, at, state, out);
+            continue;
+        }
+        if rest.starts_with('\\') && rest[1..].starts_with(['"', '$', '\\', '`']) {
+            push(out, Class::DataType, &rest[..2]);
+            at += 2;
+            continue;
+        }
+        if rest.starts_with('\\') {
+            push(out, Class::Str, &rest[..2.min(rest.len())]);
+            at += 2.min(rest.len());
+            continue;
+        }
+        let stop = rest.find(['"', '$', '\\']).unwrap_or(rest.len());
+        push(out, Class::Str, &rest[..stop.max(1)]);
+        at += stop.max(1);
+    }
+    at
+}
+
+/// `$name`, `${…}` and `$( … )`, all of which are `va` — with the
+/// substitution's contents read as code and its `:-` and friends as `op`.
+fn bash_dollar(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class, String)>) -> usize {
+    let rest = &text[from..];
+    if rest.starts_with("$'") {
+        push(out, Class::Str, "$'");
+        let mut at = from + 2;
+        while at < text.len() {
+            let tail = &text[at..];
+            if tail.starts_with('\'') {
+                push(out, Class::Str, "'");
+                return at + 1;
+            }
+            if tail.starts_with('\\') {
+                push(out, Class::DataType, &tail[..2.min(tail.len())]);
+                at += 2.min(tail.len());
+                continue;
+            }
+            let stop = tail.find(['\'', '\\']).unwrap_or(tail.len());
+            push(out, Class::Str, &tail[..stop]);
+            at += stop;
+        }
+        return at;
+    }
+    if rest.starts_with("$((") {
+        push(out, Class::Variable, "$((");
+        return bash_arith(text, from + 3, out);
+    }
+    if rest.starts_with("$(") {
+        push(out, Class::Variable, "$(");
+        let was = (state.position, state.in_test);
+        state.position = Position::Command;
+        state.in_test = false;
+        state.subst += 1;
+        let end = bash_code(text, from + 2, state, out, 1);
+        (state.position, state.in_test) = was;
+        if text[end..].starts_with(')') {
+            push(out, Class::Variable, ")");
+            state.subst -= 1;
+            return end + 1;
+        }
+        return end;
+    }
+    if rest.starts_with("${") {
+        let close = rest.find('}').unwrap_or(rest.len() - 1);
+        push(out, Class::Variable, "${");
+        bash_braced(&rest[2..close], out);
+        push(out, Class::Variable, "}");
+        return from + close + 1;
+    }
+    let len = rest[1..]
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map_or(rest.len(), |index| index + 1);
+    let len = if len == 1 { 2.min(rest.len()) } else { len };
+    push(out, Class::Variable, &rest[..len]);
+    from + len
+}
+
 /// A stretch of string content, with `{…}` placeholders taken out of it.
 /// Used where a `"""` run continues onto the next line and there is no
 /// opening quote to scan past.
@@ -942,6 +1580,188 @@ pub(crate) fn write_line(out: &mut String, pieces: &[(Class, String)], escape: f
     }
 }
 
+/// The inside of a `$(( … ))`, where a bare name is a variable and the
+/// numbers are numbers.
+fn bash_arith(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize {
+    let mut at = from;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with("))") {
+            push(out, Class::Variable, "))");
+            return at + 2;
+        }
+        if rest.starts_with("${") {
+            at = bash_dollar(text, at, &mut State::default(), out);
+            continue;
+        }
+        let byte = rest.as_bytes()[0];
+        let run = if byte.is_ascii_whitespace() {
+            rest.find(|c: char| !c.is_ascii_whitespace()).unwrap_or(rest.len())
+        } else {
+            rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '$')
+                .unwrap_or(rest.len())
+        };
+        if run == 0 {
+            push(out, Class::Operator, &rest[..1]);
+            at += 1;
+            continue;
+        }
+        let word = &rest[..run];
+        let class = if byte.is_ascii_whitespace() {
+            Class::Normal
+        } else if word.starts_with("0x") || word.starts_with("0X") {
+            Class::BaseN
+        } else if byte.is_ascii_digit() {
+            Class::DecVal
+        } else {
+            Class::Variable
+        };
+        push(out, class, word);
+        at += run;
+    }
+    at
+}
+
+/// The inside of a `${ … }`, which names a variable and then does one
+/// thing to it — measure it, default it, trim it or replace within it.
+fn bash_braced(inner: &str, out: &mut Vec<(Class, String)>) {
+    // `${#name}` measures; every other form names first and operates after.
+    let inner = match inner.strip_prefix('#') {
+        Some(rest) if !rest.is_empty() => {
+            push(out, Class::Operator, "#");
+            rest
+        }
+        _ => inner,
+    };
+    let cut = inner.find([':', '-', '=', '+', '?', '#', '%', '/', '[']).unwrap_or(inner.len());
+    push(out, Class::Variable, &inner[..cut]);
+    let tail = &inner[cut..];
+    let Some(head) = tail.bytes().next() else {
+        return;
+    };
+    if head == b'[' {
+        let end = tail.find(']').map_or(tail.len(), |index| index + 1);
+        push(out, Class::Operator, &tail[..end]);
+        bash_braced(&tail[end..], out);
+        return;
+    }
+    if head == b'/' {
+        // `${name/pattern/replacement}`
+        let op = 1 + usize::from(tail[1..].starts_with('/'));
+        push(out, Class::Operator, &tail[..op]);
+        let end = tail[op..].find('/').map_or(tail.len(), |index| op + index);
+        bash_expanded(&tail[op..end], Class::SpecialString, out);
+        push(out, Class::Operator, &tail[end..(end + 1).min(tail.len())]);
+        bash_expanded(&tail[(end + 1).min(tail.len())..], Class::Normal, out);
+        return;
+    }
+    let op = if head == b':' {
+        1 + usize::from(tail[1..].starts_with(['-', '=', '+', '?']))
+    } else if b"-=+?".contains(&head) {
+        1
+    } else {
+        usize::from(tail[1..].starts_with(head as char)) + 1
+    };
+    push(out, Class::Operator, &tail[..op]);
+    bash_expanded(&tail[op..], Class::Normal, out);
+}
+
+/// Plain text that still expands variables and honours escapes — the
+/// halves of a `${name/pattern/replacement}` and the like.
+fn bash_expanded(text: &str, plain: Class, out: &mut Vec<(Class, String)>) {
+    let mut at = 0;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with('\\') {
+            push(out, Class::DataType, &rest[..2.min(rest.len())]);
+            at += 2.min(rest.len());
+            continue;
+        }
+        if let Some(name) = rest.strip_prefix('$') {
+            let run = name
+                .find(|c: char| !c.is_alphanumeric() && c != '_')
+                .map_or(rest.len(), |index| index + 1);
+            push(out, Class::Variable, &rest[..run.max(1)]);
+            at += run.max(1);
+            continue;
+        }
+        if rest.starts_with('"') {
+            push(out, Class::Str, "\"");
+            at += 1;
+            continue;
+        }
+        if rest.starts_with(['*', '?']) {
+            let run = rest.find(|c: char| c != '*' && c != '?').unwrap_or(rest.len());
+            push(out, Class::Preprocessor, &rest[..run]);
+            at += run;
+            continue;
+        }
+        let stop = rest.find(['$', '\\', '*', '?', '"']).unwrap_or(rest.len());
+        push(out, plain, &rest[..stop]);
+        at += stop;
+    }
+}
+
+/// One `case` pattern, up to the `)` that ends it. A pattern is an `ss`
+/// but for the `*` and `?` that make it a pattern at all.
+fn bash_pattern(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class, String)>) -> usize {
+    let rest = &text[from..];
+    let byte = rest.as_bytes()[0];
+    if byte == b'"' {
+        return bash_string(text, from, state, out);
+    }
+    if byte == b'$' {
+        return bash_dollar(text, from, state, out);
+    }
+    if byte == b'\'' {
+        let end = rest[1..].find('\'').map_or(rest.len(), |index| index + 2);
+        push(out, Class::Str, &rest[..end]);
+        return from + end;
+    }
+    if byte == b')' {
+        push(out, Class::Keyword, ")");
+        state.position = Position::Command;
+        return from + 1;
+    }
+    if byte == b'|' {
+        push(out, Class::Keyword, "|");
+        return from + 1;
+    }
+    if byte == b'*' || byte == b'?' {
+        let run = rest.find(|c: char| c != '*' && c != '?').unwrap_or(rest.len());
+        push(out, Class::Preprocessor, &rest[..run]);
+        return from + run;
+    }
+    let run = rest
+        .find(|c: char| "\"'$)|*?".contains(c) || c.is_ascii_whitespace())
+        .unwrap_or(rest.len());
+    push(out, Class::SpecialString, &rest[..run]);
+    from + run
+}
+
+/// A `<<EOF` marker: the whole of it is one operator, and it opens a
+/// here-document that the next line begins.
+fn heredoc(rest: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> usize {
+    let mut end = 2 + usize::from(rest[2..].starts_with('-'));
+    let quote = rest[end..].chars().next().filter(|c| *c == '\'' || *c == '"');
+    if quote.is_some() {
+        end += 1;
+    }
+    let word = end;
+    end += rest[end..]
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .unwrap_or(rest.len() - end);
+    let delimiter = rest[word..end].to_owned();
+    if quote.is_some_and(|quote| rest[end..].starts_with(quote)) {
+        end += 1;
+    }
+    push(out, Class::Operator, &rest[..end]);
+    if !delimiter.is_empty() {
+        state.heredoc = Some((delimiter, quote.is_none()));
+    }
+    end
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Class, State, line};
@@ -1026,6 +1846,60 @@ mod tests {
         assert_eq!(line("/* one", "c", &mut state), vec![(Class::Comment, "/* one".to_owned())]);
         assert_eq!(line(" two */ x", "c", &mut state)[0], (Class::Comment, " two */".to_owned()));
         assert!(!state.in_block_comment);
+    }
+
+    /// bash's rules, which are positional rather than lexical.
+    #[test]
+    fn bash_is_tokenized_by_position_rather_than_by_word() {
+        let text = |pieces: &[(Class, &str)]| {
+            pieces.iter().map(|(c, t)| (*c, (*t).to_owned())).collect::<Vec<_>>()
+        };
+        // The same word is a command in one place and a value in another.
+        assert_eq!(
+            classes("LANG=C sort file", "bash"),
+            text(&[
+                (Class::Variable, "LANG"),
+                (Class::Operator, "="),
+                (Class::Normal, "C "),
+                (Class::Function, "sort"),
+                (Class::Normal, " file"),
+            ])
+        );
+        // A bare number is text; one beside a redirection is a number.
+        assert_eq!(
+            classes("echo hi >&2", "bash"),
+            text(&[
+                (Class::BuiltIn, "echo"),
+                (Class::Normal, " hi "),
+                (Class::Operator, ">&"),
+                (Class::DecVal, "2"),
+            ])
+        );
+        // A here-document is a string until its delimiter comes back,
+        // and an unquoted delimiter still expands.
+        let mut state = State::default();
+        line("cat <<EOF", "bash", &mut state);
+        assert_eq!(
+            line("a $y", "bash", &mut state),
+            text(&[(Class::Str, "a "), (Class::Variable, "$y")])
+        );
+        assert_eq!(line("EOF", "bash", &mut state), text(&[(Class::Operator, "EOF")]));
+        // A `case` label is a pattern, and its `)` is not a `$( … )`'s.
+        let mut state = State::default();
+        line("case $x in", "bash", &mut state);
+        assert_eq!(
+            line("  a*) ls ;;", "bash", &mut state),
+            text(&[
+                (Class::Normal, "  "),
+                (Class::SpecialString, "a"),
+                (Class::Preprocessor, "*"),
+                (Class::Keyword, ")"),
+                (Class::Normal, " "),
+                (Class::Function, "ls"),
+                (Class::Normal, " "),
+                (Class::ControlFlow, ";;"),
+            ])
+        );
     }
 
     /// Python's rules, which are a different order of hair from C's.

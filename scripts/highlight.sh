@@ -9,9 +9,9 @@
 #
 # So the inputs here are files that already exist in this repository for
 # other reasons: the C binding's example and header, and every Python
-# file in the tree. Nobody wrote them to be highlighted, and neither did
-# the highlighter's author — which is what makes 609 lines of them a
-# measurement rather than a rehearsal.
+# and shell file in the tree — this script among them. Nobody wrote them
+# to be highlighted, and neither did the highlighter's author, which is
+# what makes 2,650 lines of them a measurement rather than a rehearsal.
 #
 #   scripts/highlight.sh            the score, and one line per miss
 #   scripts/highlight.sh --verbose  and the first lines of each diff
@@ -65,6 +65,26 @@ python	scripts/nbformat-check.py
 python	corpus/epub-handmade/generate.py
 python	bindings/python/tests/test_ferrodoc.py
 python	bindings/python/python/ferrodoc/__init__.py
+bash	bindings/c/build.sh
+bash	bindings/wasm/build.sh
+bash	corpus/bench/generate.sh
+bash	corpus/docx/generate.sh
+bash	corpus/docx-libreoffice/generate.sh
+bash	corpus/epub/generate.sh
+bash	corpus/epub-handmade/generate.sh
+bash	corpus/epub-spec/generate.sh
+bash	corpus/odt/generate.sh
+bash	corpus/odt-libreoffice/generate.sh
+bash	crates/ferrodoc-ast/tests/fixtures/generate.sh
+bash	samples/generate.sh
+bash	scripts/claims.sh
+bash	scripts/compare-toc.sh
+bash	scripts/dropin.sh
+bash	scripts/flags.sh
+bash	scripts/highlight.sh
+bash	scripts/sweep-epub-xhtml.sh
+bash	scripts/verify.sh
+bash	scripts/writers.sh
 EOF
 
 echo

@@ -69,8 +69,9 @@ complete</label></li>
 </ul>
 <h2 id="running-a-conversion">Running a conversion</h2>
 <p>Convert a directory in one pass:</p>
-<pre class="bash"><code>find . -name &#39;*.docx&#39; -print0 |
-  xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md</code></pre>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">find</span> . <span class="at">-name</span> <span class="st">&#39;*.docx&#39;</span> <span class="at">-print0</span> <span class="kw">|</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">xargs</span> <span class="at">-0</span> <span class="at">-P8</span> <span class="at">-I{}</span> ferrodoc {} <span class="at">-t</span> gfm <span class="at">-o</span> {}.md</span></code></pre></div>
 <p>The Python equivalent, for a pipeline that already has one:</p>
 <div class="sourceCode" id="cb2"><pre
 class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> ferrodoc</span>

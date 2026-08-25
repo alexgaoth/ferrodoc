@@ -268,12 +268,12 @@ check_sizes() {
     trimmed_wasm=$(stat -c%s "$trimmed")
     trimmed_wasm_gz=$(gzipped "$trimmed")
 
-    within "CLI, every format"        "$cli"             6878440 5
-    within "CLI, markdown + html"     "$trimmed_cli"     4126744 5
-    within "wasm, every format"       "$wasm"            1907341 5
-    within "wasm gzipped"             "$wasm_gz"          703010 5
-    within "wasm, markdown + html"    "$trimmed_wasm"    1186745 5
-    within "wasm gzipped, trimmed"    "$trimmed_wasm_gz"  410922 5
+    within "CLI, every format"        "$cli"             7099736 5
+    within "CLI, markdown + html"     "$trimmed_cli"     4260616 5
+    within "wasm, every format"       "$wasm"            1978486 5
+    within "wasm gzipped"             "$wasm_gz"          732297 5
+    within "wasm, markdown + html"    "$trimmed_wasm"    1220665 5
+    within "wasm gzipped, trimmed"    "$trimmed_wasm_gz"  425498 5
 
     # The headline table's own row, which nothing checked until
     # 2026-08-24 and which said **4.6 MB** while the binary was 6.9 — it

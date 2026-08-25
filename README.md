@@ -50,7 +50,7 @@ something you run, and it keeps mattering afterwards:
 | | pandoc | ferrodoc | |
 |---|---|---|---|
 | **10,000 DOCX → markdown** | 374 s | **5.2 s** | **72× faster** |
-| **Binary / dependency on disk** | 160.4 MB | **6.9 MB** | **23× smaller** |
+| **Binary / dependency on disk** | 160.4 MB | **7.1 MB** | **23× smaller** |
 | **Peak memory**, 10 KB document | 115 MB | **5.2 MB** | **22× less** |
 | **Malformed DOCX** (self-referential footnote) | hangs, killed at 60 s | **handled in 12 ms** | — |
 | **Same document written twice** | different bytes | **identical bytes** | — |
@@ -306,14 +306,13 @@ stdout, output files and stderr. **11/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of
-pandoc's own features switched off at a time and names the smallest set
-that makes the two agree. Reading `-f markdown` as pandoc's dialect
-rather than CommonMark accounts for **17** misses on its own and **10**
-more together with pandoc's syntax highlighting, which now accounts for
-only **1** by itself — the highlighter covers C and Python. One row is a
-difference this project has decided to keep. That leaves **8**, and most
-of those are the same dialect decision from an angle the experiment
-cannot model — `markdown_github` naming it, a `.pmd` document written in
+pandoc's own features switched off at a time — on **both** sides, since
+this now highlights too — and names the smallest set that makes the two
+agree. Reading `-f markdown` as pandoc's dialect rather than CommonMark
+accounts for **18** misses on its own and **9** more together with syntax
+highlighting, which accounts for **2** by itself. One row is a difference
+this project has decided to keep. That leaves **7**, and most of those
+are the same dialect decision from an angle the experiment cannot model — `markdown_github` naming it, a `.pmd` document written in
 it, or `-t markdown` being asked to *write* it. **The number is one
 decision away.**
 
@@ -367,7 +366,7 @@ cargo build --release --target wasm32-unknown-unknown \
   `default = ["all"]`, so nothing changes for anyone who does not ask. A
   caller who converts markdown and HTML can leave the other nine out:
   `--no-default-features --features markdown,html` takes the wasm module to
-  **59%** of its gzipped size and the CLI binary to 60% of its own. The
+  **58%** of its gzipped size and the CLI binary to 60% of its own. The
   ratio is the claim and the byte count illustrates it: the CLI is
   reproducible to the byte in one checkout with one toolchain but 0.7%
   smaller on a CI runner, and the wasm module varies by about 0.03% with
