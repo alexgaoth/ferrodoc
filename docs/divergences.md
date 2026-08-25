@@ -1,13 +1,16 @@
 # Every failing document, and what it fails on
 
-> **Understated, and measured so on 2026-08-19.** This census counts the
-> documents the gates score. For the HTML reader that is eight
-> `corpus/*.html` files, and it named six divergences.
+> **Understated, and measured so on 2026-08-19; re-measured 2026-08-25.**
+> This census counts the documents the gates score. For the HTML reader
+> that is eight `corpus/*.html` files, and it named six divergences.
 > `scripts/sweep-epub-xhtml.sh` compares the **128** XHTML files inside the
-> corpus EPUBs — the vocabulary pandoc's own writer emits — and finds **77**
-> diverging, including two families named nowhere below: an empty
-> `<section epub:type="titlepage">` and a link with no text. Five of the six
-> are now fixed. Read the sweep before quoting a count from this page.
+> corpus EPUBs — the vocabulary pandoc's own writer emits — and found **77**
+> diverging, including two families named nowhere below. Both are fixed
+> (a self-closing `<a … />` that pandoc closes and an HTML5 tree builder
+> leaves open, and an `<li id>` with a sub-list), along with a third this
+> project had caused by dropping `epub:type="titlepage"` on every element
+> rather than the eleven pandoc drops it on. **The sweep is 12.** Read it
+> before quoting a count from this page.
 
 A census, not a change: nothing here alters behaviour. It exists because
 two claims in the project's roadmap were carrying weight without a breakdown behind
@@ -21,11 +24,11 @@ excluded on purpose: pandoc itself scores 1/13 and 4/13 on the same
 corpus, so their failures measure the format, not this project, and 20
 more rows of "the format cannot hold it" would drown the signal.
 
-That leaves **51 documents** across nine gates:
+That leaves **43 documents** across nine gates, re-counted 2026-08-25:
 
 | gate | score | failing documents |
 |---|---|---|
-| HTML reader (`diff-html-read`) | 633/659 | 26 |
+| HTML reader (`diff-html-read`) | 641/661 | 20 |
 | EPUB reader, spec chunks (`diff-epub`) | 10/22 | 12 |
 | EPUB writer (`diff-epub-write`) | 10/13 | 3 |
 | EPUB reader (`diff-epub`) | 10/12 | 2 |
@@ -56,16 +59,16 @@ $H diff-epub-write corpus > epubwrite.txt
 
 | # | group | docs | status |
 |---|---|---:|---|
-| **G1** | An element still open when its container closes (`<a>` never closed, or written `<a/>`) is reconstructed here and dropped by pandoc | **16** | 11 **declared deliberate** + 2 by extension, 3 actionable |
+| **G1** | An element still open when its container closes (`<a>` never closed) is reconstructed here and dropped by pandoc | **13** | all **declared deliberate**: the three `<a … />` rows left on 2026-08-25, where the slash *does* close it |
 | **G2** | Pandoc's **EPUB** reader runs its HTML reader with `raw_html` **on**; ferrodoc's does not, so raw HTML pandoc keeps verbatim is normalised away | **11** | actionable, undeclared |
 | **G3** | Trailing whitespace *inside* `<em>`/`<strong>` — pandoc hoists it out as `Space`, ferrodoc drops it | **3** | actionable, undeclared |
 | **G4** | A start tag with no closing `>` — pandoc's tagsoup still builds a `Div` from the junk, ferrodoc emits nothing | **3** | actionable, declared as a family |
 | **G5** | EPUB writer will not emit a reference the book cannot satisfy | **3** | **declared deliberate** |
-| **G6** | `<![CDATA[…]]>` boundaries | **2** | actionable, declared as a family |
+| ~~**G6**~~ | `<![CDATA[…]]>` boundaries, and `<? … ?>` beside them | **0** | **fixed 2026-08-25** — three documents |
 | **G7** | Pandoc reads every ODT list twice, so its identifier suffix is one higher | **2** | **declared deliberate** |
 | — | eleven groups of one (listed in full below) | **11** | 2 deliberate, 9 actionable |
 
-**Largest group: G1, 16 of 51 documents (31%).** But 13 of those 16 rest
+**Largest group: G1, 13 of 43 documents.** But 13 of those 16 rest
 on a *declared deliberate* decision — `COMPATIBILITY.md`, "HTML reader":
 an `<a href="…"></a>` with no text is kept, because dropping it would
 match pandoc on unclosed `<a>` tags at the price of deleting the
@@ -193,7 +196,7 @@ the roadmap claim was about.
 
 ## Every failing document
 
-### HTML reader — `diff-html-read $SPEC corpus`, 26 of 659
+### HTML reader — `diff-html-read $SPEC corpus`, 20 of 661
 
 | document | first diverging path | cause |
 |---|---|---|
@@ -206,8 +209,6 @@ the roadmap claim was about.
 | example 173 (HTML blocks) | `/blocks` (0 vs 1) | unclosed `<style>` swallows the rest of the document; pandoc recovers and reads `foo` |
 | example 174 (HTML blocks) | `/blocks/0/c/0/c/1` (1 vs 2) | `</blockquote>` closing over an open `<div>`; pandoc keeps the following `<p>` inside the div, ferrodoc closes both |
 | example 175 (HTML blocks) | `/blocks/0/c/0/0` | `<div>` inside `<li>` closed by `</li>`; pandoc loses the whole `<ul>`, ferrodoc keeps a `BulletList` |
-| example 180 (HTML blocks) | `/blocks/0/c/0/c` | `<?php … ?>` processing instruction; pandoc drops it entirely, ferrodoc leaks `';` and `?>` as text |
-| example 182 (HTML blocks) | `/blocks/0/c/0/c` | G6 `<![CDATA[…]]>` block; pandoc emits its contents as text, ferrodoc drops it |
 | example 187 (HTML blocks) | `/blocks/0/c` (3 vs 1) | G1 — *deliberate* |
 | example 191 (HTML blocks) | `/blocks` (2 vs 1) | `<pre>` inside `<tr>`; pandoc drops the table, ferrodoc emits `CodeBlock` + an empty `Table` |
 | example 344 (Code spans) | `/blocks/0/c/0/c` | G1 (`<a href="`">`) — *deliberate* |
@@ -215,26 +216,51 @@ the roadmap claim was about.
 | example 477 (Emphasis) | `/blocks/0/c` (2 vs 1) | G1 — *deliberate* |
 | example 494 (Links) | `/blocks/0/c` (6 vs 5) | G1, on `<b>` rather than `<a>` — *deliberate by extension*: the declared rule names `<a>` |
 | example 613 (Raw HTML) | `/blocks` (2 vs 0) | G1, on `<bab>`/`<c2c>` — *deliberate by extension*: the declared rule names `<a>` |
-| example 614 (Raw HTML) | `/blocks` (2 vs 1) | G1 duplicate: `<a/>` stays open here, so the block is emitted twice |
-| example 615 (Raw HTML) | `/blocks` (2 vs 1) | G1 duplicate |
-| example 616 (Raw HTML) | `/blocks` (2 vs 1) | G1 duplicate |
-| example 629 (Raw HTML) | `/blocks/0/c/2/c` | G6 inline CDATA: ours `&<]]>`, pandoc `>&<` |
 | example 630 (Raw HTML) | `/blocks/0/c` (3 vs 1) | G1 — *deliberate* |
 | example 631 (Raw HTML) | `/blocks/0/c` (3 vs 1) | G1 — *deliberate* |
 | example 642 (Hard line breaks) | `/blocks` (2 vs 0) | G1 — *deliberate* |
 | example 643 (Hard line breaks) | `/blocks` (2 vs 0) | G1 — *deliberate* |
 
-Probes behind G1, G4 and G6 (each run against pandoc 3.8.2.1 directly,
-no whitespace normalisation anywhere):
+**Six rows left this table on 2026-08-25**, and none of them by
+loosening anything: 614, 615 and 616 to the self-closing rewrite
+(`<a … />` closes for pandoc's parser and stays open for an HTML5 tree
+builder, so the block was emitted again for every following one); 180,
+182 and 629 to reading `<? … ?>` and `<![CDATA[ … ]]>` as pandoc reads
+them rather than as the bogus comments an HTML5 tokenizer sees, which
+end at the **first `>`** — inside the content whenever the content is
+code.
+
+**Every one of the twenty that remain is a difference in how two parsers
+repair the same malformed document**, which is the one place this project
+declines to follow pandoc: matching would mean reproducing a parse
+failure, and the input has no correct reading to agree on. They are three
+groups and nothing else.
+
+- **An inline element left unclosed** (13: 21, 31, 150, 187, 344, 476,
+  477, 494, 613, 630, 631, 642, 643). HTML5 keeps it on the list of
+  active formatting elements and *reconstructs* it into every following
+  block; TagSoup abandons it and drops what follows. Browsers do what
+  this does.
+- **A start tag with no `>` at all** (4: 156, 157, 158, 173). TagSoup
+  ends it at the line and builds an element whose attributes are the
+  words it swallowed — `<div id="foo"` followed by `*hi*` becomes a `Div`
+  with an attribute named `*hi*`. An HTML5 tokenizer keeps looking for
+  the `>` to end of input and emits nothing.
+- **A close tag that crosses an open element** (3: 174, 175, 191) —
+  `</blockquote>` over an open `<div>`, `</li>` over an open `<div>`, and
+  a `<pre>` inside a `<tr>` that HTML5 foster-parents out of the table.
+
+Probes, each run against pandoc 3.8.2.1 directly, no whitespace
+normalisation anywhere:
 
 ```sh
 printf '<p>a <a href="x">b</p>\n' | pandoc -f html -t json   # 2 Plains, no Link
-printf '<p><a/></p>\n'            | pandoc -f html -t json   # ONE Para[Span]; ferrodoc emits two
 printf '<div id="foo"\n*hi*\n'    | pandoc -f html -t json   # Div with *hi* as an attribute
-printf '<p>foo <![CDATA[>&<]]></p>\n' | pandoc -f html -t json   # Str ">&<"
+printf '<p>foo <![CDATA[>&<]]></p>\n' | pandoc -f html -t json   # Str ">&<" — matched since 2026-08-25
+printf '<a href="x" />\n<p>t</p>\n' | pandoc -f html -t json   # two Paras — matched since 2026-08-25
 ```
 
-### EPUB reader, spec chunks — `diff-epub corpus/epub-spec`, 8 of 22
+### EPUB reader, spec chunks — `diff-epub corpus/epub-spec`, 12 of 22
 
 Two causes per row, because these compound: the *epub-level* first
 divergence the gate reports, and what the same chunk's XHTML does under
@@ -290,7 +316,7 @@ diverge on is audited there.
 | `corpus/epub/corpus-code-and-raw.epub` | `/blocks/1/c/1/8/c/19/t` | a space before `<br />` — pandoc trims it, ferrodoc keeps `Space, LineBreak`. Not one of the 26. Probe: `printf '<p>a <br /> b</p>\n' \| pandoc -f html -t json` |
 | `corpus/epub/corpus-truncation-cases.epub` | `/blocks/1/c/1/9/c/0/c` | G2 — an HTML comment pandoc keeps as `RawInline`; its XHTML produces the same `blocks` under both readers, so this is not an HTML reader divergence |
 
-### EPUB writer — `diff-epub-write corpus`, 8 of 11
+### EPUB writer — `diff-epub-write corpus`, 3 of 13
 
 All three are one **declared deliberate** rule (G5): this writer does not
 emit a reference the book cannot satisfy, and `epubcheck` rejects
