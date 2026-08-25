@@ -1010,15 +1010,16 @@ fn write_highlighted(out: &mut String, attr: &Attr, text: &str, language: &str, 
     classes.extend(attr.classes.iter().cloned());
     out.push_str("<pre");
     write_attr(out, &Attr { classes, ..Attr::default() });
-    out.push_str("><code");
-    write_attr(
+    // **No break opportunity before the `<code>`'s class.** The div's
+    // and the pre's attributes each offer one; this one does not, so the
+    // fill measures `class="sourceCode python"><code class="sourceCode
+    // python">` as a single piece — which is why pandoc breaks after
+    // `<pre` and not after `<code`. Measured at 72 columns.
+    let _ = write!(
         out,
-        &Attr {
-            classes: vec!["sourceCode".to_owned(), highlight::canonical(language).to_owned()],
-            ..Attr::default()
-        },
+        "><code class=\"sourceCode {}\">",
+        highlight::canonical(language)
     );
-    out.push('>');
     // The code is one unbreakable piece, as it is without highlighting.
     out.push(STOP);
 

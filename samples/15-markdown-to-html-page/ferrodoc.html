@@ -267,9 +267,10 @@ complete</label></li>
 <pre class="bash"><code>find . -name &#39;*.docx&#39; -print0 |
   xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md</code></pre>
 <p>The Python equivalent, for a pipeline that already has one:</p>
-<pre class="python"><code>import ferrodoc
-with open(&quot;report.docx&quot;, &quot;rb&quot;) as f:
-    text = ferrodoc.convert(f.read(), &quot;docx&quot;, &quot;gfm&quot;)</code></pre>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> ferrodoc</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> <span class="bu">open</span>(<span class="st">&quot;report.docx&quot;</span>, <span class="st">&quot;rb&quot;</span>) <span class="im">as</span> f:</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    text <span class="op">=</span> ferrodoc.convert(f.read(), <span class="st">&quot;docx&quot;</span>, <span class="st">&quot;gfm&quot;</span>)</span></code></pre></div>
 <p>An indented code block, which is a different construct:</p>
 <pre><code>ferrodoc -f markdown -t html handbook.md</code></pre>
 <h2 id="awkward-cases-on-purpose">Awkward cases, on purpose</h2>

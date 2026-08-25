@@ -1,5 +1,5 @@
---- samples/15-markdown-to-html-page/pandoc.html	2026-08-23 20:52:16.723984526 -0700
-+++ samples/15-markdown-to-html-page/ferrodoc.html	2026-08-23 20:52:16.619984438 -0700
+--- samples/15-markdown-to-html-page/pandoc.html	2026-08-24 18:04:07.486845941 -0700
++++ samples/15-markdown-to-html-page/ferrodoc.html	2026-08-24 18:04:07.441846017 -0700
 @@ -169,71 +169,6 @@
        vertical-align: middle;
      }
@@ -94,7 +94,7 @@
  <li><a href="#sign-off" id="toc-sign-off">Sign-off</a></li>
  </ul></li>
  </ul>
-@@ -329,14 +264,12 @@
+@@ -329,9 +264,8 @@
  </ul>
  <h2 id="running-a-conversion">Running a conversion</h2>
  <p>Convert a directory in one pass:</p>
@@ -104,13 +104,5 @@
 +<pre class="bash"><code>find . -name &#39;*.docx&#39; -print0 |
 +  xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md</code></pre>
  <p>The Python equivalent, for a pipeline that already has one:</p>
--<div class="sourceCode" id="cb2"><pre
--class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> ferrodoc</span>
--<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="cf">with</span> <span class="bu">open</span>(<span class="st">&quot;report.docx&quot;</span>, <span class="st">&quot;rb&quot;</span>) <span class="im">as</span> f:</span>
--<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    text <span class="op">=</span> ferrodoc.convert(f.read(), <span class="st">&quot;docx&quot;</span>, <span class="st">&quot;gfm&quot;</span>)</span></code></pre></div>
-+<pre class="python"><code>import ferrodoc
-+with open(&quot;report.docx&quot;, &quot;rb&quot;) as f:
-+    text = ferrodoc.convert(f.read(), &quot;docx&quot;, &quot;gfm&quot;)</code></pre>
- <p>An indented code block, which is a different construct:</p>
- <pre><code>ferrodoc -f markdown -t html handbook.md</code></pre>
- <h2 id="awkward-cases-on-purpose">Awkward cases, on purpose</h2>
+ <div class="sourceCode" id="cb2"><pre
+ class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> ferrodoc</span>

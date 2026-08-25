@@ -8,8 +8,10 @@
 # corpus blind spot the root `CLAUDE.md` counts bugs against.
 #
 # So the inputs here are files that already exist in this repository for
-# other reasons: the C binding's example and its header. Nobody wrote
-# them to be highlighted, and neither did the highlighter's author.
+# other reasons: the C binding's example and header, and every Python
+# file in the tree. Nobody wrote them to be highlighted, and neither did
+# the highlighter's author — which is what makes 609 lines of them a
+# measurement rather than a rehearsal.
 #
 #   scripts/highlight.sh            the score, and one line per miss
 #   scripts/highlight.sh --verbose  and the first lines of each diff
@@ -59,6 +61,10 @@ while IFS=$'\t' read -r language file; do
 done <<EOF
 c	bindings/c/example/convert.c
 c	bindings/c/include/ferrodoc.h
+python	scripts/nbformat-check.py
+python	corpus/epub-handmade/generate.py
+python	bindings/python/tests/test_ferrodoc.py
+python	bindings/python/python/ferrodoc/__init__.py
 EOF
 
 echo

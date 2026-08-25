@@ -947,10 +947,12 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 | language | names accepted | gate |
 |---|---|---|
 | C | `c` | **2/2** real source files byte-identical |
+| Python | `python`, `python3`, `py` | **4/4** |
 
 `./scripts/highlight.sh` is that gate, and the inputs are the C binding's
-own example and header — files that exist in this repository for other
-reasons and that nobody wrote to be highlighted. **That distinction is
+own example and header and every Python file in the tree — 609 lines that
+exist in this repository for other reasons and that nobody wrote to be
+highlighted. **That distinction is
 the point**: only three of the spec's 652 examples hold a fence in a
 language pandoc knows, nine lines between them, and a highlighter written
 to pass those would be fitted to the fixtures rather than to the
@@ -979,8 +981,23 @@ is worse than one that says so. Every gate that mutes pandoc's
 highlighting mutes this one too, because muting one side would compare
 two different questions.
 
-It costs **27.7 KB, 0.39% of the binary**, and is a cargo feature
-(`highlight`, on by default) so a trimmed build can drop it.
+Python's rules are a different order of hair from C's, and every one was
+measured: a string that opens a line **at bracket depth zero** is a
+docstring and is coloured as a comment, so `__all__ = [` followed by
+strings is not one; `{…}` in an ordinary string is one `sc` while an
+f-string's braces are `sc` with **code** between them; an attribute dot
+inside those braces is an `sc` but only at their top level, so `{a.b}`
+has one and `{len(a.b)}` does not; `{x:.2f}`'s conversion belongs to the
+brace that closes it; an escape is a `ch` where C's is an `sc`; and a
+backslash ending a line inside a string is an `op`. The keyword table was
+probed over **python's own vocabulary** — `dir(builtins)` plus
+`keyword.kwlist`, 211 names — because choosing the probe set by hand is
+how `file` came to be missing on the first attempt, and only a real file
+caught it.
+
+It costs **27.7 KB, 0.39% of the binary** for the first language, and is
+a cargo feature (`highlight`, on by default) so a trimmed build can drop
+it.
 
 **There is a second oracle, and it had never been used.** Pandoc *writes*
 LaTeX, RST and AsciiDoc from the same AST, so the bytes can be compared
