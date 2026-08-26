@@ -693,7 +693,14 @@ fn cell_text(cell: &Cell, def: &mut Defs) -> String {
 /// nothing between them are one space, and a raw inline in another format
 /// renders to nothing — so `plus <br/> and` is `plus and` there and was
 /// `plus  and` here.
+/// What may sit directly before an RST start string, and directly after
+/// an end string, without the `\ ` separator. Whitespace is fine on
+/// either side and is checked apart from these.
+const BEFORE: &str = "-:/'\"<([{";
+const AFTER: &str = "-.,:;!?\\/'\")]}>";
+
 fn inlines(list: &[Inline], out: &mut String, def: &mut Defs) {
+    let mut pieces: Vec<(String, bool)> = Vec::new();
     let mut after_break = false;
     for inline in list {
         let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
@@ -705,9 +712,55 @@ fn inlines(list: &[Inline], out: &mut String, def: &mut Defs) {
         if piece.is_empty() {
             continue;
         }
-        out.push_str(&piece);
+        pieces.push((piece, produces_markup(inline)));
         after_break = breaking;
     }
+    // **RST will not read markup that abuts a word**: docutils wants the
+    // start string preceded by whitespace or one of `-:/'"<([{`, and the
+    // end string followed by whitespace or one of ``-.,:;!?\/'")]}>``.
+    // Pandoc writes an escaped space where that does not hold, so
+    // ``` ``int``\ →\ ``dt`` ``` and `` ``x``, `` bare.
+    //
+    // The neighbour that decides is the **sibling inline**, never the
+    // container's own marker: the code span closing `**Not ``/tmp``**` is
+    // followed by the strong's `**`, and pandoc puts nothing between
+    // them. Deciding this over the finished text instead read those
+    // markers as neighbours and separated four fixtures that were exact.
+    let free = |ch: Option<char>, allowed: &str| match ch {
+        None => true,
+        Some(c) => c.is_whitespace() || c == BREAK || c == SOFT || allowed.contains(c),
+    };
+    for (index, (piece, markup)) in pieces.iter().enumerate() {
+        if *markup && !free(out.chars().last(), BEFORE) {
+            out.push_str("\\ ");
+        }
+        out.push_str(piece);
+        if *markup {
+            let next = pieces.get(index + 1).and_then(|(text, _)| text.chars().next());
+            if !free(next, AFTER) {
+                out.push_str("\\ ");
+            }
+        }
+    }
+}
+
+/// Whether an inline is written as RST markup rather than as plain text.
+/// A wrapper that keeps only its content — `SmallCaps`, `Span` — is not
+/// one: whatever markup lies inside it marked its own edges. Neither is
+/// a `Note`, whose `[1]_` carries the space in front of it already.
+fn produces_markup(inline: &Inline) -> bool {
+    matches!(
+        inline,
+        Inline::Emph(_)
+            | Inline::Strong(_)
+            | Inline::Strikeout(_)
+            | Inline::Superscript(_)
+            | Inline::Subscript(_)
+            | Inline::Code(..)
+            | Inline::Math(..)
+            | Inline::Link(..)
+            | Inline::Image(..)
+    )
 }
 
 fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
@@ -912,7 +965,13 @@ fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
     // **RST inline markup cannot be split across lines**, so the whole
     // span is one word to the fill: pandoc breaks after `*emph in*`, not
     // inside it.
-    let _ = write!(out, "{marker}{}{marker}", trimmed(&text).replace([BREAK, SOFT], " "));
+    //
+    // That is the *fill's* break and not the document's. A `SoftBreak`
+    // written inside `**…**` survives under `--wrap=preserve` — pandoc
+    // keeps it and collapses it under the other two — so it goes through
+    // to `lay_out` like any other. Removing it here joined every such
+    // paragraph into one line; `docs/gates.md` has three.
+    let _ = write!(out, "{marker}{}{marker}", trimmed(&text).replace(BREAK, " "));
 }
 
 /// One run of un-nested inlines, wrapped in the marker its parent uses.
@@ -923,8 +982,9 @@ fn push_run(marker: &str, run: &[Inline], pieces: &mut Vec<String>, def: &mut De
     let mut text = String::new();
     inlines(run, &mut text, def);
     // One unbreakable unit, like the un-nested form: RST inline markup
-    // cannot be split across lines.
-    let text = trimmed(&text).replace([BREAK, SOFT], " ");
+    // cannot be split across lines — to the *fill*. A `SoftBreak` the
+    // document wrote is `lay_out`'s to decide, as above.
+    let text = trimmed(&text).replace(BREAK, " ");
     if !text.is_empty() {
         pieces.push(format!("{marker}{text}{marker}"));
     }
