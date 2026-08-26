@@ -1138,8 +1138,20 @@ DOCX, an ODT, an EPUB and a notebook have no bytes worth comparing — the
 two tools zip different files in a different order — so
 `scripts/roundtrip.sh` writes the same AST with both and requires what
 pandoc reads back out of them to agree. It stands at **odt 16/16, docx
-13/16, ipynb 11/16 and epub 0/16**, over `corpus/*.md` and this
-repository's own prose.
+14/16, ipynb 11/16 and epub 0/16**, over `corpus/*.md` and this
+repository's own prose, and **every one of the misses is a divergence
+recorded on this page**: the loose/tight list reading, the code block
+pandoc loses when it opens a container, a quotation the DOCX round trip
+renests, and `dc:title`.
+
+Two documents are counted as *unwritten* rather than as misses, both for
+`ipynb`: `corpus/images.md` and `corpus/readme-style.md` name a picture
+that is deliberately absent, and pandoc refuses the conversion where this
+falls back to the image's alt text. A document only one of them will
+write is not a difference in the writer. Every artefact is deleted before
+each pair is built, because pandoc writes *nothing* when it refuses and
+`-o out.ipynb` then leaves the previous document's bytes in place — which
+made three rows agree by accident until 2026-08-26.
 
 **It is also the only gate that sees the fill.** `writers.sh` compares
 at `--wrap=preserve`, and a notebook's markdown cell is written at

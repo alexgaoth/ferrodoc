@@ -67,7 +67,26 @@ def strip(x):
         for v in x:
             strip(v)
 
+# The name an embedded picture is filed under — `media/rId9.png` for
+# pandoc, `media/image1.png` here. `samples/README.md` has counted that
+# as immaterial since the writers were written. Numbered by first
+# appearance rather than blanked, so two *different* pictures still read
+# as different.
+seen = {}
+def rename(x):
+    if isinstance(x, dict):
+        if x.get("t") in ("Image", "Link") and isinstance(x.get("c"), list):
+            url = x["c"][2][0]
+            if url.startswith("media/"):
+                x["c"][2][0] = "media/%d" % seen.setdefault(url, len(seen))
+        for v in x.values():
+            rename(v)
+    elif isinstance(x, list):
+        for v in x:
+            rename(v)
+
 strip(d)
+rename(d)
 json.dump(d, sys.stdout, indent=1, sort_keys=True)
 PY
 
@@ -78,7 +97,7 @@ docs=(corpus/*.md README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README
 floor_for() {
     case "$1" in
         odt)   echo 16 ;;
-        docx)  echo 13 ;;
+        docx)  echo 14 ;;
         ipynb) echo 11 ;;
         # Every book differs on `dc:title`, which this writes always and
         # pandoc omits — `epubcheck` rejects pandoc's book for exactly
@@ -93,10 +112,17 @@ floor_for() {
 below=0
 summary=""
 for format in docx odt epub ipynb; do
-    same=0 total=0
+    same=0 total=0 refused=0
     for doc in "${docs[@]}"; do
         [ -f "$doc" ] || continue
         total=$((total + 1))
+        # **Every artefact is removed first.** Pandoc writes nothing when
+        # it refuses a document — `corpus/images.md` names a picture that
+        # is deliberately absent, and `-o out.ipynb` then leaves whatever
+        # was there — so without this the comparison silently ran against
+        # the *previous* document's bytes and three rows agreed by
+        # accident.
+        rm -f "$work/p.$format" "$work/f.$format"
         # **Pandoc looks for media in the working directory; this looks
         # beside the document** (`COMPATIBILITY.md`, `--resource-path`).
         # Without saying so, every document with a picture measured that
@@ -106,6 +132,15 @@ for format in docx odt epub ipynb; do
           pandoc "$doc" -f commonmark --resource-path="$(dirname "$doc")" \
               -o "$work/p.$format" ) 2>/dev/null
         "$FERRODOC" "$doc" -f markdown -o "$work/f.$format" 2>/dev/null
+        # A document only one of them will write is not a difference in
+        # the writer, and saying so beats scoring it either way.
+        if [ ! -s "$work/p.$format" ] || [ ! -s "$work/f.$format" ]; then
+            [ "$verbose" = 0 ] || printf '  %-6s %-24s not written by %s\n' \
+                "$format" "$(basename "$doc")" \
+                "$([ -s "$work/p.$format" ] && echo ferrodoc || echo pandoc)"
+            refused=$((refused + 1))
+            continue
+        fi
         for side in p f; do
             ( ulimit -v 6000000; pandoc "$work/$side.$format" -t json ) 2>/dev/null \
                 | python3 "$work/norm.py" > "$work/$side.json" 2>/dev/null
@@ -122,7 +157,11 @@ for format in docx odt epub ipynb; do
         printf '%-6s %d/%d — BELOW ITS FLOOR OF %d\n' "$format" "$same" "$total" "$floor"
         below=1
     fi
-    summary="$summary $format $same/$total,"
+    if [ "$refused" -gt 0 ]; then
+        summary="$summary $format $same/$total ($refused unwritten),"
+    else
+        summary="$summary $format $same/$total,"
+    fi
 done
 
 printf 'read back by pandoc:%s over corpus/*.md and this repository'"'"'s own prose\n' "${summary%,}"
