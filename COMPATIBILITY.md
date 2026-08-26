@@ -1138,7 +1138,7 @@ DOCX, an ODT, an EPUB and a notebook have no bytes worth comparing — the
 two tools zip different files in a different order — so
 `scripts/roundtrip.sh` writes the same AST with both and requires what
 pandoc reads back out of them to agree. It stands at **odt 16/16, docx
-13/16, ipynb 10/16 and epub 0/16**, over `corpus/*.md` and this
+13/16, ipynb 11/16 and epub 0/16**, over `corpus/*.md` and this
 repository's own prose.
 
 **It is also the only gate that sees the fill.** `writers.sh` compares

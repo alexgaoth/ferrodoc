@@ -368,9 +368,23 @@ fn detach_images(blocks: &mut [Block], media: &dyn Fn(&str) -> Option<Vec<u8>>) 
             Block::BlockQuote(children) | Block::Div(_, children) => {
                 stack.extend(children.iter_mut());
             }
-            Block::BulletList(items) | Block::OrderedList(_, items) => {
+            // **An ordered list loses its start and its delimiter**, the
+            // way the reader in this crate already drops them and the way
+            // pandoc's notebook writer writes them: `3) item` becomes
+            // `1.  item`. Pandoc's own ipynb reader cannot read `3)` as a
+            // list at all — it comes back as a paragraph — so a notebook
+            // written with one is a notebook pandoc will not read, and
+            // this reader normalises it away regardless. Writing it out
+            // faithfully made the round trip lossy at both ends.
+            Block::OrderedList(list, items) => {
+                *list = ferrodoc_ast::ListAttributes {
+                    start: 1,
+                    style: ferrodoc_ast::ListNumberStyle::DefaultStyle,
+                    delim: ferrodoc_ast::ListNumberDelim::DefaultDelim,
+                };
                 stack.extend(items.iter_mut().flatten());
             }
+            Block::BulletList(items) => stack.extend(items.iter_mut().flatten()),
             _ => {}
         }
     }
