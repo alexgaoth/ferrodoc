@@ -130,14 +130,24 @@ impl Writer {
                 let text = self.inlines(inlines).replace([BREAK, SOFT], " ");
                 out.push(indent(&text, prefix));
             }
-            // Four spaces at the **top level**, which is what makes it
-            // read as code at all — and none inside a quote or a list
-            // item, where the container's own indentation already sets it
-            // apart. Four more there put the code four columns right of
-            // where pandoc has it, on every nested block.
+            // Four spaces, which is what makes it read as code at all,
+            // **on top of whatever the container already indents by** — a
+            // quote's own two columns do not stand in for them, and
+            // pandoc writes 6 inside one quote and 8 inside two. Requiring
+            // an empty prefix suppressed them entirely there: `README.md`
+            // has a `sh` block inside a blockquote, and it came out level
+            // with the prose around it.
+            //
+            // The **first block of a container** is the exception, and
+            // `nested` is what says so: a quote or an item that opens
+            // with code gets the container's indent and nothing more —
+            // `> ```{.sh}` is 2 where the same block one paragraph later
+            // is 6. A list item renders that first block with an empty
+            // prefix and adds its continuation indent afterwards, so the
+            // prefix cannot be read for it either.
             Block::CodeBlock(_, text) => {
-                let inner = if prefix.is_empty() && self.nested == 0 {
-                    "    ".to_owned()
+                let inner = if self.nested == 0 {
+                    format!("{prefix}    ")
                 } else {
                     prefix.to_owned()
                 };
@@ -147,7 +157,12 @@ impl Writer {
             Block::BlockQuote(inner) => {
                 let inner_prefix = format!("{prefix}  ");
                 let before = out.len();
-                self.blocks(inner, out, &inner_prefix);
+                if let Some((first, rest)) = inner.split_first() {
+                    self.nested += 1;
+                    self.block(first, out, &inner_prefix);
+                    self.nested -= 1;
+                    self.blocks(rest, out, &inner_prefix);
+                }
                 // A quote whose content renders to nothing — a raw block
                 // in another format is one — is still a quote, and pandoc
                 // writes its indentation on a line of its own.

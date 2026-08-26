@@ -271,11 +271,14 @@ Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`,
 >
 > ```sh
 > cargo run -p ferrodoc-harness -- diff-pandoc-md corpus --verbose
-> ``` Footnotes are read by `gfm`
-> and not by `markdown` — which is how pandoc has it too. The one case
-> where the output is *wrong* rather than narrower is a YAML metadata
-> block, because the title and author land in the body, so ferrodoc prints
-> a line to stderr when a document opens with one. `-s`/`--standalone` writes a complete page
+> ```
+
+Footnotes are read by `gfm` and not by `markdown` — which is how pandoc
+has it too. The one case where the output is *wrong* rather than narrower
+is a YAML metadata block, because the title and author land in the body,
+so ferrodoc prints a line to stderr when a document opens with one.
+
+`-s`/`--standalone` writes a complete page
 **through pandoc's own default template**, which is vendored here under
 the BSD-3 licence pandoc offers for it: byte-identical output across
 `--toc`, `--toc-depth`, `--css`, `-V`, `-H`, `-B`, `-A` and a

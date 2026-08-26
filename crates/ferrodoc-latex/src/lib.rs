@@ -762,10 +762,18 @@ fn inline_to(inline: &Inline, out: &mut String) {
             // making the address a second link. `\href{u}{u}` renders the
             // address in body text with no break points, so this is a
             // typesetting difference as well as a byte one.
+            // …but only when the text is *bare*. `[`a.md`](a.md)` has a
+            // `Code` for its text and stringifies to the URL just the
+            // same, and pandoc writes `\href{a.md}{\texttt{a.md}}` for
+            // it: the short spellings are for an autolink, whose text is
+            // one `Str` and nothing else. `ROADMAP.md` is full of
+            // `[`COMPATIBILITY.md`](COMPATIBILITY.md)`, and every one of
+            // them lost its code font.
+            let bare = matches!(inner.as_slice(), [Inline::Str(_)]);
             let text = stringify(inner);
-            if text == target.url {
+            if bare && text == target.url {
                 let _ = write!(out, "\\url{{{url}}}");
-            } else if target.url.strip_prefix("mailto:") == Some(text.as_str()) {
+            } else if bare && target.url.strip_prefix("mailto:") == Some(text.as_str()) {
                 let _ = write!(out, "\\href{{{url}}}{{\\nolinkurl{{{}}}}}", escape_url(&text));
             } else {
                 let _ = write!(out, "\\href{{{url}}}{{");

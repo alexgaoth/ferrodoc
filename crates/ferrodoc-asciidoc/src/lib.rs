@@ -590,18 +590,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
             inlines(inner, out);
         }
         Inline::Code(_, code) => {
-            // A code span is not verbatim in `AsciiDoc`: a backtick ends
-            // it, and `<`, `>` and `|` still mean what they mean outside.
-            // The `++` passthrough is what pandoc reaches for, inside the
-            // span, for each of the four.
-            let escaped: String = code
-                .chars()
-                .map(|ch| match ch {
-                    '`' | '<' | '>' | '|' => format!("++{ch}++"),
-                    ch => ch.to_string(),
-                })
-                .collect();
-            let _ = write!(out, "`{escaped}`");
+            let _ = write!(out, "`{}`", passthrough(code));
         }
         Inline::Math(_, math) => {
             let _ = write!(out, "latexmath:[{math}]");
@@ -689,6 +678,33 @@ fn inline_to(inline: &Inline, out: &mut String) {
 ///
 /// **A passthrough, not a backslash.** `AsciiDoc` has no general escape
 /// character: `\*` is a backslash and an asterisk in most positions, and
+/// The inside of a code span, which is **not** verbatim in `AsciiDoc`: a
+/// backtick ends the span and the markup characters still mean what they
+/// mean outside. The `++` passthrough is what pandoc reaches for.
+///
+/// **Ten characters, not four, and a run at a time.** The four this had
+/// were chosen by hand and every one of the other six reached a real
+/// document — `` `with_capacity` `` in `docs/benchmarking.md` came out as
+/// emphasis. Probed over the whole of ASCII punctuation: `}` is *not* in
+/// the set, only `{`, and pandoc wraps a maximal run once, so ``` `` ```
+/// takes one wrapper rather than two.
+fn passthrough(code: &str) -> String {
+    let marks = |c: char| "`*<>[\\]_{|".contains(c);
+    let mut out = String::with_capacity(code.len());
+    let mut rest = code;
+    while !rest.is_empty() {
+        let run = rest.find(marks).unwrap_or(rest.len());
+        out.push_str(&rest[..run]);
+        rest = &rest[run..];
+        let end = rest.find(|c: char| !marks(c)).unwrap_or(rest.len());
+        if end > 0 {
+            let _ = write!(out, "++{}++", &rest[..end]);
+            rest = &rest[end..];
+        }
+    }
+    out
+}
+
 /// `++*++` is the one spelling that reliably means a literal one. Pandoc
 /// uses it for every character in the set below, and `{plus}` for `+`
 /// itself, which cannot be wrapped in `++`. Probed character by
