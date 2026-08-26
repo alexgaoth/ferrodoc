@@ -105,12 +105,15 @@ struct Standing {
     /// holds more than one block. Four spaces there are the marker's own
     /// column, not a code fence.
     item_start: bool,
-    /// Whether the inlines being written are a **heading's**. Nothing
-    /// opens a block on a line that already has `## ` in front of it, so
-    /// the escapes that exist to stop one are dead weight there — pandoc
-    /// writes `## 0. Before anything` where this wrote `## 0\. Before
-    /// anything`, five times in `docs/releasing.md` alone.
-    heading: bool,
+    /// Whether something is already written **in front of these inlines
+    /// on their line** — a heading's `## `, or the `*`, `**` or `[` of a
+    /// container. Nothing opens a block after any of them, so the escapes
+    /// that exist to stop one are dead weight. Each container renders its
+    /// content into a *fresh* buffer, so without this every one of them
+    /// looks like the start of an empty line: pandoc writes
+    /// `## 0. Before anything` and `**1. The two gates**` where this
+    /// wrote `## 0\.` and `**1\.`.
+    preceded: bool,
 }
 
 #[derive(Default)]
@@ -326,9 +329,7 @@ impl Writer {
                 push_wrapped(out, prefix, &text, self.columns);
             }
             Block::Header(level, _, inlines) => {
-                self.at.heading = true;
-                let text = self.inlines(inlines);
-                self.at.heading = false;
+                let text = self.inner(inlines);
                 header(out, prefix, *level, &text);
             }
             Block::CodeBlock(attr, text) => Self::code_block(out, attr, text, prefix, at),
@@ -694,7 +695,7 @@ impl Writer {
     /// delimiter at a word boundary, so it is not offered more widely.
     fn nested(&mut self, inner: &[Inline], alternate: bool) -> String {
         self.alternate = alternate;
-        let text = self.inlines(inner);
+        let text = self.inner(inner);
         self.alternate = false;
         text
     }
@@ -709,12 +710,12 @@ impl Writer {
     /// An inline written as a raw HTML element, for the constructs
     /// markdown has no syntax for.
     fn tagged(&mut self, out: &mut String, tag: &str, attributes: &str, inner: &[Inline]) {
-        let text = self.inlines(inner);
+        let text = self.inner(inner);
         let _ = write!(out, "<{tag}{attributes}>{text}</{tag}>");
     }
 
     fn strikeout(&mut self, out: &mut String, inner: &[Inline]) {
-        let text = self.inlines(inner);
+        let text = self.inner(inner);
         let body = text.trim_matches([' ', '\n', BREAK]);
         // A tilde at either edge is strikeout immediately inside
         // strikeout; nesting with text in between spells out fine.
@@ -733,6 +734,17 @@ impl Writer {
         } else {
             let _ = write!(out, "{lead}~~{body}~~{tail}");
         }
+    }
+
+    /// The content of a container — emphasis, a link's text, a heading.
+    /// Whatever opens it is already on the line, so nothing inside can
+    /// open a block.
+    fn inner(&mut self, inlines: &[Inline]) -> String {
+        let was = self.at.preceded;
+        self.at.preceded = true;
+        let text = self.inlines(inlines);
+        self.at.preceded = was;
+        text
     }
 
     fn inlines(&mut self, inlines: &[Inline]) -> String {
@@ -754,7 +766,7 @@ impl Writer {
 
     fn inline(&mut self, out: &mut String, inline: &Inline) {
         match inline {
-            Inline::Str(text) => escape_text(out, text, self.gfm, self.at.heading),
+            Inline::Str(text) => escape_text(out, text, self.gfm, self.at.preceded),
             Inline::Space => out.push(if self.columns.is_some() { BREAK } else { ' ' }),
             // A soft break is a real line break in the source, and this
             // writer never re-wraps, so keeping it is both faithful and
@@ -805,7 +817,7 @@ impl Writer {
                 // A span carrying nothing is only a wrapper; pandoc writes
                 // no tag for it either.
                 if attributes.is_empty() {
-                    let text = self.inlines(inner);
+                    let text = self.inner(inner);
                     out.push_str(&text);
                 } else {
                     self.tagged(out, "span", &attributes, inner);
@@ -815,7 +827,7 @@ impl Writer {
             // `citeproc` is what turns one into a reference, and this is
             // not that.
             Inline::Cite(_, inner) => {
-                let text = self.inlines(inner);
+                let text = self.inner(inner);
                 out.push_str(&text);
             }
             Inline::Quoted(quote, inner) => {
@@ -824,7 +836,7 @@ impl Writer {
                     QuoteType::DoubleQuote => ('\u{201C}', '\u{201D}'),
                 };
                 out.push(open);
-                out.push_str(&self.inlines(inner));
+                out.push_str(&self.inner(inner));
                 out.push(close);
             }
             Inline::Code(_, text) => {
@@ -879,7 +891,7 @@ impl Writer {
                 // `Link` wrapped around a `Link`. `corpus/gfm/
                 // extensions.gfm` is the document, and the escape is what
                 // keeps `diff-gfm-md` at 100.
-                let text = self.inlines(inner);
+                let text = self.inner(inner);
                 if write_autolink(out, inner, target) {
                     return;
                 }
@@ -890,7 +902,7 @@ impl Writer {
                 out.push(')');
             }
             Inline::Image(_, alt, target) => {
-                let text = self.inlines(alt);
+                let text = self.inner(alt);
                 let _ = write!(out, "![{text}]({}", link_destination(&target.url));
                 if !target.title.is_empty() {
                     let _ = write!(out, " \"{}\"", target.title.replace('"', "\\\""));
@@ -1070,14 +1082,12 @@ fn header(out: &mut String, prefix: &str, level: i64, text: &str) {
     }
     let hashes = "#".repeat(usize::try_from(level).unwrap_or(1).clamp(1, 6));
     let text = text.replace('\n', " ");
-    // A trailing `#` run would be read as the heading's closing sequence;
-    // one escape anywhere inside the run is enough to stop that.
-    let stripped = text.trim_end_matches('#');
-    let text = if stripped.len() == text.len() {
-        text.clone()
-    } else {
-        format!("{stripped}\\{}", &text[stripped.len()..])
-    };
+    // A trailing `#` run is the heading's closing sequence **only when a
+    // space comes before it**, and `escape_text` escapes exactly the `#`
+    // that begins a word — so the run that needs stopping is already
+    // stopped and `bar###`, which needs nothing, is left alone. Escaping
+    // it here as well wrote `\\###` for one and `bar\###` for the other.
+    let text = text.clone();
     push_line(out, prefix, &format!("{hashes} {text}"));
 }
 
@@ -1175,7 +1185,7 @@ fn opens_autolink(out: &str, ch: char) -> bool {
 ///   so `a&amp;b` reads back as `a&b`;
 /// - the GFM autolink triggers. Pandoc writes literal `http://x` bare and
 ///   its own reader turns the text into a link.
-fn escape_text(out: &mut String, text: &str, gfm: bool, heading: bool) {
+fn escape_text(out: &mut String, text: &str, gfm: bool, preceded: bool) {
     let mut chars = text.chars().peekable();
     let mut escaped_bang = false;
     while let Some(ch) = chars.next() {
@@ -1187,7 +1197,7 @@ fn escape_text(out: &mut String, text: &str, gfm: bool, heading: bool) {
         // exist to stop a list or a setext rule are dead weight there.
         // `#` is the exception and still escapes — more hashes on a
         // heading line are more heading, which is a real ambiguity.
-        let opens_here = at_line_start && !heading;
+        let opens_here = at_line_start && !preceded;
         // A marker only opens a block when the line breaks after it, so
         // `-b` is text and `- b` is a list. Pandoc splits on exactly that.
         let opens_block = next.is_none_or(|c| c == ' ');
@@ -1243,7 +1253,11 @@ fn escape_text(out: &mut String, text: &str, gfm: bool, heading: bool) {
             }
             // These only mean something at the start of a line. `#` needs
             // no space after it to be a heading, so it has no `opens_block`.
-            '#' if at_line_start => {
+            // `#` opens a heading at a line start, and pandoc escapes it
+            // **wherever it begins a word** — `a \#b` but not `a#b`,
+            // `a# b` or `C#`. `docs/divergences.md` writes `| # | group |`
+            // in a table row that `CommonMark` reads as text.
+            '#' if at_line_start || out.ends_with([' ', '\n', BREAK]) => {
                 out.push('\\');
                 out.push(ch);
             }
@@ -1262,7 +1276,7 @@ fn escape_text(out: &mut String, text: &str, gfm: bool, heading: bool) {
             }
             // `1.` and `1)` open an ordered list, but only where the line
             // so far is nothing but the number.
-            '.' | ')' if !heading && digits_since_line_start(out) && opens_block => {
+            '.' | ')' if !preceded && digits_since_line_start(out) && opens_block => {
                 out.push('\\');
                 out.push(ch);
             }

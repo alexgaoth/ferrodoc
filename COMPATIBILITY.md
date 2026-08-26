@@ -1086,8 +1086,8 @@ directly without asking its reader to survive anything.
 | `plain` | **19/20** | 19 |
 | `latex` | 18/20 | 18 |
 | `asciidoc` | **19/20** | 19 |
-| `gfm` | 13/20 | 13 |
-| `commonmark` | 14/20 | 14 |
+| `gfm` | 14/20 | 14 |
+| `commonmark` | 15/20 | 15 |
 | `markdown` | 3/20 | 3 |
 
 Twenty documents: the eight in `corpus/` read as CommonMark, the four in
@@ -1132,6 +1132,30 @@ round-tripping pandoc's own output through pandoc:**
   Pandoc's separator **is a `RawBlock` its own reader gives back**, so
   `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
   where a two-block one went in. The bullet switch returns the two.
+
+**A list is loose when an item holds two blocks with a blank line
+between them — and pandoc reads one such list as tight.** The
+`CommonMark` specification says a list is loose "if any of its
+constituent list items directly contain two block-level elements with a
+blank line between them", and
+
+    - first
+    - second
+      - nested item:
+
+            code line
+
+      trailing para
+
+is exactly that: the second item holds a `Plain`, a nested list and a
+paragraph, blank-line separated. This reads it loose. `pandoc -f
+commonmark` reads it **tight** and writes `trailing para` with no `<p>`
+around it — and reads the same list **loose** the moment the indented
+code block inside the nested item is removed, which is what makes it a
+slip rather than a rule. `diff-html` is 652/652, so the spec's own
+examples do not contain the shape; `COMPATIBILITY.md` does, six lines of
+it, and it is the whole of what the `commonmark` and `gfm` writer rows
+still differ on in this file.
 
 **RST cannot nest inline markup, and the two answers lose different
 things.** `**bold with *emph* inside**` has no RST spelling: pandoc keeps
