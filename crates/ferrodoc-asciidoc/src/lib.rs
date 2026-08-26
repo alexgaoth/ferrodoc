@@ -521,7 +521,16 @@ fn cell_text(cell: &Cell) -> String {
 /// nothing between them are one, and a raw inline in another format
 /// renders to nothing — so `plus <br/> and` is `plus and` there and was
 /// `plus  and` here.
+/// The characters that make `*b*` unreadable as strong and force the
+/// **unconstrained** `**b**` instead — every alphanumeric, and these.
+/// Probed one character at a time over ASCII punctuation with a space
+/// held on the other side, because the neighbour on either side is
+/// enough on its own and a probe with a letter outside answers for the
+/// letter rather than for the character being tested.
+const UNCONSTRAINED: &str = "$+<=>^|~";
+
 fn inlines(list: &[Inline], out: &mut String) {
+    let mut pieces: Vec<(String, bool)> = Vec::new();
     let mut after_break = false;
     for inline in list {
         let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
@@ -533,8 +542,28 @@ fn inlines(list: &[Inline], out: &mut String) {
         if piece.is_empty() {
             continue;
         }
-        out.push_str(&piece);
+        let constrainable = matches!(inline, Inline::Emph(_) | Inline::Strong(_));
+        pieces.push((piece, constrainable));
         after_break = breaking;
+    }
+    // **AsciiDoc reads `*b*` as strong only where it stands apart.**
+    // Against a word it is literal, and pandoc doubles the marker there:
+    // `x**b**y` where `a *b* c` suffices. The neighbour that decides is
+    // the sibling inline, as in RST — `` `c`*b* `` keeps the single
+    // marker, so it is not "any non-space".
+    let tight = |ch: Option<char>| match ch {
+        None => false,
+        Some(c) => c.is_alphanumeric() || UNCONSTRAINED.contains(c),
+    };
+    for (index, (piece, constrainable)) in pieces.iter().enumerate() {
+        let next = pieces.get(index + 1).and_then(|(text, _)| text.chars().next());
+        if *constrainable && (tight(out.chars().last()) || tight(next)) {
+            let marker = piece.chars().next().unwrap_or('*');
+            let inner = piece.trim_matches(marker);
+            let _ = write!(out, "{marker}{marker}{inner}{marker}{marker}");
+        } else {
+            out.push_str(piece);
+        }
     }
 }
 
@@ -606,9 +635,15 @@ fn inline_to(inline: &Inline, out: &mut String) {
             let text = text.trim();
             // A link whose text **is** its target needs no markup at all:
             // AsciiDoc linkifies a bare URL and a bare address, and that
-            // is what pandoc writes.
+            // is what pandoc writes — but only when the text is *bare*.
+            // `[`x.md`](x.md)` has a `Code` for its text and flattens to
+            // the URL just the same; pandoc writes ``link:x.md[`x.md`]``
+            // and keeps the code font. `ROADMAP.md` opens with one.
             let literal = plain_text(inner);
-            if literal == target.url || target.url.strip_prefix("mailto:") == Some(literal.as_str())
+            let bare = matches!(inner.as_slice(), [Inline::Str(_)]);
+            if bare
+                && (literal == target.url
+                    || target.url.strip_prefix("mailto:") == Some(literal.as_str()))
             {
                 out.push_str(&literal);
                 return;
@@ -689,7 +724,17 @@ fn inline_to(inline: &Inline, out: &mut String) {
 /// the set, only `{`, and pandoc wraps a maximal run once, so ``` `` ```
 /// takes one wrapper rather than two.
 fn passthrough(code: &str) -> String {
+    // `+` is the exception: it is an attribute reference in `AsciiDoc`,
+    // and pandoc spells a literal one `{plus}` rather than wrapping it —
+    // one per character, so `a++b` is `a{plus}{plus}b`. Plain text
+    // already did this; a code span did not. It is substituted **around**
+    // the scan rather than before it, or the `{` it introduces would be
+    // wrapped as a mark of its own.
     let marks = |c: char| "`*<>[\\]_{|".contains(c);
+    if code.contains('+') {
+        let parts: Vec<String> = code.split('+').map(passthrough).collect();
+        return parts.join("{plus}");
+    }
     let mut out = String::with_capacity(code.len());
     let mut rest = code;
     while !rest.is_empty() {

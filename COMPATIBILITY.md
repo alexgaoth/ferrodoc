@@ -1085,7 +1085,7 @@ directly without asking its reader to survive anything.
 | `rst` | 14/20 | 14 |
 | `plain` | **19/20** | 19 |
 | `latex` | 18/20 | 18 |
-| `asciidoc` | 14/20 | 14 |
+| `asciidoc` | **19/20** | 19 |
 | `gfm` | 10/20 | 10 |
 | `commonmark` | 11/20 | 11 |
 | `markdown` | 3/20 | 3 |

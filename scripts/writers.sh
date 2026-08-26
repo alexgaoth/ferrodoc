@@ -68,7 +68,7 @@ floor_for() {
         rst)      echo 14 ;;
         plain)    echo 19 ;;
         latex)    echo 18 ;;
-        asciidoc) echo 14 ;;
+        asciidoc) echo 19 ;;
         gfm)      echo 10 ;;
         # The like-for-like row: `-t markdown` here **is** CommonMark, so
         # pandoc's `commonmark` writer is the writer to compare it with.
