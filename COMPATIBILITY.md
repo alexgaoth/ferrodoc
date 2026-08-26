@@ -1086,8 +1086,8 @@ directly without asking its reader to survive anything.
 | `plain` | **19/20** | 19 |
 | `latex` | 18/20 | 18 |
 | `asciidoc` | **19/20** | 19 |
-| `gfm` | 10/20 | 10 |
-| `commonmark` | 11/20 | 11 |
+| `gfm` | 12/20 | 12 |
+| `commonmark` | 13/20 | 13 |
 | `markdown` | 3/20 | 3 |
 
 Twenty documents: the eight in `corpus/` read as CommonMark, the four in

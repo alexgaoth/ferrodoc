@@ -69,7 +69,7 @@ floor_for() {
         plain)    echo 19 ;;
         latex)    echo 18 ;;
         asciidoc) echo 19 ;;
-        gfm)      echo 10 ;;
+        gfm)      echo 12 ;;
         # The like-for-like row: `-t markdown` here **is** CommonMark, so
         # pandoc's `commonmark` writer is the writer to compare it with.
         # It went 3 to 8 the day it was asked separately, and all four
@@ -77,7 +77,7 @@ floor_for() {
         # opens a blockquote or a list item comes back from its own round
         # trip as a paragraph, and its `<!-- -->` list separator comes
         # back as a `RawBlock` that was never in the document.
-        commonmark) echo 11 ;;
+        commonmark) echo 13 ;;
         # And the row that keeps the other question honest: a real
         # `pandoc -t markdown` command line gets pandoc's dialect, and
         # this is how far that is. It moves when `pandoc_markdown` does,

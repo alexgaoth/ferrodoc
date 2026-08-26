@@ -271,9 +271,17 @@ impl Writer {
             }
             return;
         }
-        // A fence must be longer than any backtick run inside.
+        // A fence must be longer than any run of backticks that could
+        // **close** it, and only a line that is nothing but backticks —
+        // after up to three spaces of indent — can. A run in the middle
+        // of a line cannot, so `a ``` b` needs no more than three, and
+        // neither does ```` ```rust ````: `README.md` holds a `console`
+        // block full of both, and every fence around one was a backtick
+        // too long.
         let longest = text
-            .split(|c| c != '`')
+            .lines()
+            .map(|line| line.trim_matches([' ', '\t']))
+            .filter(|line| !line.is_empty() && line.chars().all(|c| c == '`'))
             .map(str::len)
             .max()
             .unwrap_or(0);
@@ -818,8 +826,17 @@ impl Writer {
                 // backtick**, not only where a backtick sits at the edge:
                 // `` a`b `` rather than ``a`b``. Both read back the same;
                 // the bytes are the test.
-                let pad = if !all_spaces
-                    && (ticks.len() > 1 || text.starts_with(' ') || text.ends_with(' '))
+                //
+                // It does **not** pad for a space at one end only — it
+                // writes `` `#include ` `` where this wrote
+                // `` ` #include  ` ``, and nothing is stripped on the way
+                // back either way, so the shorter is the one to match.
+                // A space at **both** ends is different: there the reader
+                // strips one from each, so pandoc's bare form loses them
+                // and the padding is what returns the text. `ROADMAP.md`
+                // is where the one-sided case showed.
+                let spaced = text.starts_with(' ') && text.ends_with(' ');
+                let pad = if !all_spaces && (ticks.len() > 1 || spaced)
                 {
                     " "
                 } else {
@@ -1364,26 +1381,31 @@ mod tests {
         // `numberLines` is not filtered: only `sourceCode` is.
         assert_eq!(fenced(&["numberLines", "python"]), "``` numberLines\nx\n```\n");
         assert_eq!(fenced(&["a", "b"]), "``` a\nx\n```\n");
-        // The fence still outgrows the backticks inside it, which pandoc
-        // does not need to do: it sizes a fence by the longest line that is
-        // one unbroken run of backticks once the line's leading and trailing
-        // spaces and tabs are dropped — contents `"````"`, `"   ````"`,
-        // `"\t````"` and `"```` "` each get a five-backtick fence, while
-        // `"```` ``"` and `"```` x"` get three, the run no longer being the
-        // whole trimmed line. So a three-backtick fence closes this block and
-        // pandoc reads its own output straight back, losing nothing. Counting
-        // any run instead is strictly wider, never narrower — the one
-        // assertion here that diverges on purpose.
-        let attr = ferrodoc_ast::Attr {
-            identifier: String::new(),
-            classes: vec!["sourceCode".to_owned(), "bash".to_owned()],
-            attributes: Vec::new(),
+        // **Only a line that could close the fence lengthens it**, and
+        // pandoc sizes one by the longest line that is one unbroken run
+        // of backticks once its leading and trailing spaces and tabs are
+        // dropped. This matched that description in a comment and not in
+        // the code until 2026-08-26 — it counted a run *anywhere*, which
+        // is strictly wider — and the assertion below said `````` `````
+        // `` for a block pandoc writes with three. Five was never
+        // pandoc's: it was this writer's own output written down as the
+        // expected value.
+        let block = |body: &str| {
+            let attr = ferrodoc_ast::Attr {
+                identifier: String::new(),
+                classes: vec!["sourceCode".to_owned(), "bash".to_owned()],
+                attributes: Vec::new(),
+            };
+            write_gfm(&Pandoc::new(vec![Block::CodeBlock(attr, body.to_owned())]))
         };
-        let long = write_gfm(&Pandoc::new(vec![Block::CodeBlock(
-            attr,
-            "```` x".to_owned(),
-        )]));
-        assert_eq!(long, "````` bash\n```` x\n`````\n");
+        // A run that is not the whole line cannot close anything.
+        assert_eq!(block("```` x"), "``` bash\n```` x\n```\n");
+        assert_eq!(block("```` ``"), "``` bash\n```` ``\n```\n");
+        // A bare run can, however it is padded.
+        assert_eq!(block("````"), "````` bash\n````\n`````\n");
+        assert_eq!(block("   ````"), "````` bash\n   ````\n`````\n");
+        assert_eq!(block("```` "), "````` bash\n```` \n`````\n");
+        assert_eq!(block("\t````"), "````` bash\n\t````\n`````\n");
     }
 
     /// Read, write, read again: the second AST must equal the first.
