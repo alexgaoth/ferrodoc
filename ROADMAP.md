@@ -696,8 +696,8 @@ in that order:
 | `plain` | 5/8 | **19/20** | 19 |
 | `latex` | 0/8 | 18/20 | 18 |
 | `asciidoc` | 2/8 | **19/20** | 19 |
-| `gfm` | 3/8 | 12/20 | 12 |
-| `commonmark` | — | 13/20 | 13 |
+| `gfm` | 3/8 | 13/20 | 13 |
+| `commonmark` | — | 14/20 | 14 |
 | `markdown` | 1/8 | 3/20 | 3 |
 
 The corpus grew from eight documents to twenty on the way, and that is

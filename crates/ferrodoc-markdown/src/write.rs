@@ -98,14 +98,26 @@ fn render_with(doc: &Pandoc, gfm: bool, columns: Option<usize>) -> String {
     out
 }
 
+/// The two places the writer's position changes what it must escape.
 #[derive(Default)]
-struct Writer {
-    /// Footnote bodies, collected as they are referenced.
-    notes: Vec<String>,
+struct Standing {
     /// Whether the next block written is the first of a list item that
     /// holds more than one block. Four spaces there are the marker's own
     /// column, not a code fence.
     item_start: bool,
+    /// Whether the inlines being written are a **heading's**. Nothing
+    /// opens a block on a line that already has `## ` in front of it, so
+    /// the escapes that exist to stop one are dead weight there — pandoc
+    /// writes `## 0. Before anything` where this wrote `## 0\. Before
+    /// anything`, five times in `docs/releasing.md` alone.
+    heading: bool,
+}
+
+#[derive(Default)]
+struct Writer {
+    /// Footnote bodies, collected as they are referenced.
+    notes: Vec<String>,
+
     /// The bullet the next list uses. Two adjacent bullet lists would
     /// merge into one on re-reading; alternating the character splits
     /// them and, unlike a separator comment, adds no block.
@@ -115,6 +127,9 @@ struct Writer {
     alternate: bool,
     /// Whether the GFM extensions are available.
     gfm: bool,
+    /// Where in the document the writer stands, which is what decides
+    /// whether an escape is needed at all.
+    at: Standing,
     /// The column to fill to, or `None` to leave every line as it falls.
     columns: Option<usize>,
     /// How many **list items** deep the block being written is. A
@@ -179,9 +194,9 @@ impl Writer {
                     previous,
                     Some(Block::BulletList(_) | Block::OrderedList(..) | Block::BlockQuote(_))
                 ),
-                first_in_item: self.item_start,
+                first_in_item: self.at.item_start,
             };
-            self.item_start = false;
+            self.at.item_start = false;
             self.block(out, block, prefix, at);
             previous = Some(block);
         }
@@ -311,7 +326,9 @@ impl Writer {
                 push_wrapped(out, prefix, &text, self.columns);
             }
             Block::Header(level, _, inlines) => {
+                self.at.heading = true;
                 let text = self.inlines(inlines);
+                self.at.heading = false;
                 header(out, prefix, *level, &text);
             }
             Block::CodeBlock(attr, text) => Self::code_block(out, attr, text, prefix, at),
@@ -627,7 +644,7 @@ impl Writer {
             // `corpus/truncation-cases.md` is where the lost space
             // showed — in this writer's own round trip, not pandoc's.
             // `CommonMark` examples 273, 274 and 324 are the rest.
-            self.item_start = true;
+            self.at.item_start = true;
             if tight {
                 let mut previous: Option<&Block> = None;
                 for block in item {
@@ -640,16 +657,16 @@ impl Writer {
                                     | Block::BlockQuote(_)
                             )
                         ),
-                        first_in_item: self.item_start,
+                        first_in_item: self.at.item_start,
                     };
-                    self.item_start = false;
+                    self.at.item_start = false;
                     self.block(&mut body, block, inner, at);
                     previous = Some(block);
                 }
             } else {
                 self.blocks(&mut body, item, inner);
             }
-            self.item_start = false;
+            self.at.item_start = false;
             self.depth -= 1;
             let mut lines = body.trim_end_matches('\n').split('\n');
             if let Some(first) = lines.next() {
@@ -737,7 +754,7 @@ impl Writer {
 
     fn inline(&mut self, out: &mut String, inline: &Inline) {
         match inline {
-            Inline::Str(text) => escape_text(out, text, self.gfm),
+            Inline::Str(text) => escape_text(out, text, self.gfm, self.at.heading),
             Inline::Space => out.push(if self.columns.is_some() { BREAK } else { ' ' }),
             // A soft break is a real line break in the source, and this
             // writer never re-wraps, so keeping it is both faithful and
@@ -1158,13 +1175,19 @@ fn opens_autolink(out: &str, ch: char) -> bool {
 ///   so `a&amp;b` reads back as `a&b`;
 /// - the GFM autolink triggers. Pandoc writes literal `http://x` bare and
 ///   its own reader turns the text into a link.
-fn escape_text(out: &mut String, text: &str, gfm: bool) {
+fn escape_text(out: &mut String, text: &str, gfm: bool, heading: bool) {
     let mut chars = text.chars().peekable();
     let mut escaped_bang = false;
     while let Some(ch) = chars.next() {
         let next = chars.peek().copied();
         let after_bang = std::mem::take(&mut escaped_bang);
         let at_line_start = out.is_empty() || out.ends_with('\n');
+        // A heading's text cannot **open** a block: the `## ` in front of
+        // it has already decided what the line is, so the escapes that
+        // exist to stop a list or a setext rule are dead weight there.
+        // `#` is the exception and still escapes — more hashes on a
+        // heading line are more heading, which is a real ambiguity.
+        let opens_here = at_line_start && !heading;
         // A marker only opens a block when the line breaks after it, so
         // `-b` is text and `- b` is a list. Pandoc splits on exactly that.
         let opens_block = next.is_none_or(|c| c == ' ');
@@ -1229,17 +1252,17 @@ fn escape_text(out: &mut String, text: &str, gfm: bool) {
             // heading, which is not a block opener at all and is why this
             // is wider than pandoc's rule. Pandoc loses `Foo\nbar\n\---`
             // to a heading; `CommonMark` example 106 is that document.
-            '-' | '+' if at_line_start && (opens_block || next == Some(ch)) => {
+            '-' | '+' if opens_here && (opens_block || next == Some(ch)) => {
                 out.push('\\');
                 out.push(ch);
             }
-            '=' if at_line_start && next == Some('=') => {
+            '=' if opens_here && next == Some('=') => {
                 out.push('\\');
                 out.push(ch);
             }
             // `1.` and `1)` open an ordered list, but only where the line
             // so far is nothing but the number.
-            '.' | ')' if digits_since_line_start(out) && opens_block => {
+            '.' | ')' if !heading && digits_since_line_start(out) && opens_block => {
                 out.push('\\');
                 out.push(ch);
             }
