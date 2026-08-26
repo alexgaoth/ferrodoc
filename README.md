@@ -57,6 +57,28 @@ something you run, and it keeps mattering afterwards:
 | **Runs in a browser / edge worker** | no | **yes** (wasm32) | — |
 | **Callable without a subprocess** | no | **yes** (Rust, Python) | — |
 
+That batch result is not a promise that every conversion is 72× faster.
+Document size and shape matter, and startup is a larger fraction of a small
+file. Here is a direct measurement on four public, non-generated documents:
+Markdown → HTML with CommonMark input, no syntax highlighting, and unwrapped output.
+`ferrodoc` is the in-process library call; `pandoc` is the subprocess a Python
+or Node pipeline normally starts once per file.
+
+| real document | input | ferrodoc | pandoc subprocess | time | ferrodoc peak RSS | pandoc peak RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| [Rust README](https://github.com/rust-lang/rust/blob/master/README.md) | 3,304 B | **0.172 ms** | 29.2 ms | **170× faster** | **5.1 MiB** | 30.9 MiB |
+| [CommonMark spec source](https://github.com/commonmark/commonmark-spec/blob/master/spec.txt) | 206,108 B | **8.43 ms** | 336 ms | **39.9× faster** | **10.5 MiB** | 141.1 MiB |
+| [Kubernetes 1.34 changelog](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.34.md) | 440,462 B | **18.20 ms** | 494 ms | **27.2× faster** | **16.1 MiB** | 157.5 MiB |
+| [Rust release notes](https://github.com/rust-lang/rust/blob/master/RELEASES.md) | 918,295 B | **53.20 ms** | 1.059 s | **19.9× faster** | **31.5 MiB** | 253.3 MiB |
+
+These rows were downloaded and measured on 2026-08-25 on the machine below.
+Peak RSS is the operating system's high-water mark for one conversion,
+including each program's allocator and executable; it is why memory savings
+should be reported per path and document, not as one universal multiplier.
+The same caution applies to speed: parser-only, writer-only, and a complete
+conversion have different costs. The table deliberately reports the complete
+path that an application pays.
+
 Deterministic output is worth a line of its own: pandoc embeds a timestamp,
 so the same input gives different bytes every run, and content-addressed
 caching and "did this actually change?" both stop working. ferrodoc writes
@@ -97,8 +119,9 @@ print("pandoc   %.2f ms/doc" % bench(lambda: [subprocess.run(
 EOF
 ```
 
-Absolute timings move with CPU state; the ratios hold. Compare interleaved
-runs, never numbers from different sittings.
+Absolute timings and ratios move with CPU state, document shape, and whether
+the competing converter is already running. Compare interleaved runs on your
+own inputs, never numbers from different sittings.
 
 ## And the output is the same
 
@@ -114,7 +137,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **14/20** over every markdown document in `corpus/`, and **498/652** over the CommonMark spec — which is why `-f markdown` is still CommonMark here |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **37/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
-| `ferrodoc-docx` writer | **643/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
+| `ferrodoc-docx` writer | **646/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
 | `ferrodoc-odt` reader | **32/34** corpus documents produce identical ASTs, and **8/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-odt` writer | **640/652** spec examples survive an ODT round trip identically, with embedded images |
 | `ferrodoc-epub` reader | **11/12** corpus documents produce identical ASTs, and **3/3** hand-authored books in layouts pandoc never emits (validated by `epubcheck`) |
