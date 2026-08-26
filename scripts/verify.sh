@@ -278,6 +278,13 @@ if [ "$want_gates" = 1 ]; then
     # byte-identical and is not any more, which is a regression rather
     # than a range. 1 s.
     gate "text writers vs pandoc's" ./scripts/writers.sh --floors
+    # And the binary writers, which have no bytes worth comparing: the
+    # judge is what pandoc reads back out of them. `corpus/docx` and
+    # friends are **pandoc's own output**, so no gate here could see a
+    # construct pandoc's writer does not emit — a code block inside a
+    # list item was split into a paragraph per line for as long as
+    # anyone had looked.
+    gate "binary writers, read back" ./scripts/roundtrip.sh
 
     echo "== published figures"
     # Every score above is published somewhere a reader will believe it.

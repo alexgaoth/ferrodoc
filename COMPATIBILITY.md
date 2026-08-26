@@ -1133,6 +1133,28 @@ round-tripping pandoc's own output through pandoc:**
   `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
   where a two-block one went in. The bullet switch returns the two.
 
+**The binary writers have a judge of their own since 2026-08-26.** A
+DOCX, an ODT, an EPUB and a notebook have no bytes worth comparing — the
+two tools zip different files in a different order — so
+`scripts/roundtrip.sh` writes the same AST with both and requires what
+pandoc reads back out of them to agree. It stands at **docx 13/16, odt
+15/16, ipynb 9/16 and epub 0/16**, over `corpus/*.md` and this
+repository's own prose.
+
+It exists because `diff-docx` and its siblings score **pandoc's own
+output**, and a gate cannot fail on a construct pandoc's writer never
+emits. In one sitting it found a code block inside a list item split into
+a paragraph per line, `--wrap` reaching none of the notebook writer, the
+EPUB writer emitting no accessibility metadata, and its `dc:language`
+defaulting to `en`. Two fields are normalised away and no others: a
+notebook cell's `id` and an EPUB's `dc:identifier`/`dc:date`, each a
+documented difference where this writer is deterministic and pandoc is
+not. The `epub` row is zero because **every** book differs on `dc:title`
+— written always here, omitted by pandoc, and `epubcheck` rejects
+pandoc's book for exactly that — so it is gated at zero until that
+decision changes, with `--verbose` printing the line count so a second
+difference cannot hide behind the first.
+
 **A list is loose when an item holds two blocks with a blank line
 between them — and pandoc reads one such list as tight.** The
 `CommonMark` specification says a list is loose "if any of its
@@ -1155,7 +1177,9 @@ code block inside the nested item is removed, which is what makes it a
 slip rather than a rule. `diff-html` is 652/652, so the spec's own
 examples do not contain the shape; `COMPATIBILITY.md` does, six lines of
 it, and it is the whole of what the `commonmark` and `gfm` writer rows
-still differ on in this file.
+still differ on in this file. It reaches the **DOCX** writer too, and is
+the whole of that row's remainder: the same list written to a `.docx` and
+read back is `Plain` for pandoc and `Para` here.
 
 **RST cannot nest inline markup, and the two answers lose different
 things.** `**bold with *emph* inside**` has no RST spelling: pandoc keeps
