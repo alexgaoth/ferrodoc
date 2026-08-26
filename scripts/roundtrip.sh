@@ -79,7 +79,7 @@ floor_for() {
     case "$1" in
         odt)   echo 16 ;;
         docx)  echo 13 ;;
-        ipynb) echo 9 ;;
+        ipynb) echo 10 ;;
         # Every book differs on `dc:title`, which this writes always and
         # pandoc omits — `epubcheck` rejects pandoc's book for exactly
         # that, so the divergence is decided and the row stays at zero

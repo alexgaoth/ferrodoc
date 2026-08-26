@@ -628,13 +628,19 @@ impl Writer {
             // would make the whole list loose when it is read back, and
             // every `Plain` inside would come back as a `Para`.
             //
-            // When filling, the item's content is rendered under `indent`
-            // so the fill pays for the marker: pandoc puts `- word word
-            // word` on a 20-column line, not `- word word word word`.
-            // The marker then replaces the indent on the first line. When
-            // not filling the prefix changes nothing, so it is left empty
-            // and the indent is added per line below, exactly as before.
-            let inner = if self.columns.is_some() { indent.as_str() } else { "" };
+            // When filling, the item's content is rendered under the
+            // whole of what will sit to its left — the enclosing
+            // `prefix` **and** this item's own indent — so the fill pays
+            // for both: pandoc puts `- word word word` on a 20-column
+            // line, not `- word word word word`. Counting only the
+            // indent left a nested item's line as wide as the outer
+            // list's prefix, 73 columns against 72 at one level of
+            // nesting, which no gate could see because `writers.sh`
+            // compares at `--wrap=preserve`. When not filling the prefix
+            // changes nothing, so it is left empty and the indent is
+            // added per line below.
+            let nested_prefix = format!("{prefix}{indent}");
+            let inner = if self.columns.is_some() { nested_prefix.as_str() } else { "" };
             let mut body = String::new();
             self.depth += 1;
             // A code block cannot open a list item as four spaces,
@@ -680,7 +686,9 @@ impl Writer {
                 } else if inner.is_empty() {
                     push_line(out, prefix, &format!("{indent}{line}"));
                 } else {
-                    push_line(out, prefix, line);
+                    // `inner` already carries `prefix`, so adding it
+                    // again would indent the line twice.
+                    push_line(out, "", line);
                 }
             }
         }
