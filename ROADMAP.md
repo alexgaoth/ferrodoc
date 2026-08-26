@@ -691,21 +691,29 @@ in that order:
 
 | writer | was | now | floor |
 |---|---|---|---|
-| `html` | 8/8 | **12/12** | 12 |
-| `rst` | 2/8 | **12/12** | 12 |
-| `plain` | 5/8 | **12/12** | 12 |
-| `latex` | 0/8 | 11/12 | 11 |
-| `asciidoc` | 2/8 | 11/12 | 11 |
-| `gfm` | 3/8 | 7/12 | 7 |
-| `commonmark` | — | 6/12 | 6 |
-| `markdown` | 1/8 | 3/12 | 3 |
+| `html` | 8/8 | **19/20** | 19 |
+| `rst` | 2/8 | 14/20 | 14 |
+| `plain` | 5/8 | **19/20** | 19 |
+| `latex` | 0/8 | 18/20 | 18 |
+| `asciidoc` | 2/8 | 14/20 | 14 |
+| `gfm` | 3/8 | 10/20 | 10 |
+| `commonmark` | — | 11/20 | 11 |
+| `markdown` | 1/8 | 3/20 | 3 |
 
-The corpus grew from eight documents to twelve on the way, and that is
-the part worth carrying forward: the four added are read as **GFM**,
-because `CommonMark` has no table, no task list and no footnote, so a
-score over the original eight could not see the constructs the writers
-were worst at. The first run of the wider corpus found that the HTML
-writer — at `diff-html` 652/652 — **dropped every footnote**.
+The corpus grew from eight documents to twenty on the way, and that is
+the part worth carrying forward. Four are read as **GFM**, because
+`CommonMark` has no table, no task list and no footnote, so a score over
+the original eight could not see the constructs the writers were worst
+at; the first run of that wider corpus found the HTML writer — at
+`diff-html` 652/652 — **dropping every footnote**.
+
+The last eight are **this repository's own prose**, added 2026-08-25:
+README, ROADMAP, COMPATIBILITY, `docs/` and `samples/README.md`, 4,440
+lines that exist to be read rather than to be converted. They scored
+**asciidoc 0/8 and rst 1/8** against writers sitting at 11/12 and 12/12
+on the fixtures. Five real bugs came out of that in one sitting, and one
+was a broken fence in `README.md` itself — twelve fixtures written to be
+converted had said nothing about any of them.
 
 Each floor is the score that writer reached, because every point below
 one is a document that used to be byte-identical and is not any more.

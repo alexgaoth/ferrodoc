@@ -64,12 +64,12 @@ esac
 # the whole corpus, and the two that are not are held to what they have.
 floor_for() {
     case "$1" in
-        html)     echo 12 ;;
-        rst)      echo 12 ;;
-        plain)    echo 12 ;;
-        latex)    echo 11 ;;
-        asciidoc) echo 11 ;;
-        gfm)      echo 7 ;;
+        html)     echo 19 ;;
+        rst)      echo 14 ;;
+        plain)    echo 19 ;;
+        latex)    echo 18 ;;
+        asciidoc) echo 14 ;;
+        gfm)      echo 10 ;;
         # The like-for-like row: `-t markdown` here **is** CommonMark, so
         # pandoc's `commonmark` writer is the writer to compare it with.
         # It went 3 to 8 the day it was asked separately, and all four
@@ -77,7 +77,7 @@ floor_for() {
         # opens a blockquote or a list item comes back from its own round
         # trip as a paragraph, and its `<!-- -->` list separator comes
         # back as a `RawBlock` that was never in the document.
-        commonmark) echo 8 ;;
+        commonmark) echo 11 ;;
         # And the row that keeps the other question honest: a real
         # `pandoc -t markdown` command line gets pandoc's dialect, and
         # this is how far that is. It moves when `pandoc_markdown` does,
@@ -101,6 +101,13 @@ summary=""
 # bug class: a gate cannot fail on a construct its corpus lacks. The `gfm`
 # pass is the same comparison over `corpus/gfm/*.gfm`, which holds tables
 # with every alignment, task lists, and footnotes.
+#
+# **The third pass is this repository's own prose**, and it is here for
+# the same reason `highlight.sh` runs on real source files: the twelve
+# above are fixtures, written to be converted, and 4,440 lines of README,
+# ROADMAP, COMPATIBILITY and `docs/` were not. Adding them on 2026-08-25
+# scored **asciidoc 0/8 and rst 1/8** on writers that were at 11/12 and
+# 12/12 here, and every one of the five bugs behind that was real.
 # `commonmark` and `markdown` are the same ferrodoc writer measured
 # against two different pandoc writers — see `floor_for` above.
 for format in html commonmark markdown gfm latex rst asciidoc plain; do
@@ -111,7 +118,8 @@ for format in html commonmark markdown gfm latex rst asciidoc plain; do
     mine=$format
     [ "$format" != commonmark ] || mine=markdown
     same=0 total=0
-    for source in "commonmark corpus/*.md" "gfm corpus/gfm/*.gfm"; do
+    for source in "commonmark corpus/*.md" "gfm corpus/gfm/*.gfm" \
+                  "commonmark README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README.md"; do
         read -r from pattern <<<"$source"
         for doc in $pattern; do
             total=$((total + 1))
@@ -139,5 +147,5 @@ for format in html commonmark markdown gfm latex rst asciidoc plain; do
     summary="$summary $format $same/$total,"
 done
 
-printf 'byte-identical:%s all on corpus/*.md and corpus/gfm/*.gfm\n' "${summary%,}"
+printf 'byte-identical:%s on corpus/*.md, corpus/gfm/*.gfm and this repository'"'"'s own prose\n' "${summary%,}"
 exit "$below"

@@ -1081,17 +1081,22 @@ directly without asking its reader to survive anything.
 
 | writer | byte-identical to pandoc | floor |
 |---|---|---|
-| `html` | **12/12** | 12 |
-| `rst` | **12/12** | 12 |
-| `plain` | **12/12** | 12 |
-| `latex` | 11/12 | 11 |
-| `asciidoc` | 11/12 | 11 |
-| `gfm` | 7/12 | 7 |
-| `commonmark` | 8/12 | 8 |
-| `markdown` | 3/12 | 3 |
+| `html` | **19/20** | 19 |
+| `rst` | 14/20 | 14 |
+| `plain` | **19/20** | 19 |
+| `latex` | 18/20 | 18 |
+| `asciidoc` | 14/20 | 14 |
+| `gfm` | 10/20 | 10 |
+| `commonmark` | 11/20 | 11 |
+| `markdown` | 3/20 | 3 |
 
-Twelve documents: the eight in `corpus/` read as CommonMark, and the four
-in `corpus/gfm/` read as GFM. **The second four are there because the
+Twenty documents: the eight in `corpus/` read as CommonMark, the four in
+`corpus/gfm/` read as GFM, and **this repository's own eight** — README,
+ROADMAP, COMPATIBILITY, `docs/` and `samples/README.md`, 4,440 lines that
+exist to be read rather than to be converted. Those eight were added on
+2026-08-25 and scored **asciidoc 0/8 and rst 1/8** against writers that
+were at 11/12 and 12/12 on the fixtures; five real bugs came out of it,
+and one of them was a broken fence in `README.md` itself. **The second four are there because the
 first eight cannot express what the writers are worst at** — CommonMark
 has no table, no task list and no footnote — and the first thing the GFM
 pass found was that the HTML writer, at `diff-html` 652/652, **dropped
