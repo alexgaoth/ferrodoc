@@ -65,7 +65,7 @@ esac
 floor_for() {
     case "$1" in
         html)     echo 19 ;;
-        rst)      echo 14 ;;
+        rst)      echo 17 ;;
         plain)    echo 19 ;;
         latex)    echo 18 ;;
         asciidoc) echo 19 ;;

@@ -1082,7 +1082,7 @@ directly without asking its reader to survive anything.
 | writer | byte-identical to pandoc | floor |
 |---|---|---|
 | `html` | **19/20** | 19 |
-| `rst` | 14/20 | 14 |
+| `rst` | 17/20 | 17 |
 | `plain` | **19/20** | 19 |
 | `latex` | 18/20 | 18 |
 | `asciidoc` | **19/20** | 19 |
@@ -1132,6 +1132,15 @@ round-tripping pandoc's own output through pandoc:**
   Pandoc's separator **is a `RawBlock` its own reader gives back**, so
   `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
   where a two-block one went in. The bullet switch returns the two.
+
+**RST cannot nest inline markup, and the two answers lose different
+things.** `**bold with *emph* inside**` has no RST spelling: pandoc keeps
+the outer marker and **drops the emphasis** — its own round trip returns
+`Strong ["bold with emph inside"]` with no `Emph` in it — while this
+closes the outer marker and reopens it, `**bold with** *emph* **inside**`,
+which returns all three marks and not the nesting. Neither is exact; one
+keeps the words' emphasis and one does not. `sphinx-build -W` accepts
+both.
 
 **The EPUB writer emits no syntax highlighting**, where pandoc's book
 carries both the spans and 66 lines of CSS for them. That is not an

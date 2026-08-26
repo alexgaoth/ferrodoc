@@ -342,8 +342,16 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
                 }
                 None => out.push_str("::\n\n"),
             }
+            // A blank line inside the block stays blank: `indent` has
+            // always known that and this loop did not, so every code
+            // block with an empty line in it carried three stray spaces
+            // there. `docs/releasing.md` has two.
             for line in code.lines() {
-                let _ = writeln!(out, "{INDENT}{line}");
+                if line.is_empty() {
+                    out.push('\n');
+                } else {
+                    let _ = writeln!(out, "{INDENT}{line}");
+                }
             }
             out.push('\n');
         }
@@ -805,6 +813,13 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
         // no run of them can enclose. Pandoc falls back to the `literal`
         // role, where a backslash escape works.
         Inline::Code(_, code) => {
+            // **RST cannot hold a space against the marker**, so pandoc
+            // trims both edges; the interior is untouched. `` `x ` `` is
+            // a code span whose content really does end in a space —
+            // `CommonMark` strips one only when there is one at each end
+            // — and writing it back put the space where docutils cannot
+            // read it. `ROADMAP.md` has `` `#include ` ``.
+            let code = code.trim();
             if code.contains('`') {
                 let _ = write!(out, ":literal:`{}`", code.replace('`', "\\`"));
             } else {
