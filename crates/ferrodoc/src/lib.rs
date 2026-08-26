@@ -219,17 +219,28 @@ impl Format {
             // HTML one does since 2026-08-24 — it marks its break
             // opportunities as it writes, including **between a tag's
             // attributes**, which is where pandoc breaks a long tag.
-            Format::Markdown | Format::Gfm | Format::Html | Format::Plain | Format::Latex => {
-                Wrapping::Fills
-            }
-            Format::Rst | Format::Asciidoc => Wrapping::Fills,
+            Format::Markdown
+            | Format::Gfm
+            | Format::Html
+            | Format::Plain
+            | Format::Latex
+            // …and RST and AsciiDoc, and **a notebook**: its markdown
+            // cell is markdown, and all three of pandoc's modes change
+            // it. Ipynb was grouped with DOCX below, where ignoring
+            // `--wrap` is right because there are no lines to lay out; a
+            // cell has lines, and `auto`, `none` and `preserve` gave
+            // identical bytes here until 2026-08-26.
+            | Format::Rst
+            | Format::Asciidoc
+            | Format::Ipynb => Wrapping::Fills,
             // `pandoc --wrap=auto -t docx` is accepted and does nothing
             // there too, so ignoring it is the compatible answer.
-            Format::Docx | Format::Odt | Format::Epub | Format::Ipynb | Format::Json => {
-                Wrapping::NotText
-            }
-            // Read-only, so nothing is ever written with a wrap.
-            Format::PandocMarkdown => Wrapping::NotText,
+            // `pandoc_markdown` is read-only and never written at all.
+            Format::Docx
+            | Format::Odt
+            | Format::Epub
+            | Format::Json
+            | Format::PandocMarkdown => Wrapping::NotText,
         }
     }
 
@@ -685,6 +696,14 @@ pub fn render_wrapped_with_media(
         return Ok(ferrodoc_html::write_html_wrapped(doc, "", wrap).into_bytes());
     }
     match (columns, to) {
+        #[cfg(feature = "ipynb")]
+        (columns, Format::Ipynb) => {
+            let resolve = |url: &str| data_url(url).or_else(|| media(url));
+            ferrodoc_ipynb::write_ipynb_wrapped(doc, &resolve, columns).map_err(|e| Error::Invalid {
+                format: to,
+                detail: e.to_string(),
+            })
+        }
         #[cfg(feature = "markdown")]
         (Some(columns), Format::Markdown) => {
             Ok(ferrodoc_markdown::write_markdown_wrapped(doc, columns).into_bytes())

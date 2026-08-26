@@ -35,6 +35,28 @@ pub fn write_ipynb_with_media(
     doc: &Pandoc,
     media: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
+    write_ipynb_wrapped(doc, media, None)
+}
+
+/// Write a notebook whose markdown cells are filled to `columns`.
+///
+/// **A notebook's markdown cell is markdown, and pandoc lays it out.**
+/// `--wrap` was ignored here — `auto`, `none` and `preserve` produced the
+/// same bytes — because `Format::Ipynb` was classified with DOCX and ODT,
+/// where pandoc ignores it too because there are no lines to lay out.
+/// There are lines in a markdown cell, and all three of pandoc's modes
+/// change them.
+///
+/// `None` keeps the document's own breaks, which is `--wrap=preserve`.
+///
+/// # Errors
+///
+/// The same as [`write_ipynb`].
+pub fn write_ipynb_wrapped(
+    doc: &Pandoc,
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+    columns: Option<usize>,
+) -> Result<Vec<u8>, Error> {
     let mut cells = Vec::new();
     let mut loose: Vec<Block> = Vec::new();
     for block in &doc.blocks {
@@ -45,16 +67,16 @@ pub fn write_ipynb_with_media(
                 // `ferrodoc notes.md -o notes.ipynb` produce a notebook
                 // rather than an empty one.
                 if !loose.is_empty() {
-                    cells.push(cell(&Attr::default(), "markdown", &std::mem::take(&mut loose), media));
+                    cells.push(cell(&Attr::default(), "markdown", &std::mem::take(&mut loose), media, columns));
                 }
                 let kind = attr.classes.get(1).map_or("markdown", String::as_str);
-                cells.push(cell(attr, kind, blocks, media));
+                cells.push(cell(attr, kind, blocks, media, columns));
             }
             other => loose.push(other.clone()),
         }
     }
     if !loose.is_empty() {
-        cells.push(cell(&Attr::default(), "markdown", &loose, media));
+        cells.push(cell(&Attr::default(), "markdown", &loose, media, columns));
     }
 
     let notebook = json!({
@@ -101,7 +123,13 @@ fn meta_json(value: &MetaValue) -> Value {
     }
 }
 
-fn cell(attr: &Attr, kind: &str, blocks: &[Block], media: &dyn Fn(&str) -> Option<Vec<u8>>) -> Value {
+fn cell(
+    attr: &Attr,
+    kind: &str,
+    blocks: &[Block],
+    media: &dyn Fn(&str) -> Option<Vec<u8>>,
+    columns: Option<usize>,
+) -> Value {
     let mut metadata = Map::new();
     let mut execution_count = Value::Null;
     for (key, value) in &attr.attributes {
@@ -156,7 +184,13 @@ fn cell(attr: &Attr, kind: &str, blocks: &[Block], media: &dyn Fn(&str) -> Optio
         _ => {
             let mut blocks = blocks.to_vec();
             attachments = detach_images(&mut blocks, media);
-            ferrodoc_markdown::write_gfm(&Pandoc { blocks, ..Pandoc::default() })
+            {
+                let cell = Pandoc { blocks, ..Pandoc::default() };
+                match columns {
+                    Some(columns) => ferrodoc_markdown::write_gfm_wrapped(&cell, columns),
+                    None => ferrodoc_markdown::write_gfm(&cell),
+                }
+            }
                 .trim_end_matches('\n')
                 .to_owned()
         }

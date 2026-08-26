@@ -46,7 +46,7 @@ mod sha1;
 mod write;
 
 pub use read::{read_ipynb, read_ipynb_with_media};
-pub use write::{write_ipynb, write_ipynb_with_media};
+pub use write::{write_ipynb, write_ipynb_with_media, write_ipynb_wrapped};
 
 use std::collections::HashMap;
 
