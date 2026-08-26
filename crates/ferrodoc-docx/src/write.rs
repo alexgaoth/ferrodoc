@@ -246,19 +246,28 @@ impl Writer<'_> {
             Block::BlockQuote(blocks) => {
                 self.with_style("BlockText", |w| w.blocks(blocks))
             }
+            // **One paragraph, with `<w:br/>` between the lines** — which
+            // is what pandoc writes. A paragraph per line reads back the
+            // same at the top level, because pandoc's reader re-merges
+            // consecutive `SourceCode` paragraphs; **inside a list item
+            // it does not**, and a three-line block in a bullet came back
+            // as three separate code blocks. `docs/divergences.md` turned
+            // 8 code blocks into 22 that way, and `diff-docx` could not
+            // see it because its corpus is pandoc's own output, where a
+            // code block in a list item does not occur.
             Block::CodeBlock(_, text) => {
-                let mut out = String::new();
                 let mut runs = String::new();
-                for line in code_block_lines(text) {
-                    runs.clear();
+                for (index, line) in code_block_lines(text).enumerate() {
+                    if index > 0 {
+                        runs.push_str("<w:r><w:br/></w:r>");
+                    }
                     runs.push_str(
                         "<w:r><w:rPr><w:rStyle w:val=\"VerbatimChar\"/></w:rPr><w:t xml:space=\"preserve\">",
                     );
                     escape_into(&mut runs, line);
                     runs.push_str("</w:t></w:r>");
-                    out.push_str(&self.emit_paragraph(Some("SourceCode"), "", &runs));
                 }
-                out
+                self.emit_paragraph(Some("SourceCode"), "", &runs)
             }
             Block::BulletList(items) => self.list_blocks(items, None, 0),
             Block::OrderedList(attrs, items) => self.list_blocks(items, Some(attrs), 0),
