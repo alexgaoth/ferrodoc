@@ -1133,6 +1133,15 @@ round-tripping pandoc's own output through pandoc:**
   `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
   where a two-block one went in. The bullet switch returns the two.
 
+**The EPUB writer emits no syntax highlighting**, where pandoc's book
+carries both the spans and 66 lines of CSS for them. That is not an
+oversight to fix in passing: the CSS is skylighting's style rather than
+`data/templates`, so the BSD carve-out pandoc's template is vendored
+under does not reach it, and it is the same owner's decision that holds
+`-s` output back — ROADMAP 0.7. Emitting the spans without the CSS is
+reachable and would close the round-trip gap; it is recorded here rather
+than done, because it is half of a decision that has not been made.
+
 **The `gfm` row's five are the same story**, checked the same way:
 `code-and-raw.md` and `truncation-cases.md` are the code block pandoc
 loses; `extensions.gfm` and `task-list-runs.gfm` are the `<!-- -->`

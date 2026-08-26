@@ -358,6 +358,15 @@ fn item_id(file: &str) -> String {
 /// rejects pandoc's book for precisely that. `dcterms:modified` is fixed
 /// rather than stamped with the clock, which is what makes the same
 /// document produce the same bytes.
+///
+/// The **accessibility metadata** is pandoc's, verbatim: a book with none
+/// is rejected by some stores and tells a reading system nothing about
+/// what it can offer. It was missing until 2026-08-26, and no gate could
+/// see it — `diff-epub-write` compares blocks, so the whole package
+/// document is outside what it reads. Round-tripping this repository's
+/// own prose through the writer and back through pandoc is what found
+/// it, along with a `dc:language` defaulting to `en` where pandoc's
+/// default is `en-US`.
 fn package(doc: &Pandoc, title: &str, chapters: &[Chapter], pictures: &[Picture]) -> String {
     let mut out = String::from(concat!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
@@ -382,9 +391,22 @@ fn package(doc: &Pandoc, title: &str, chapters: &[Chapter], pictures: &[Picture]
     let _ = writeln!(
         out,
         "<dc:language>{}</dc:language>",
-        escape(if language.is_empty() { "en" } else { &language })
+        escape(if language.is_empty() { "en-US" } else { &language })
     );
     out.push_str("<meta property=\"dcterms:modified\">1980-01-01T00:00:00Z</meta>\n");
+    // The accessibility metadata pandoc writes, verbatim and in its
+    // order. Some stores require it, a reader uses it to say what it can
+    // offer, and none of it depends on the document — every book this
+    // writer produces is textual, navigable and has a contents.
+    out.push_str(concat!(
+        "<meta property=\"schema:accessMode\">textual</meta>\n",
+        "<meta property=\"schema:accessModeSufficient\">textual</meta>\n",
+        "<meta property=\"schema:accessibilityFeature\">alternativeText</meta>\n",
+        "<meta property=\"schema:accessibilityFeature\">readingOrder</meta>\n",
+        "<meta property=\"schema:accessibilityFeature\">structuralNavigation</meta>\n",
+        "<meta property=\"schema:accessibilityFeature\">tableOfContents</meta>\n",
+        "<meta property=\"schema:accessibilityHazard\">none</meta>\n",
+    ));
     out.push_str("</metadata>\n<manifest>\n");
     out.push_str(concat!(
         "<item id=\"nav\" href=\"nav.xhtml\"",
