@@ -1137,9 +1137,17 @@ round-tripping pandoc's own output through pandoc:**
 DOCX, an ODT, an EPUB and a notebook have no bytes worth comparing — the
 two tools zip different files in a different order — so
 `scripts/roundtrip.sh` writes the same AST with both and requires what
-pandoc reads back out of them to agree. It stands at **docx 13/16, odt
-15/16, ipynb 9/16 and epub 0/16**, over `corpus/*.md` and this
+pandoc reads back out of them to agree. It stands at **odt 16/16, docx
+13/16, ipynb 9/16 and epub 0/16**, over `corpus/*.md` and this
 repository's own prose.
+
+Pandoc is given `--resource-path` pointing at the document's directory,
+because **pandoc looks for media in the working directory and this looks
+beside the document** — see `--resource-path` below. Without that the
+comparison measures the difference in path resolution rather than the
+writer: pandoc found none of `corpus/images.md`'s pictures and wrote a
+book with no frames in it, which read back as a missing image on every
+row. That was the ODT row's only miss, and it was the gate's own.
 
 It exists because `diff-docx` and its siblings score **pandoc's own
 output**, and a gate cannot fail on a construct pandoc's writer never

@@ -77,7 +77,7 @@ docs=(corpus/*.md README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README
 
 floor_for() {
     case "$1" in
-        odt)   echo 15 ;;
+        odt)   echo 16 ;;
         docx)  echo 13 ;;
         ipynb) echo 9 ;;
         # Every book differs on `dc:title`, which this writes always and
@@ -97,7 +97,14 @@ for format in docx odt epub ipynb; do
     for doc in "${docs[@]}"; do
         [ -f "$doc" ] || continue
         total=$((total + 1))
-        ( ulimit -v 6000000; pandoc "$doc" -f commonmark -o "$work/p.$format" ) 2>/dev/null
+        # **Pandoc looks for media in the working directory; this looks
+        # beside the document** (`COMPATIBILITY.md`, `--resource-path`).
+        # Without saying so, every document with a picture measured that
+        # difference instead of the writer: pandoc found none of
+        # `corpus/images.md`'s and wrote a book with no frames in it.
+        ( ulimit -v 6000000
+          pandoc "$doc" -f commonmark --resource-path="$(dirname "$doc")" \
+              -o "$work/p.$format" ) 2>/dev/null
         "$FERRODOC" "$doc" -f markdown -o "$work/f.$format" 2>/dev/null
         for side in p f; do
             ( ulimit -v 6000000; pandoc "$work/$side.$format" -t json ) 2>/dev/null \
