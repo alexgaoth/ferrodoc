@@ -460,8 +460,8 @@ fn take_flag(
     match arg {
         "-f" | "--from" | "-t" | "--to" => {
             let name = value(arg)?;
-            let parsed = format(&name)?;
             let slot = usize::from(matches!(arg, "-t" | "--to"));
+            let parsed = format(&name, slot == 0)?;
             if out.deprecated.len() <= slot {
                 out.deprecated.resize(slot + 1, String::new());
             }
@@ -674,8 +674,8 @@ fn run() -> Result<(), String> {
         return Ok(());
     };
 
-    let from = inferred(from, input.as_deref(), "input", "--from", "a file")?;
-    let to = inferred(to, output.as_deref(), "output", "--to", "an output file")?;
+    let from = inferred(from, input.as_deref(), "input", "--from", "a file", true)?;
+    let to = inferred(to, output.as_deref(), "output", "--to", "an output file", false)?;
 
     let bytes = read_input(input.as_deref())?;
     if matches!(from, Format::Markdown | Format::Gfm) && opens_with_metadata_block(&bytes) {
@@ -1031,8 +1031,10 @@ fn inferred(
     role: &str,
     flag: &str,
     what: &str,
+    input: bool,
 ) -> Result<Format, String> {
-    given.or_else(|| path.and_then(Format::from_path)).ok_or_else(|| {
+    let from_path = if input { Format::from_input_path } else { Format::from_path };
+    given.or_else(|| path.and_then(from_path)).ok_or_else(|| {
         format!("cannot tell the {role} format: pass {flag}, or name {what} with a known extension")
     })
 }
@@ -1494,7 +1496,7 @@ fn resolve<'a>(
     }
 }
 
-fn format(name: &str) -> Result<Format, String> {
+fn format(name: &str, input: bool) -> Result<Format, String> {
     // `markdown+footnotes-pipe_tables` is pandoc's extension syntax. What
     // is accepted here is what the named dialect **already does**: a
     // request that asks for nothing new is the same conversion, and one
@@ -1512,7 +1514,11 @@ fn format(name: &str) -> Result<Format, String> {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    let format = Format::parse(name)
+    // On the input side `markdown` is pandoc's dialect, as it is in
+    // pandoc; on the output side it is still CommonMark, because there is
+    // no writer for the dialect yet.
+    let resolve = if input { Format::parse_input } else { Format::parse };
+    let format = resolve(name)
         .ok_or_else(|| format!("unknown format {name:?}; known formats: {}", known()))?;
     // Only a build trimmed with cargo features can reach this: the name is
     // real, the code for it was not compiled in. Saying so beats "unknown

@@ -2136,12 +2136,34 @@ nests the other way round, and the four `.gfm` documents, which are read
 by a dialect that is not GFM and disagree about pipes in code spans and
 about how a run of task items is cut into lists.
 
-### `markdown` means CommonMark, not pandoc's markdown
+### `markdown` means pandoc's markdown on the way in, CommonMark on the way out
 
-The flag spelling is the same and the dialects are not. `pandoc -f
-markdown` is pandoc's own dialect; `ferrodoc -f markdown` is CommonMark,
-and extension inference picks it for a `.md` file. Five things a pandoc
-document may carry are read as the literal text they are written with:
+**Reversed on 2026-08-27.** It used to mean CommonMark in both
+directions, and the paragraphs below describe what that cost; they are
+kept because the cost is what decided it.
+
+`ferrodoc -f markdown` and a `.md` file with no `-f` now read pandoc's
+own dialect, as they do in pandoc. `-f commonmark` names CommonMark.
+**`-t markdown` still writes CommonMark**, because there is no writer for
+the dialect yet — that asymmetry is real and is written here rather than
+hidden.
+
+What decided it, measured over this repository's own documents against
+`pandoc -t html` with no `-f` on either side:
+
+| read as | differing lines |
+|---|---:|
+| CommonMark | **2,466** |
+| pandoc's dialect | **241** |
+
+Ten times closer, and **not one document worse**. Drop-in went 12/48 to
+**22/48** in the same commit. Twenty-eight of the 48 real command lines
+in `dropin/` name no input format at all, so the extension decided it for
+them, and it decided wrongly.
+
+The old behaviour is below, as the record of what the flag used to do.
+Five things a pandoc document may carry were read as the literal text
+they are written with:
 
 ```console
 $ cat sample.md
@@ -2187,11 +2209,16 @@ that makes the two agree. On the 38 misses in 48 real command lines:
 
 | what one change would fix the row | rows |
 |---|---|
-| reading `-f markdown` as pandoc's dialect | **17** |
-| that, and pandoc's default syntax highlighting | **10** |
-| highlighting alone | 3 |
+| reading `-f markdown` as pandoc's dialect | 4 |
+| that, and pandoc's default syntax highlighting | 1 |
+| highlighting alone | **8** |
 | a difference this project keeps (`dropin-006`) | 1 |
-| neither | **7** |
+| neither | **12** |
+
+Those first two rows read **17** and **10** before the default changed.
+What is left is the honest remainder: twelve rows are gaps in this
+project's own reading of pandoc's dialect, which the old default kept out
+of sight behind a decision.
 
 **Six of those last seven are the same decision from an angle the
 experiment cannot model.** The counterfactual works by handing pandoc

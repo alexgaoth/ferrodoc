@@ -8,6 +8,32 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
+## Unreleased
+
+### `markdown` is pandoc's markdown when reading
+
+**This changes what `ferrodoc x.md` does.** A `.md` file with no `-f`, and
+`-f markdown` spelled out, now read pandoc's own dialect — heading
+identifiers, footnotes, definition lists, `{#id .class}` attributes and a
+YAML metadata block — where they read CommonMark before.
+
+> **If you want the old behaviour, pass `-f commonmark`.** It is the same
+> reader, under the name pandoc gives it.
+
+Measured over this repository's own documents against `pandoc -t html`
+with no `-f` on either side, the difference from pandoc's output falls
+from **2,466 lines to 241**, and no document gets worse. The 48 real
+command lines in `dropin/` go from **12/48 to 22/48** byte-identical.
+
+**`-t markdown` still writes CommonMark.** There is no writer for
+pandoc's dialect yet, so the name is asymmetric: it reads one thing and
+writes another. That is stated rather than smoothed over, and it is the
+next thing worth building.
+
+`Format::parse` is unchanged and still maps `markdown` to CommonMark;
+the new `Format::parse_input` and `Format::from_input_path` are what the
+CLI uses for the input side.
+
 ## 0.7.0 — 2026-08-26
 
 ### Syntax highlighting, in pandoc's shape

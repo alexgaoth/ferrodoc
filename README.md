@@ -337,7 +337,7 @@ at a time is what let the default flip.
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
 real pandoc command lines — collected from public Makefiles, CI files and
 scripts — through both binaries and compares every byte either wrote,
-stdout, output files and stderr. **12/48 command lines identical**, with
+stdout, output files and stderr. **22/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of
@@ -345,12 +345,16 @@ pandoc's own features switched off at a time — on **both** sides, since
 this now highlights too — and names the smallest set that makes the two
 agree. Reading `markdown` as pandoc's dialect rather than CommonMark —
 on the way in, on the way out, and under the deprecated name
-`markdown_github` — accounts for **23** misses on its own and **9** more
-together with syntax highlighting, which accounts for **2** by itself.
-One row is a difference this project has decided to keep. **That leaves
-2**: a `--reference-doc` DOCX and a LaTeX document. It left eight before
-the experiment learned to switch a feature off on *both* sides. **The
-number is one decision away.**
+`markdown_github` — accounted for 23 misses on its own until
+**2026-08-27, when the default became pandoc's dialect** and the number
+went 12/48 to 22/48. It now accounts for **4**, with **1** more together
+with syntax highlighting, which accounts for **8** by itself. One row is
+a difference this project has decided to keep.
+
+**That leaves 12**, and they are the honest remainder: gaps in this
+project's own reading of pandoc's dialect, which the old default hid
+behind a decision. The number stopped being one decision away and became
+work.
 
 `--extract-media DIR` writes the input's embedded images under `DIR` and
 repoints the output at them, matching `pandoc --extract-media` file for

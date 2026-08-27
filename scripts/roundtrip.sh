@@ -146,7 +146,12 @@ for format in docx odt epub ipynb; do
         ( ulimit -v 6000000
           pandoc "$doc" -f commonmark --resource-path="$(dirname "$doc")" \
               -o "$work/p.$format" ) 2>/dev/null
-        "$FERRODOC" "$doc" -f markdown -o "$work/f.$format" 2>/dev/null
+        # **`-f commonmark`, spelled out.** pandoc above is given
+        # commonmark, and the two sides must read the same dialect;
+        # `-f markdown` named CommonMark here until 2026-08-27 and now
+        # names pandoc's dialect, which silently made this compare two
+        # different documents — docx fell 14/16 to 1/16 in one commit.
+        "$FERRODOC" "$doc" -f commonmark -o "$work/f.$format" 2>/dev/null
         # A document only one of them will write is not a difference in
         # the writer, and saying so beats scoring it either way.
         if [ ! -s "$work/p.$format" ] || [ ! -s "$work/f.$format" ]; then
