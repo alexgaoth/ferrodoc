@@ -1475,6 +1475,17 @@ recorded on this page**: the loose/tight list reading, the code block
 pandoc loses when it opens a container, a quotation the DOCX round trip
 renests, and `dc:title`.
 
+**Two differences sit behind the epub row, and both are decided.** Nine
+differing lines is the `dc:title` baseline; a document above it has a
+relative link to a file the book does not contain, which this writer
+drops the href of and pandoc keeps. `epubcheck` settles that one:
+injecting such a link into an otherwise valid book gives
+`ERROR(RSC-007): Referenced resource "EPUB/text/x.html" could not be
+found in the EPUB`. `docs/gates.md` has no relative links and sits at
+nine; `README.md` has six and sits at 152. A count above nine that those
+links do not explain would be a third difference, and there is not one
+today.
+
 Two documents are counted as *unwritten* rather than as misses, both for
 `ipynb`: `corpus/images.md` and `corpus/readme-style.md` name a picture
 that is deliberately absent, and pandoc refuses the conversion where this

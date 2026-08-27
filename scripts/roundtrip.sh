@@ -104,6 +104,21 @@ floor_for() {
         # that, so the divergence is decided and the row stays at zero
         # until the decision changes. Gated so a *second* difference
         # cannot hide behind the first: `--verbose` prints the line count.
+        #
+        # **Two are known, and both are deliberate.** Nine lines is the
+        # `dc:title` baseline. Above it means the document has a relative
+        # link to a file the book does not contain: this drops the dead
+        # href and keeps the text, pandoc keeps the href, and `epubcheck`
+        # answers the question —
+        #
+        #   ERROR(RSC-007): Referenced resource "EPUB/text/x.html"
+        #   could not be found in the EPUB.
+        #
+        # measured 2026-08-27 by injecting one into an otherwise valid
+        # book. `docs/gates.md` has no relative links and sits at nine;
+        # `README.md` has six and sits at 152. **A count above nine that
+        # is not explained by those links is the third difference this
+        # line exists to catch.**
         epub)  echo 0 ;;
         *)     echo 0 ;;
     esac
