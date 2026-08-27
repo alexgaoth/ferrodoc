@@ -1108,6 +1108,35 @@ outranks a speculative one; by 0.8 there are installed users to measure.
 
 - Source bytes, decompressed archive bytes and entry count, retained media,
   structural depth, output bytes.
+
+**Measured 2026-08-27, so the size of the hole is known before the work
+starts.** `corpus/bombs/generate.sh` writes two archives of ordinary
+shape — no nesting, no trickery, just a compressible body:
+
+| fixture | on disk | decompressed | peak RSS | ratio |
+|---|---:|---:|---:|---:|
+| `ratio.docx` | 457 KB | 131 MB | **1.28 GB** | **2,900×** |
+| `ratio.epub` | 218 KB | 72 MB | **1.18 GB** | **5,400×** |
+
+`verify.sh` gates peak RSS at **80× input** and reports `docx-to-markdown
+at 60.0x, within the 80.0x bound`. Neither fixture is in the corpus that
+gate runs over, so **the bound is stated and not defended** — the same
+blind spot this file names for the highlighters, in the resource
+contract. Structural depth is bounded (`MAX_NESTING`); decompressed bytes
+are not bounded anywhere.
+
+Under memory pressure the process **aborts** rather than returning an
+error — `memory allocation of 192 bytes failed` — which is Rust's OOM
+path and not a panic in this code, but it is not refusing hostile input
+either. Pandoc, for comparison, rejects the same `ratio.docx` in 0.00 s
+at 15 MB, though for its own reasons rather than a size rule.
+
+**The threshold is not a session's to choose.** A decompression budget is
+a user-visible refusal: set it low and a legitimate 200 MB manuscript
+stops converting, set it high and it defends nothing. Rule 3 of this file
+says a measured production limit outranks a speculative one, which is
+exactly why 0.8 sits after the embedders. The measurement above is what
+that decision now has to work from.
 - A typed `ResourceLimit` naming the budget crossed, identical in Rust,
   CLI, Python, C and WASM.
 - Zip-bomb and giant-media fixtures in the corpus; rejection before
