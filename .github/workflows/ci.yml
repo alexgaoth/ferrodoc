@@ -61,8 +61,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install pandoc ${{ env.PANDOC_VERSION }}
         run: |
-          curl -fsSL -o pandoc.deb \
-            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          .github/fetch.sh \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb" \
+            pandoc.deb
           sudo dpkg -i pandoc.deb
           pandoc --version | head -1
       - name: every gate, at the thresholds scripts/verify.sh holds
@@ -81,8 +82,9 @@ jobs:
       # An EPUB has a second judge that knows nothing of our intentions.
       - name: epubcheck accepts the hand-authored corpus
         run: |
-          curl -fsSL -o epubcheck.zip \
-            https://github.com/w3c/epubcheck/releases/download/v5.1.0/epubcheck-5.1.0.zip
+          .github/fetch.sh \
+            https://github.com/w3c/epubcheck/releases/download/v5.1.0/epubcheck-5.1.0.zip \
+            epubcheck.zip
           unzip -q epubcheck.zip
           for book in corpus/epub-handmade/*.epub; do
             java -jar epubcheck-5.1.0/epubcheck.jar "$book" 2>&1 | tee /tmp/check
@@ -145,8 +147,9 @@ jobs:
       # sides have to be on the machine that checks the claim.
       - name: Install pandoc ${{ env.PANDOC_VERSION }}
         run: |
-          curl -fsSL -o pandoc.deb \
-            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          .github/fetch.sh \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb" \
+            pandoc.deb
           sudo dpkg -i pandoc.deb
           pandoc --version | head -1
       - name: byte counts and trimmed ratios
@@ -266,8 +269,9 @@ jobs:
       # only pandoc's answer settles that.
       - name: Install pandoc ${{ env.PANDOC_VERSION }}
         run: |
-          curl -fsSL -o pandoc.deb \
-            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          .github/fetch.sh \
+            "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/pandoc-${PANDOC_VERSION}-1-amd64.deb" \
+            pandoc.deb
           sudo dpkg -i pandoc.deb
       - name: build the writers
         run: cargo build --release -p ferrodoc
