@@ -564,18 +564,52 @@ impl Writer<'_> {
     // --- inlines ---
 
     fn inlines(&mut self, inlines: &[Inline]) -> String {
-        let style = RunStyle::default();
-        inlines.iter().map(|i| self.inline(i, &style)).collect()
+        self.sequence(inlines, &RunStyle::default())
+    }
+
+    /// Render a run of inlines, **merging adjacent plain text into one
+    /// OOXML run** the way pandoc does.
+    ///
+    /// A run per inline is correct and enormous: `word/document.xml` for
+    /// 1 MB of prose was **17.7 MB** against pandoc's 3.5 MB, because
+    /// every word and every space between them carried its own
+    /// `<w:r><w:t>`.
+    ///
+    /// The rule is `Str (Space Str)*`, and it was probed rather than
+    /// assumed. `a b c d` is **one** run; `a *b* c d` is five —
+    /// `a`, ` `, the italic `b`, ` `, `c d` — because a `Space` joins the
+    /// text only when a `Str` stands on **both** sides of it. A
+    /// `SoftBreak` never joins, though it renders as the same space:
+    /// `alpha beta\ngamma delta` comes back as three runs, not one.
+    fn sequence(&mut self, inlines: &[Inline], style: &RunStyle) -> String {
+        let mut out = String::new();
+        let mut at = 0;
+        while at < inlines.len() {
+            let Inline::Str(first) = &inlines[at] else {
+                out.push_str(&self.inline(&inlines[at], style));
+                at += 1;
+                continue;
+            };
+            let mut text = escape(first);
+            let mut end = at + 1;
+            while matches!(inlines.get(end), Some(Inline::Space))
+                && let Some(Inline::Str(next)) = inlines.get(end + 1)
+            {
+                text.push(' ');
+                text.push_str(&escape(next));
+                end += 2;
+            }
+            out.push_str(&run(style, &text));
+            at = end;
+        }
+        out
     }
 
     /// Render an inline, carrying the run style accumulated by the
     /// formatting containers around it (OOXML runs do not nest).
     fn inline(&mut self, inline: &Inline, style: &RunStyle) -> String {
         let nested = |writer: &mut Self, inner: &[Inline], style: &RunStyle| -> String {
-            inner
-                .iter()
-                .map(|i| writer.inline(i, style))
-                .collect::<String>()
+            writer.sequence(inner, style)
         };
         match inline {
             Inline::Str(text) => run(style, &escape(text)),
