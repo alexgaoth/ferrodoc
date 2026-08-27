@@ -977,16 +977,19 @@ fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
         out.push_str(&text);
         return;
     }
-    // **RST inline markup cannot be split across lines**, so the whole
-    // span is one word to the fill: pandoc breaks after `*emph in*`, not
-    // inside it.
+    // **A span is not one word to the fill.** Docutils joins a
+    // paragraph's continuation lines before it reads the markup, so
+    // `**a long run**` may be broken anywhere inside it — and pandoc
+    // does, filling `**section` onto one line and `for this version**`
+    // onto the next. Treating the span as unbreakable pushed it whole
+    // onto a new line and overran the column instead. The gate could not
+    // see it: `writers.sh` compares at `--wrap=preserve`, where no fill
+    // runs at all.
     //
-    // That is the *fill's* break and not the document's. A `SoftBreak`
-    // written inside `**…**` survives under `--wrap=preserve` — pandoc
-    // keeps it and collapses it under the other two — so it goes through
-    // to `lay_out` like any other. Removing it here joined every such
-    // paragraph into one line; `docs/gates.md` has three.
-    let _ = write!(out, "{marker}{}{marker}", trimmed(&text).replace(BREAK, " "));
+    // Neither mark is dropped here, then: `BREAK` is the fill's own
+    // opportunity and `SOFT` is a break the document wrote, and `lay_out`
+    // is where both are decided.
+    let _ = write!(out, "{marker}{}{marker}", trimmed(&text));
 }
 
 /// One run of un-nested inlines, wrapped in the marker its parent uses.
@@ -996,10 +999,8 @@ fn push_run(marker: &str, run: &[Inline], pieces: &mut Vec<String>, def: &mut De
     }
     let mut text = String::new();
     inlines(run, &mut text, def);
-    // One unbreakable unit, like the un-nested form: RST inline markup
-    // cannot be split across lines — to the *fill*. A `SoftBreak` the
-    // document wrote is `lay_out`'s to decide, as above.
-    let text = trimmed(&text).replace(BREAK, " ");
+    // Breakable, like the un-nested form above.
+    let text = trimmed(&text);
     if !text.is_empty() {
         pieces.push(format!("{marker}{text}{marker}"));
     }

@@ -691,16 +691,16 @@ in that order:
 
 | writer | was | now | floor |
 |---|---|---|---|
-| `html` | 8/8 | **19/20** | 19 |
-| `rst` | 2/8 | 17/20 | 17 |
-| `plain` | 5/8 | **19/20** | 19 |
-| `latex` | 0/8 | 18/20 | 18 |
-| `asciidoc` | 2/8 | **19/20** | 19 |
-| `gfm` | 3/8 | 14/20 | 14 |
-| `commonmark` | — | 15/20 | 15 |
-| `markdown` | 1/8 | 3/20 | 3 |
+| `html` | 8/8 | **38/40** | 38 |
+| `rst` | 2/8 | 34/40 | 34 |
+| `plain` | 5/8 | **38/40** | 38 |
+| `latex` | 0/8 | 36/40 | 36 |
+| `asciidoc` | 2/8 | **38/40** | 38 |
+| `gfm` | 3/8 | 28/40 | 28 |
+| `commonmark` | — | 29/40 | 29 |
+| `markdown` | 1/8 | 6/40 | 6 |
 
-The corpus grew from eight documents to twenty on the way, and that is
+The corpus grew from eight documents to twenty, each written twice, on the way, and that is
 the part worth carrying forward. Four are read as **GFM**, because
 `CommonMark` has no table, no task list and no footnote, so a score over
 the original eight could not see the constructs the writers were worst
@@ -854,6 +854,105 @@ wrong, which is the worst kind this project has.
 The measurement says (a) or nothing. Either way the exit test needs a
 corpus of real code per language, not the spec's nine lines — otherwise
 the number means only that the fixtures were chosen to pass.
+
+### 0.7.5 — Performance and the large-document envelope
+
+**Claim:** the supported conversion paths get materially faster and use
+materially less peak memory on real documents, while preserving the exact
+output and safety guarantees that make the speed claim worth anything.
+
+This is a required best-effort engineering objective, not a decorative set
+of aspirational numbers. Every card below must make the strongest reasonable
+attempt to reach its target. A target may be revised only after a profile,
+the exact input checksum, and the reason it cannot be reached are committed
+to the performance record. "The benchmark improved a little" is not done.
+
+#### Baseline and targets
+
+These are release-build, Linux x86-64 baselines measured on 2026-08-25. The
+real public inputs must be recorded by URL and checksum before any result is
+made a gate; they are not fixtures to be silently replaced with friendlier
+ones.
+
+| end-to-end workload | current baseline | target | why it matters |
+|---|---:|---:|---|
+| 918,295 B Rust release notes, CommonMark → HTML | 53.2 ms; 31.5 MiB peak RSS | **≤ 40 ms; ≤ 24 MiB** | A large text document where parser, AST and writer all matter. |
+| 6,797,467 B public EPUB → plain text | 180 ms; 71 MiB peak RSS | **≤ 140 ms; ≤ 55 MiB** | A genuine multi-chapter archive rather than tiled Markdown. |
+| 226 public EPUBs, 199.6 MiB compressed input, CLI → plain text | 26.7 s; 223 MiB worst per-process RSS | **≤ 20 s; ≤ 180 MiB** | Sustained ingestion: the workload a migration actually schedules. |
+
+Use the median of five warm release runs for time and the operating system's
+high-water resident set for memory. Conversion must exit successfully,
+produce the same bytes as the checked baseline where a byte oracle exists,
+and leave all differential gates at their floors. A lower RSS number obtained
+by skipping media, refusing a document, or timing only a parser is a failure,
+not an improvement.
+
+#### Concrete hot paths already found
+
+The work begins with measured allocations and copies, not with a generic
+rewrite in the name of speed.
+
+1. **HTML's footnote preflight clones every AST.**
+   `ferrodoc-html::has_note` copies `blocks` just to walk them mutably, even
+   for a document with no notes. `take_notes` therefore pays a full-tree
+   allocation before it can return its borrowed fast path. Replace it with
+   an immutable short-circuiting walk. This must preserve the existing
+   footnote numbering and nested-note tests.
+2. **HTML layout copies the whole rendered output two or three times.**
+   `lay_out` chains `String::replace` for `Wrap::None` and `Wrap::Preserve`.
+   Replace that with one output pass and one allocation, byte-identical for
+   all wrap modes. This matters most when the output, rather than the input,
+   is the large object.
+3. **The Markdown reader defeats its own borrowed preprocessing fast path.**
+   `preprocess` returns a borrowed `Cow` for already-normal input, but
+   `read` immediately calls `into_owned`. Keep the input borrowed until the
+   empty-front-matter workaround actually changes it. This removes one full
+   input copy on the ordinary path.
+4. **The owned interoperability AST is the real large-document ceiling.**
+   Comrak builds a complete arena tree and ferrodoc then builds a complete,
+   fully owned Pandoc-compatible AST. Literal prose is further represented
+   as word-sized `Inline::Str(String)` allocations because Pandoc JSON needs
+   those token boundaries. Do not weaken JSON compatibility to hide memory;
+   profile an internal compact/borrowed representation or an event path
+   behind the existing owning public API, and make it a separately reviewed
+   design decision.
+5. **Archive readers hold several representations at once.**
+   EPUB takes all ZIP bytes, reads a chapter into a `String`, builds an HTML
+   tree, and appends its owned blocks to the growing document. DOCX and ODT
+   have the same whole-part shape. Design a reader-backed archive and
+   streaming-output path for CLI/batch users, while retaining the current
+   byte-slice APIs for embedders that need an owned AST.
+
+The first three are compatibility-preserving implementation cards. The last
+two are architectural work: no public AST break, lossy shortcut, `unsafe`,
+or unbounded partial rewrite is acceptable merely to hit a benchmark.
+
+#### Initial execution cards
+
+**P1 — Remove unconditional HTML copies.** Replace the mutable clone in the
+footnote preflight with an immutable walk; make `Wrap::None` and
+`Wrap::Preserve` layout one-pass. Add unit tests for no note, nested note,
+and each wrap mode; run the HTML differential gate and the pinned 918,295 B
+benchmark. **Done:** identical output and a recorded movement toward
+40 ms / 24 MiB. **Not this card:** changing the public AST or implementing
+streaming.
+
+**P2 — Keep ordinary Markdown input borrowed.** Carry `Cow<str>` through
+the Markdown parser setup, allocating only for tabs, carriage returns,
+missing final newlines, or the empty-front-matter exception. Run the 652
+CommonMark examples, AST round-trip gate, and the pinned large Markdown
+benchmark. **Done:** no compatibility loss and an allocation/profile record
+showing whether the input copy was removed. **Not this card:** replacing
+Comrak.
+
+**P3 — Make the archive/AST decision from evidence.** Profile the largest
+real EPUB and the 199.6 MiB batch by phase: input archive, decompressed
+chapter, HTML tree, Pandoc AST, and output. Write and review the smallest
+design that can release those buffers early — likely a reader-backed archive
+plus a streaming conversion API. **Done:** a checked design and a prototype
+or a recorded, evidence-backed rejection; it must make the strongest
+reasonable attempt at 140 ms / 55 MiB and 20 s / 180 MiB. **Not this card:**
+a silent public-API break or a new document format.
 
 ### 0.8 — The resource contract
 

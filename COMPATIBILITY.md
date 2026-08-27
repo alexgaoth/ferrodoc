@@ -1149,16 +1149,21 @@ directly without asking its reader to survive anything.
 
 | writer | byte-identical to pandoc | floor |
 |---|---|---|
-| `html` | **19/20** | 19 |
-| `rst` | 17/20 | 17 |
-| `plain` | **19/20** | 19 |
-| `latex` | 18/20 | 18 |
-| `asciidoc` | **19/20** | 19 |
-| `gfm` | 14/20 | 14 |
-| `commonmark` | 15/20 | 15 |
-| `markdown` | 3/20 | 3 |
+| `html` | **38/40** | 38 |
+| `rst` | 34/40 | 34 |
+| `plain` | **38/40** | 38 |
+| `latex` | 36/40 | 36 |
+| `asciidoc` | **38/40** | 38 |
+| `gfm` | 28/40 | 28 |
+| `commonmark` | 29/40 | 29 |
+| `markdown` | 6/40 | 6 |
 
-Twenty documents: the eight in `corpus/` read as CommonMark, the four in
+Twenty documents, **each written twice** — as the document falls, and
+filled to 72 columns, which is pandoc's own default. Nothing measured the
+fill until 2026-08-26, and the RST writer had been treating an inline
+span as one unbreakable word: `**a long run**` was pushed whole onto the
+next line and overran the column on four of the eight prose documents.
+The twenty are the eight in `corpus/` read as CommonMark, the four in
 `corpus/gfm/` read as GFM, and **this repository's own eight** — README,
 ROADMAP, COMPATIBILITY, `docs/` and `samples/README.md`, 4,440 lines that
 exist to be read rather than to be converted. Those eight were added on

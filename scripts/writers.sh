@@ -64,12 +64,12 @@ esac
 # the whole corpus, and the two that are not are held to what they have.
 floor_for() {
     case "$1" in
-        html)     echo 19 ;;
-        rst)      echo 17 ;;
-        plain)    echo 19 ;;
-        latex)    echo 18 ;;
-        asciidoc) echo 19 ;;
-        gfm)      echo 14 ;;
+        html)     echo 38 ;;
+        rst)      echo 34 ;;
+        plain)    echo 38 ;;
+        latex)    echo 36 ;;
+        asciidoc) echo 38 ;;
+        gfm)      echo 28 ;;
         # The like-for-like row: `-t markdown` here **is** CommonMark, so
         # pandoc's `commonmark` writer is the writer to compare it with.
         # It went 3 to 8 the day it was asked separately, and all four
@@ -77,12 +77,12 @@ floor_for() {
         # opens a blockquote or a list item comes back from its own round
         # trip as a paragraph, and its `<!-- -->` list separator comes
         # back as a `RawBlock` that was never in the document.
-        commonmark) echo 15 ;;
+        commonmark) echo 29 ;;
         # And the row that keeps the other question honest: a real
         # `pandoc -t markdown` command line gets pandoc's dialect, and
         # this is how far that is. It moves when `pandoc_markdown` does,
         # not when the writer does — see ROADMAP card D4.4.
-        markdown) echo 3 ;;
+        markdown) echo 6 ;;
         *)        echo 0 ;;
     esac
 }
@@ -118,22 +118,30 @@ for format in html commonmark markdown gfm latex rst asciidoc plain; do
     mine=$format
     [ "$format" != commonmark ] || mine=markdown
     same=0 total=0
-    for source in "commonmark corpus/*.md" "gfm corpus/gfm/*.gfm" \
-                  "commonmark README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README.md"; do
-        read -r from pattern <<<"$source"
-        for doc in $pattern; do
-            total=$((total + 1))
-            ( ulimit -v 6000000
-              pandoc "$doc" -f "$from" -t "$format" --wrap="$wrap" \
-                  --syntax-highlighting=none ) > "$work/p" 2>/dev/null
-            "$FERRODOC" "$doc" -f "$from" -t "$mine" --wrap="$wrap" \
-                  --no-highlight > "$work/f" 2>/dev/null
-            if diff -q "$work/p" "$work/f" >/dev/null; then
-                same=$((same + 1))
-            elif [ "$verbose" = 1 ]; then
-                printf '  %-9s %-22s %s lines\n' "$format" "$(basename "$doc")" \
-                    "$(diff "$work/p" "$work/f" | grep -c '^[<>]')"
-            fi
+    # **Every document twice: as it falls, and filled.** The second mode
+    # is pandoc's own default, and nothing measured it until 2026-08-26 —
+    # the RST writer treated an inline span as one unbreakable word, so
+    # `**a long run**` was pushed whole onto the next line and overran
+    # the column, on four of the eight prose documents. `--wrap=preserve`
+    # never runs a fill, so no score here could move.
+    for mode in "$wrap" auto; do
+        for source in "commonmark corpus/*.md" "gfm corpus/gfm/*.gfm" \
+                      "commonmark README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README.md"; do
+            read -r from pattern <<<"$source"
+            for doc in $pattern; do
+                total=$((total + 1))
+                ( ulimit -v 6000000
+                  pandoc "$doc" -f "$from" -t "$format" --wrap="$mode" --columns=72 \
+                      --syntax-highlighting=none ) > "$work/p" 2>/dev/null
+                "$FERRODOC" "$doc" -f "$from" -t "$mine" --wrap="$mode" --columns=72 \
+                      --no-highlight > "$work/f" 2>/dev/null
+                if diff -q "$work/p" "$work/f" >/dev/null; then
+                    same=$((same + 1))
+                elif [ "$verbose" = 1 ]; then
+                    printf '  %-9s %-6s %-22s %s lines\n' "$format" "$mode" \
+                        "$(basename "$doc")" "$(diff "$work/p" "$work/f" | grep -c '^[<>]')"
+                fi
+            done
         done
     done
     floor=$(floor_for "$format")
@@ -141,7 +149,7 @@ for format in html commonmark markdown gfm latex rst asciidoc plain; do
         printf '%-10s %d/%d — BELOW ITS FLOOR OF %d\n' "$format" "$same" "$total" "$floor"
         below=1
     elif [ "$floors" = 0 ]; then
-        printf '%-10s %d/%d byte-identical to pandoc (--wrap=%s)\n' \
+        printf '%-10s %d/%d byte-identical to pandoc (--wrap=%s and --wrap=auto)\n' \
             "$format" "$same" "$total" "$wrap"
     fi
     summary="$summary $format $same/$total,"
