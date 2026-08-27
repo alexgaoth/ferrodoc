@@ -47,6 +47,12 @@ pub(crate) enum Class {
     Alert,
     /// What `%x( … )` — a shell command — comes back as.
     Information,
+    /// A backslash that begins no escape python knows.
+    Error,
+    /// A python docstring. Rendered `co` like a comment, and kept apart
+    /// from one because **a docstring carries no alert words**: `TODO`
+    /// in a `#` comment is an `al` and `TODO` in a `""" … """` is not.
+    Documentation,
     /// **A Ruby symbol.** Skylighting files `:name` under the class it
     /// uses for warnings; probed, not guessed.
     Warning,
@@ -66,7 +72,9 @@ impl Class {
             Class::Str => "st",
             Class::Char => "ch",
             Class::SpecialChar => "sc",
-            Class::Comment => "co",
+            // A docstring renders as a comment and is not one: it
+            // carries no alert words, which is why it has its own variant.
+            Class::Comment | Class::Documentation => "co",
             Class::Operator => "op",
             Class::Preprocessor => "pp",
             Class::Import => "im",
@@ -80,6 +88,7 @@ impl Class {
             Class::Constant => "cn",
             Class::Alert => "al",
             Class::Information => "in",
+            Class::Error => "er",
             Class::Warning => "wa",
         })
     }
@@ -129,6 +138,9 @@ const CONVERSIONS: u8 = 1 << 1;
 const DOCSTRINGS: u8 = 1 << 2;
 /// `@name` at the start of a line is an `at`.
 const DECORATORS: u8 = 1 << 3;
+/// A backslash begins an escape only where python says it does, and
+/// otherwise is an `er`: `"\n"` is a `ch` and `"\d"` is an error.
+const STRICT_ESCAPES: u8 = 1 << 5;
 /// `{…}` inside an ordinary string is one `sc` — python's `str.format`
 /// placeholders. In an f-string it is the braces alone that are `sc`,
 /// with code between them, which is a different rule.
@@ -511,7 +523,7 @@ static PYTHON: Syntax = Syntax {
     ],
     // `%20` inside a string is an `sc` here as `%s` is in C — the same
     // conversion rule, in a language that also spells modulo `%`.
-    quirks: CONVERSIONS | DOCSTRINGS | DECORATORS | PLACEHOLDERS,
+    quirks: CONVERSIONS | DOCSTRINGS | DECORATORS | PLACEHOLDERS | STRICT_ESCAPES,
     conversions: "cdefgiorsuxEFGX%",
     operators: PYTHON_OPERATORS,
     string_prefixes: "rbfuRBFU",
@@ -1065,7 +1077,9 @@ pub(crate) struct State {
     carried: Carried,
     /// Inside a `"""`/`'''` run: the quote character and the class the
     /// run took where it opened, which is a `co` for a docstring.
-    open_string: Option<(char, Class)>,
+    /// The quote, the class the run took, and whether its body is read
+    /// as a regular expression.
+    open_string: Option<(char, Class, bool)>,
     /// Bash only: where in a command the scanner stands. Carried
     /// between lines because a line ending in `\\`, `|` or `&&`
     /// continues one.
@@ -1199,22 +1213,31 @@ fn uncommented(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)
     }
     let mut out: Vec<(Class, String)> = Vec::new();
     let mut at = 0;
-    if let Some((quote, class)) = state.open_string {
+    if let Some((quote, class, regexp)) = state.open_string {
         let delimiter: String = std::iter::repeat_n(quote, 3).collect();
         // An **empty** line inside the run is empty: pandoc writes no
         // span at all for it, not an empty one.
         if text.is_empty() {
             return Vec::new();
         }
-        let end = text.find(&delimiter);
-        let body = end.map_or(text, |end| &text[..end]);
-        placeholders(body, class, syntax, &mut out);
-        match end {
-            None => return out,
-            Some(end) => {
-                push(&mut out, class, &text[end..end + delimiter.len()]);
-                at = end + delimiter.len();
-                state.open_string = None;
+        // A `r""" … """` continues as a regular expression, not as text:
+        // `doctest.py`'s `_EXAMPLE_RE` is twenty lines of one.
+        if regexp {
+            at = python_regexp(text, 0, &delimiter, class, false, state, &mut out);
+            if state.open_string.is_some() {
+                return out;
+            }
+        } else {
+            let end = text.find(&delimiter);
+            let body = end.map_or(text, |end| &text[..end]);
+            placeholders(body, class, syntax, &mut out);
+            match end {
+                None => return out,
+                Some(end) => {
+                    push(&mut out, class, &text[end..end + delimiter.len()]);
+                    at = end + delimiter.len();
+                    state.open_string = None;
+                }
             }
         }
     } else if state.carried == Carried::BlockComment {
@@ -1384,12 +1407,16 @@ fn scan(text: &str, from: usize, syntax: &Syntax, state: &mut State, out: &mut V
             // An **f-string is never a docstring**, measured: a bare
             // `f"…"` on its own line stays a `ss`, where a bare `r"…"`
             // becomes a `co`.
+            // A raw string can be one too — `doctest.py` opens with
+            // `r"""…"""` — and when it is, it is read as prose and not as
+            // the regular expression an `r` prefix otherwise makes it.
             if syntax.has(DOCSTRINGS)
-                && opener.class == Class::Str
+                && matches!(opener.class, Class::Str | Class::VerbatimString)
                 && state.brackets == 0
                 && out.iter().all(|(_, run)| run.trim().is_empty())
             {
-                opener.class = Class::Comment;
+                opener.class = Class::Documentation;
+                opener.regexp = false;
             }
             at = quoted(text, at, opener, syntax, state, out);
             continue;
@@ -1461,6 +1488,266 @@ struct Opener {
     skip: usize,
     quote: char,
     class: Class,
+    /// Whether the body is a regular expression, which a lowercase `r`
+    /// prefix makes it and a capital `R` does not.
+    regexp: bool,
+    /// Whether `{ … }` in the body is a placeholder — an `f` prefix, which
+    /// can stand beside the `r` and does in `fr"…"`.
+    placeholders: bool,
+}
+
+/// The body of a python raw string, which pandoc reads as a **regular
+/// expression** rather than as text. Every rule below was probed one
+/// construct at a time against the pinned binary.
+///
+/// The shape of it: the body is a `vs`; `\d` and its letter friends are
+/// `dv` while `\1` and `\.` are `ch`; a character class is `pp` with its
+/// escapes keeping their own classes; `.`, `^` and `$` are `dv`; `|` is
+/// `cf`; `+`, `*`, `?` and a **numeric** `{2,3}` are `op` — `{a}` is not;
+/// and a group's parentheses take their class from what opens it.
+fn python_regexp(
+    text: &str,
+    from: usize,
+    delimiter: &str,
+    class: Class,
+    placeholders: bool,
+    state: &mut State,
+    out: &mut Vec<(Class, String)>,
+) -> usize {
+    // What each open group's `)` will be. `(?: … )` closes with no class
+    // at all, which is why this holds an `Option`.
+    let mut groups: Vec<Option<Class>> = Vec::new();
+    let verbose = delimiter.len() > 1;
+    let mut at = from;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with(delimiter) {
+            push(out, class, delimiter);
+            state.open_string = None;
+            return at + delimiter.len();
+        }
+        // **A triple-quoted raw string is a *verbose* regexp**, where `#`
+        // comments to the end of the line — and a single-quoted one is
+        // not: `r"a#b"` is flat, `r"""a#b"""` carries a `co`. The
+        // delimiter's length is the whole of the difference.
+        if verbose && rest.starts_with('#') {
+            let end = rest.find(delimiter).unwrap_or(rest.len());
+            push(out, Class::Comment, &rest[..end]);
+            at += end;
+            continue;
+        }
+        if let Some(after) = rest.strip_prefix('\\') {
+            let width = 1 + after.chars().next().map_or(0, char::len_utf8);
+            let escape = if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                Class::DecVal
+            } else {
+                Class::Char
+            };
+            push(out, escape, &rest[..width]);
+            at += width;
+            continue;
+        }
+        // An `fr"…"` is both: `fr"{x}\d"` keeps the `sc` braces of an
+        // f-string *and* reads `\d` as a regexp escape.
+        if placeholders
+            && rest.starts_with('{')
+            && let Some(end) = rest.find('}')
+        {
+            push(out, Class::SpecialChar, "{");
+            push(out, Class::Normal, &rest[1..end]);
+            push(out, Class::SpecialChar, "}");
+            at += end + 1;
+            continue;
+        }
+        if rest.starts_with('[') {
+            at += character_class(rest, out);
+            continue;
+        }
+        if rest.starts_with('(') {
+            at += group_opener(rest, &mut groups, out);
+            continue;
+        }
+        if rest.starts_with(')') {
+            match groups.pop().unwrap_or(Some(Class::Keyword)) {
+                Some(closing) => push(out, closing, ")"),
+                None => push(out, Class::Normal, ")"),
+            }
+            at += 1;
+            continue;
+        }
+        if let Some(width) = quantifier(rest) {
+            push(out, Class::Operator, &rest[..width]);
+            at += width;
+            continue;
+        }
+        let width = rest.chars().next().map_or(1, char::len_utf8);
+        let single = match &rest[..width] {
+            "|" => Class::ControlFlow,
+            "." | "^" | "$" => Class::DecVal,
+            _ => class,
+        };
+        push(out, single, &rest[..width]);
+        at += width;
+    }
+    if verbose {
+        let quote = delimiter.chars().next().unwrap_or('"');
+        state.open_string = Some((quote, class, true));
+    }
+    at
+}
+
+/// `+`, `*`, `?`, or a repetition count — but only a **numeric** one:
+/// `a{2,3}` quantifies and `a{b}` is three ordinary characters.
+fn quantifier(rest: &str) -> Option<usize> {
+    if rest.starts_with(['+', '*', '?']) {
+        return Some(1);
+    }
+    let inside = rest.strip_prefix('{')?;
+    let end = inside.find('}')?;
+    let count = &inside[..end];
+    let numeric = !count.is_empty()
+        && count.bytes().all(|byte| byte.is_ascii_digit() || byte == b',')
+        && count.bytes().filter(|byte| *byte == b',').count() <= 1;
+    numeric.then_some(end + 2)
+}
+
+/// `[a-z]`, whose brackets and plain characters are `pp` while the
+/// escapes inside keep their own classes. A `]` **immediately** after the
+/// opening bracket, or after its `^`, is a literal — `[]]` is one class.
+fn character_class(rest: &str, out: &mut Vec<(Class, String)>) -> usize {
+    let opened = 1 + usize::from(rest[1..].starts_with('^'));
+    let mut at = opened + usize::from(rest[opened..].starts_with(']'));
+    let mut plain = 0;
+    while at < rest.len() {
+        if let Some(after) = rest[at..].strip_prefix('\\') {
+            push(out, Class::Preprocessor, &rest[plain..at]);
+            let width = 1 + after.chars().next().map_or(0, char::len_utf8);
+            let escape = if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                Class::DecVal
+            } else {
+                Class::Char
+            };
+            push(out, escape, &rest[at..at + width]);
+            at += width;
+            plain = at;
+            continue;
+        }
+        if rest[at..].starts_with(']') {
+            push(out, Class::Preprocessor, &rest[plain..=at]);
+            return at + 1;
+        }
+        at += rest[at..].chars().next().map_or(1, char::len_utf8);
+    }
+    // Unterminated: the rest of the run is still the class.
+    push(out, Class::Preprocessor, &rest[plain..]);
+    at
+}
+
+/// A `(`, and what its `)` will be. The plain group is `kw`; `(?: … )`
+/// carries no class either side; a lookaround is `ex`; a named group is
+/// `kw` with a `fu` for its name; and `(?i)`, `(?#…)` and `(?P=n)` are
+/// each one span of their own.
+fn group_opener(rest: &str, groups: &mut Vec<Option<Class>>, out: &mut Vec<(Class, String)>) -> usize {
+    if let Some(end) = rest.find(')') {
+        let whole = &rest[..=end];
+        // `(?i)`, `(?ms)` — flags, and nothing else in the group.
+        let flags = rest[1..end]
+            .strip_prefix('?')
+            .is_some_and(|f| !f.is_empty() && f.bytes().all(|b| b.is_ascii_lowercase()));
+        let alone = if rest.starts_with("(?#") {
+            Some(Class::Comment)
+        } else if rest.starts_with("(?P=") {
+            Some(Class::Variable)
+        } else if flags {
+            Some(Class::Function)
+        } else {
+            None
+        };
+        if let Some(class) = alone {
+            push(out, class, whole);
+            return end + 1;
+        }
+    }
+    if rest.starts_with("(?:") {
+        groups.push(None);
+        push(out, Class::Normal, "(?:");
+        return 3;
+    }
+    if rest.starts_with("(?=") || rest.starts_with("(?!") {
+        groups.push(Some(Class::Extension));
+        push(out, Class::Extension, "(");
+        push(out, Class::Function, &rest[1..3]);
+        return 3;
+    }
+    if rest.starts_with("(?<") {
+        groups.push(Some(Class::Keyword));
+        push(out, Class::Keyword, "(");
+        push(out, Class::Function, "?<");
+        return 3;
+    }
+    if rest.starts_with("(?P<")
+        && let Some(end) = rest.find('>')
+    {
+        groups.push(Some(Class::Keyword));
+        push(out, Class::Keyword, "(");
+        push(out, Class::Function, &rest[1..=end]);
+        return end + 1;
+    }
+    groups.push(Some(Class::Keyword));
+    push(out, Class::Keyword, "(");
+    1
+}
+
+/// One escape, written and measured. Where the language is strict about
+/// which escapes exist — python is — a backslash that begins none is an
+/// `er`, and only the backslash: `"\d"` is `er` then `st`. Where it is
+/// not, a run of backslashes is taken two at a time.
+fn escaped(rest: &str, syntax: &Syntax, out: &mut Vec<(Class, String)>) -> usize {
+    if syntax.has(STRICT_ESCAPES) {
+        let Some(len) = python_escape(rest) else {
+            push(out, Class::Error, "\\");
+            return 1;
+        };
+        push(out, syntax.escape, &rest[..len]);
+        return len;
+    }
+    let mut end = 0;
+    while rest[end..].starts_with('\\') {
+        end = (end + 2).min(rest.len());
+    }
+    push(out, syntax.escape, &rest[..end]);
+    end
+}
+
+/// How long the escape at `rest` is, or `None` if the backslash begins
+/// none. **Probed a to z, A to Z and 0 to 9**, and then form by form:
+/// `\a \b \f \n \r \t \v` are escapes and every other letter alone is
+/// not; one to three octal digits are; `\x` needs exactly two hex digits,
+/// `\u` four and `\U` eight, and each is an error without them; `\N{…}`
+/// is one whole escape; and of the punctuation only `\\`, `\'` and `\"`
+/// count — `\.` and a backslash before a space are errors.
+fn python_escape(rest: &str) -> Option<usize> {
+    let after = rest.strip_prefix('\\')?;
+    let first = after.chars().next()?;
+    if "abfnrtv\\'\"\n".contains(first) {
+        return Some(1 + first.len_utf8());
+    }
+    if ('0'..='7').contains(&first) {
+        let digits = after.chars().take(3).take_while(|c| ('0'..='7').contains(c)).count();
+        return Some(1 + digits);
+    }
+    let hex = |count: usize| {
+        let digits = &after[1..];
+        (digits.len() >= count && digits[..count].bytes().all(|b| b.is_ascii_hexdigit()))
+            .then_some(2 + count)
+    };
+    match first {
+        'x' => hex(2),
+        'u' => hex(4),
+        'U' => hex(8),
+        'N' => after[1..].starts_with('{').then(|| after.find('}').map(|end| end + 2))?,
+        _ => None,
+    }
 }
 
 /// The quoted run that opens `rest`, if one does. A prefix letter belongs
@@ -1469,19 +1756,42 @@ struct Opener {
 fn opening(rest: &str, syntax: &Syntax) -> Option<Opener> {
     let first = rest.chars().next()?;
     if let Some((_, class)) = syntax.quotes.iter().find(|(q, _)| *q == first) {
-        return Some(Opener { skip: 0, quote: first, class: *class });
+        return Some(Opener { skip: 0, quote: first, class: *class, regexp: false, placeholders: false });
     }
-    if !syntax.string_prefixes.contains(first) {
+    // A prefix is one or two letters — `r`, `b`, `f`, `u` and their
+    // capitals, in either order: `rb"…"` and `br"…"` are both strings.
+    let prefix: String = rest
+        .chars()
+        .take(2)
+        .take_while(|c| syntax.string_prefixes.contains(*c))
+        .collect();
+    if prefix.is_empty() {
         return None;
     }
-    let quote = rest[first.len_utf8()..].chars().next()?;
+    let skip = prefix.len();
+    let quote = rest[skip..].chars().next()?;
     syntax.quotes.iter().find(|(q, _)| *q == quote)?;
-    let class = if first.eq_ignore_ascii_case(&'f') {
+    // **A lowercase `r` makes the body a regular expression; a capital
+    // `R` does not** — `r"\d"` carries a `dv` inside a `vs`, while
+    // `R"\d"` is one flat `vs` with no tokens in it at all. Both are
+    // `vs`; only the lowercase one is read. Measured, and not a
+    // distinction anyone would invent.
+    let raw = prefix.contains(['r', 'R']);
+    let formatted = prefix.contains(['f', 'F']);
+    let class = if raw {
+        Class::VerbatimString
+    } else if formatted {
         Class::SpecialString
     } else {
         Class::Str
     };
-    Some(Opener { skip: first.len_utf8(), quote, class })
+    Some(Opener {
+        skip,
+        quote,
+        class,
+        regexp: prefix.contains('r'),
+        placeholders: formatted,
+    })
 }
 
 fn quoted(
@@ -1492,7 +1802,7 @@ fn quoted(
     state: &mut State,
     out: &mut Vec<(Class, String)>,
 ) -> usize {
-    let Opener { skip, quote, class } = opener;
+    let Opener { skip, quote, class, regexp, placeholders } = opener;
     // `"""` and `'''` close on the same run of three, not on one.
     let triple: String = std::iter::repeat_n(quote, 3).collect();
     let delimiter = if text[from + skip..].starts_with(&triple) {
@@ -1502,6 +1812,16 @@ fn quoted(
     };
     push(out, class, &text[from..from + skip + delimiter.len()]);
     let mut at = from + skip + delimiter.len();
+    if regexp {
+        return python_regexp(text, at, delimiter, class, placeholders, state, out);
+    }
+    // A capital `R` is raw but unread: the body carries no tokens, so it
+    // runs to the delimiter as one piece.
+    if class == Class::VerbatimString {
+        let end = text[at..].find(delimiter).map_or(text.len(), |index| at + index + delimiter.len());
+        push(out, class, &text[at..end]);
+        return end;
+    }
     // Where an f-string placeholder's `!r` or `:>3` begins, if it has one.
     let mut spec: Option<usize> = None;
     while at < text.len() {
@@ -1520,12 +1840,7 @@ fn quoted(
             return at + 1;
         }
         if rest.starts_with('\\') {
-            let mut end = 0;
-            while rest[end..].starts_with('\\') {
-                end = (end + 2).min(rest.len());
-            }
-            push(out, syntax.escape, &rest[..end]);
-            at += end;
+            at += escaped(rest, syntax, out);
             continue;
         }
         // `{…}` in an ordinary string is one piece; in an f-string the
@@ -1597,7 +1912,7 @@ fn quoted(
     // The line ended inside the run: a triple-quoted one continues on the
     // next, a single-quoted one does not.
     if delimiter.len() > quote.len_utf8() {
-        state.open_string = Some((quote, class));
+        state.open_string = Some((quote, class, false));
     }
     at
 }
@@ -2224,7 +2539,7 @@ fn bash_punctuation(
     if byte == b'\'' {
         let Some(end) = rest[1..].find('\'').map(|index| index + 2) else {
             push(out, Class::Str, rest);
-            state.open_string = Some(('\'', Class::Str));
+            state.open_string = Some(('\'', Class::Str, false));
             return Some(text.len());
         };
         push(out, Class::Str, &rest[..end]);
@@ -2563,14 +2878,21 @@ fn placeholders(text: &str, class: Class, syntax: &Syntax, out: &mut Vec<(Class,
             push(out, Class::Operator, rest);
             return;
         }
-        if syntax.has(CONVERSIONS)
+        // **A docstring holds no conversions and no placeholders**: it is
+        // prose, and pandoc leaves `%d` and `{name}` in it alone. The
+        // first line of one already knew that, because `quoted` asks
+        // whether the class is `st`; every line after it did not, and
+        // `difflib.py` is full of `%d` inside `""" … """`.
+        if class != Class::Documentation
+            && syntax.has(CONVERSIONS)
             && let Some(len) = specifier(rest, syntax.conversions)
         {
             push(out, Class::SpecialChar, &rest[..len]);
             at += len;
             continue;
         }
-        if syntax.has(PLACEHOLDERS)
+        if class != Class::Documentation
+            && syntax.has(PLACEHOLDERS)
             && rest.starts_with('{')
             && let Some(end) = rest.find('}')
         {
@@ -3032,7 +3354,10 @@ mod tests {
             pieces.iter().map(|(c, t)| (*c, (*t).to_owned())).collect::<Vec<_>>()
         };
         // A string that opens a line is a docstring — a comment.
-        assert_eq!(classes("\"doc\"", "python"), text(&[(Class::Comment, "\"doc\"")]));
+        // A docstring renders `co` and is **not** a `Comment`: alert
+        // words are read in a comment and not in a docstring, so the two
+        // cannot share a class. `\"\"\"TODO\"\"\"` carries no `al`.
+        assert_eq!(classes("\"doc\"", "python"), text(&[(Class::Documentation, "\"doc\"")]));
         // …but not inside a bracket run, which is what a `__all__` list
         // is full of.
         let mut state = State::default();
