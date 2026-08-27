@@ -540,11 +540,7 @@ static BASH: Syntax = Syntax {
     canonical: "bash",
     names: &["bash", "sh", "shell", "zsh", "ksh"],
     keywords: &[
-        // The command vocabulary was probed against an external list,
-        // not one written from memory and not one drawn from the files
-        // the gate happens to hold: every name in /usr/bin, 3,130 of
-        // them, read back 200 to a document. 279 came back `fu` and 21
-        // `bu`; the other 2,830 carry no class at all.
+        (".", Class::BuiltIn),
         (":", Class::BuiltIn),
         ("aconnect", Class::Function),
         ("alias", Class::BuiltIn),
@@ -2465,6 +2461,15 @@ fn bash_code(
             push(out, Class::Comment, rest);
             return text.len();
         }
+        // **Inside a `name=( … )` array, `[key]=` is a subscript**, not a
+        // glob: the brackets are `op`, a quoted key keeps its `st`, a
+        // bare one carries nothing, and the `=` after the `]` is a `va`.
+        if cursor.in_array
+            && let Some(run) = array_key(rest, out)
+        {
+            at += run;
+            continue;
+        }
         if let Some(next) = bash_punctuation(text, at, state, out, depth) {
             at = next;
             continue;
@@ -2561,6 +2566,24 @@ fn backticked(
         return end + 1;
     }
     end
+}
+
+/// A `[key]=` inside a `name=( … )` array, and how much of the line it
+/// took. The brackets are `op`, a quoted key keeps its `st`, a bare one
+/// carries nothing, and the `=` after the `]` is a `va` — not the `op` an
+/// assignment outside an array gets.
+fn array_key(rest: &str, out: &mut Vec<(Class, String)>) -> Option<usize> {
+    let close = rest.strip_prefix('[')?.find(']')? + 1;
+    push(out, Class::Operator, "[");
+    let key = &rest[1..close];
+    let class = if key.starts_with(['"', '\'']) { Class::Str } else { Class::Normal };
+    push(out, class, key);
+    push(out, Class::Operator, "]");
+    let assigns = rest[close + 1..].starts_with('=');
+    if assigns {
+        push(out, Class::Variable, "=");
+    }
+    Some(close + 1 + usize::from(assigns))
 }
 
 /// The punctuation that reads the same wherever it stands: quotes,
@@ -3259,6 +3282,10 @@ fn bash_pattern(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class
 /// here-document that the next line begins.
 fn heredoc(rest: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> usize {
     let mut end = 2 + usize::from(rest[2..].starts_with('-'));
+    // **`cat << EOF` is the same as `cat <<EOF`**, and the space between
+    // belongs to the operator: pandoc writes `op|<< EOF`. Without this
+    // the heredoc never opened and its body was read as commands.
+    end += rest[end..].find(|c: char| !c.is_ascii_whitespace()).unwrap_or(0);
     let quote = rest[end..].chars().next().filter(|c| *c == '\'' || *c == '"');
     if quote.is_some() {
         end += 1;

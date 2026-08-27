@@ -1072,7 +1072,7 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 |---|---|---|---|---|
 | C | `c` | **2/2** | 25/40 system headers | **98%** of 11,154 |
 | Python | `python`, `python3`, `py` | **4/4** | 21/40 standard library | **98%** of 28,813 |
-| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 6/40 scripts in `/usr/bin` | **95%** of 17,018 |
+| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 7/40 scripts in `/usr/bin` | **96%** of 17,018 |
 | Ruby | `ruby`, `rb` | — | 15/40 standard library | **95%** of 26,777 |
 
 **The last two columns measure the same thing and disagree, and the
@@ -1153,6 +1153,14 @@ pinned binary rather than reasoned about:
 - **`&>` and `&>>` redirect and do not end the command.** Reading the `&`
   as the separator put the scanner back at command position and made
   `/dev/null` an `ex`
+- **`cat << EOF` opens a heredoc as surely as `cat <<EOF`**, and the space
+  between belongs to the operator — `op|<< EOF`. Without it the heredoc
+  never opened and its prose was read as commands
+- **inside a `name=( … )` array, `[key]=` is a subscript and not a glob**:
+  the brackets are `op`, a quoted key keeps its `st`, a bare one carries
+  nothing, and the `=` after the `]` is a **`va`**, not the `op` an
+  assignment gets anywhere else
+- `.` — the source builtin — is a `bu`
 
 `./scripts/real-world.sh` is the second column, and the figures in it were
 taken on 2026-08-26. It **reports and does not gate**: its corpus is
