@@ -205,8 +205,11 @@ fn write_body(
 /// Turn the break marks into whatever the mode asks for.
 fn lay_out(text: &str, wrap: Wrap) -> String {
     match wrap {
-        Wrap::None => text.replace([BREAK, SOFT], " ").replace(STOP, ""),
-        Wrap::Preserve => text.replace(BREAK, " ").replace(SOFT, "\n").replace(STOP, ""),
+        // **One pass and one allocation.** Chaining `replace` copied the
+        // whole rendered output two or three times, which is the cost
+        // that matters when the *output* is the large object.
+        Wrap::None => resolved(text, " "),
+        Wrap::Preserve => resolved(text, "\n"),
         Wrap::Fill(columns) => {
             let mut out = String::with_capacity(text.len());
             for line in text.split('\n') {
@@ -219,6 +222,26 @@ fn lay_out(text: &str, wrap: Wrap) -> String {
             out
         }
     }
+}
+
+/// Resolve the layout markers in one pass: a `BREAK` becomes a space, a
+/// `SOFT` becomes `soft`, and a `STOP` is dropped. Copying runs between
+/// markers rather than characters, so the common case is a memcpy.
+fn resolved(text: &str, soft: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(index) = rest.find([BREAK, SOFT, STOP]) {
+        out.push_str(&rest[..index]);
+        let marker = rest[index..].chars().next().unwrap_or(STOP);
+        match marker {
+            BREAK => out.push(' '),
+            SOFT => out.push_str(soft),
+            _ => {}
+        }
+        rest = &rest[index + marker.len_utf8()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The columns a string occupies, which is **not** its character count:
@@ -635,11 +658,40 @@ fn replace_notes(list: &mut [Inline], prefix: &str, bodies: &mut Vec<Vec<Block>>
     }
 }
 
+/// Whether any inline anywhere in `blocks` is a `Note`.
+///
+/// **Immutable and short-circuiting**, which is the whole point of it.
+/// The version this replaces reached the mutable walker by cloning the
+/// entire tree — `blocks.to_vec()` — so every document *without* a note
+/// paid a full-tree allocation before the borrowed fast path could
+/// return, and every document with one paid it twice.
 fn has_note(blocks: &[Block]) -> bool {
-    let mut found = false;
-    let mut copy = blocks.to_vec();
-    walk_inlines(&mut copy, &mut |list| found = found || note_inside(list));
-    found
+    blocks.iter().any(block_has_note)
+}
+
+/// The same traversal `walk_inlines` makes, reading rather than writing.
+fn block_has_note(block: &Block) -> bool {
+    match block {
+        Block::Plain(list) | Block::Para(list) | Block::Header(_, _, list) => note_inside(list),
+        Block::LineBlock(lines) => lines.iter().any(|line| note_inside(line)),
+        Block::BlockQuote(inner) | Block::Div(_, inner) => has_note(inner),
+        Block::BulletList(items) | Block::OrderedList(_, items) => items.iter().any(|i| has_note(i)),
+        Block::DefinitionList(entries) => entries.iter().any(|(term, definitions)| {
+            note_inside(term) || definitions.iter().any(|d| has_note(d))
+        }),
+        Block::Figure(_, caption, inner) => has_note(&caption.blocks) || has_note(inner),
+        Block::Table(table) => {
+            has_note(&table.caption.blocks)
+                || table
+                    .head
+                    .rows
+                    .iter()
+                    .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+                    .chain(table.foot.rows.iter())
+                    .any(|row| row.cells.iter().any(|cell| has_note(&cell.blocks)))
+        }
+        Block::HorizontalRule | Block::CodeBlock(..) | Block::RawBlock(..) => false,
+    }
 }
 
 fn note_inside(list: &[Inline]) -> bool {

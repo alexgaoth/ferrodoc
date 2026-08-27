@@ -188,14 +188,18 @@ if dialect == Dialect::Pandoc {
 }
 
 fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
-    let mut prepared: String = preprocess(input).into_owned();
+    // **Stay borrowed.** `preprocess` hands back a `Cow::Borrowed` for
+    // input that is already normal, and calling `into_owned` on it threw
+    // that away — one full copy of the document on the ordinary path, for
+    // a workaround below that almost never fires.
+    let mut prepared: Cow<'_, str> = preprocess(input);
     // comrak does not recognise an **empty** front-matter block, so
     // `---\n---` reaches the parser as two thematic breaks where pandoc
     // reads an empty metadata block and emits nothing.
     if dialect == Dialect::Pandoc {
         for opening in ["---\n---\n", "---\r\n---\r\n"] {
             if let Some(rest) = prepared.strip_prefix(opening) {
-                prepared = rest.trim_start_matches(['\n', '\r']).to_owned();
+                prepared = Cow::Owned(rest.trim_start_matches(['\n', '\r']).to_owned());
                 break;
             }
         }
