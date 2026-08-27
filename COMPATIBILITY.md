@@ -1070,7 +1070,7 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 
 | language | names accepted | curated gate | files written for somebody else | lines of those files |
 |---|---|---|---|---|
-| C | `c` | **2/2** | 25/40 system headers | **98%** of 11,154 |
+| C | `c` | **2/2** | 28/40 system headers | **98%** of 11,154 |
 | Python | `python`, `python3`, `py` | **4/4** | 21/40 standard library | **98%** of 28,813 |
 | bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 7/40 scripts in `/usr/bin` | **96%** of 17,018 |
 | Ruby | `ruby`, `rb` | — | 16/40 standard library | **96%** of 26,777 |
@@ -1104,9 +1104,13 @@ pinned binary rather than reasoned about:
 - **on a directive line nothing is plain**: the spacing before a trailing
   comment, a macro's parameter names, the body it expands to, all `pp`.
   This one rule took C from 7/40 to 23/40
-- a directive continued with `\` runs onto the next line, which is `pp`
-  entire, and the `\` itself is an `op`; `##` inside one is an `op` too,
-  though the `#` that opened the directive is a `pp`
+- a directive continued with `\` runs onto the next line, and that line
+  is tokenized **like a `#define`'s value** rather than taken flat:
+  operators are `op` and numbers `dv`, with everything else `pp`. Reading
+  it as one `pp` run was the first attempt and was measurably wrong —
+  `#define A(x) \` then `((x) ? 1 : 0)` carries five operator spans. The
+  `\` itself is an `op`; `##` inside a directive is an `op` too, though
+  the `#` that opened it is a `pp`
 - bash's **doubled** brackets are `kw` and its single ones `bu`
 - python's dunders: of 96 probed, 68 are `fu` wherever they stand —
   `x.__init__` too — while `__name__` and `__file__` are `va`, and 29

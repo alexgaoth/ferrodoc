@@ -1418,16 +1418,15 @@ fn uncommented(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)
             }
         }
     } else if state.carried == Carried::Directive {
-        // **A directive continued with `\` runs on**: the whole of the next
-        // line is `pp`, and its own trailing `\` continues it again.
-        let end = text.strip_suffix('\\').map_or(text.len(), str::len);
-        push(&mut out, Class::Preprocessor, &text[..end]);
-        if end < text.len() {
-            push(&mut out, Class::Operator, "\\");
-        }
-        state.carried =
-            if end < text.len() { Carried::Directive } else { Carried::Nothing };
-        return out;
+        // **A directive continued with `\` runs on**, and its next line is
+        // tokenized like a `#define`'s value rather than taken flat:
+        // operators are `op` and numbers are `dv`, with everything else
+        // `pp`. Emitting the whole line as one `pp` was measurably wrong —
+        // `#define A(x) \` then `((x) ? 1 : 0)` has five operator spans in
+        // it. Its own trailing `\` continues the directive again.
+        state.carried = if text.ends_with('\\') { Carried::Directive } else { Carried::Nothing };
+        scan(text, 0, syntax, state, &mut out);
+        return preprocessed(out);
     } else if syntax.has(PREPROCESSOR) {
         at = directive(text, syntax, &mut out);
         if at > 0 && text.ends_with('\\') {
