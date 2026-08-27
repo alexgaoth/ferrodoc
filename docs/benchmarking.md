@@ -31,6 +31,24 @@ conversion.
 `bench-sizes` now runs every read once for real and fails loudly. Do not
 reintroduce a timing loop that discards a `Result`.
 
+## The denominator is part of the measurement
+
+`bench-sizes` reported `docx -> AST` at **2 MB/s** for months, fifteen
+times slower than every other path in the table, and the path was not
+slow. Its throughput was being computed against the **markdown the docx
+was written from**, because every row shared one denominator.
+
+A docx byte is compressed: the `word/document.xml` inside one written
+from 1 MB of markdown is **17.7 MB**. So 494 ms is about 1 MB/s of
+archive and about 33 MB/s of XML, and those are both true and neither is
+the other. Every row now prints a `reads` column saying how big its own
+input was, and the `MB/s` is against that.
+
+**Rows in that table are not comparable across formats**, and the column
+exists to make that visible rather than to be looked past. The same trap
+as the 4.12 s refusal above, in a quieter form: the number was real, the
+thing it measured was not what it was labelled.
+
 ## Comparing
 
 - **Never compare builds by absolute timings.** This machine drifts ~2×

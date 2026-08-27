@@ -775,7 +775,20 @@ fn bench_sizes(paths: &[String], iters: u32) -> Result<()> {
     if paths.is_empty() {
         bail!("bench-sizes expects at least one markdown file");
     }
-    println!("{:>10}  {:<18}  {:>11}  {:>9}", "input", "path", "latency", "MB/s");
+    // **Every row says what it read.** The `MB/s` column is against each
+    // path's *own* input, and `reads` names how big that was — because
+    // the rows are otherwise not comparable and were being compared.
+    // `docx -> AST` looked fifteen times slower than every other path
+    // while its throughput was computed against the markdown the docx was
+    // written from; a docx byte is compressed, and the
+    // `word/document.xml` inside one written from 1 MB of markdown is
+    // 17.7 MB. Reading 388 KB of archive at 531 ms is slow per archive
+    // byte and ordinary per byte parsed, and only the column saying which
+    // makes that legible.
+    println!(
+        "{:>10}  {:<18}  {:>11}  {:>9}  {:>9}",
+        "document", "path", "latency", "MB/s", "reads"
+    );
     for p in paths {
         let markdown = std::fs::read_to_string(p).with_context(|| format!("reading {p}"))?;
         let bytes = markdown.len();
@@ -810,10 +823,10 @@ fn bench_sizes(paths: &[String], iters: u32) -> Result<()> {
         measure(&label, "AST -> docx", bytes, runs, || {
             let _ = ferrodoc_docx::write_docx(&ast);
         });
-        measure(&label, "docx -> AST", bytes, runs, || {
+        measure(&label, "docx -> AST", docx.len(), runs, || {
             let _ = ferrodoc_docx::read_docx(&docx);
         });
-        measure(&label, "HTML -> AST", bytes, runs, || {
+        measure(&label, "HTML -> AST", html.len(), runs, || {
             let _ = ferrodoc_html::read_html(&html);
         });
     }
@@ -976,8 +989,9 @@ fn measure(label: &str, path: &str, bytes: usize, runs: u32, mut body: impl FnMu
     #[expect(clippy::cast_precision_loss, reason = "reporting, not arithmetic")]
     let throughput = bytes as f64 / each.as_secs_f64() / 1_048_576.0;
     println!(
-        "{label:>10}  {path:<18}  {:>11}  {throughput:>9.0}",
-        format!("{each:.2?}")
+        "{label:>10}  {path:<18}  {:>11}  {throughput:>9.0}  {:>9}",
+        format!("{each:.2?}"),
+        human(bytes)
     );
 }
 
