@@ -52,6 +52,8 @@ pub(crate) enum Class {
     /// A python docstring. Rendered `co` like a comment, and kept apart
     /// from one because **a docstring carries no alert words**: `TODO`
     /// in a `#` comment is an `al` and `TODO` in a `""" … """` is not.
+    Docstring,
+    /// The body of a ruby here-document.
     Documentation,
     /// **A Ruby symbol.** Skylighting files `:name` under the class it
     /// uses for warnings; probed, not guessed.
@@ -74,7 +76,8 @@ impl Class {
             Class::SpecialChar => "sc",
             // A docstring renders as a comment and is not one: it
             // carries no alert words, which is why it has its own variant.
-            Class::Comment | Class::Documentation => "co",
+            Class::Comment | Class::Docstring => "co",
+            Class::Documentation => "do",
             Class::Operator => "op",
             Class::Preprocessor => "pp",
             Class::Import => "im",
@@ -1411,7 +1414,7 @@ fn scan(text: &str, from: usize, syntax: &Syntax, state: &mut State, out: &mut V
                 && state.brackets == 0
                 && out.iter().all(|(_, run)| run.trim().is_empty())
             {
-                opener.class = Class::Documentation;
+                opener.class = Class::Docstring;
                 opener.regexp = false;
             }
             at = quoted(text, at, opener, syntax, state, out);
@@ -2073,6 +2076,62 @@ fn class_of_word(word: &str) -> Class {
     }
 }
 
+/// The `<<TAG` that opens a here-document: the marker and its `~` or `-`
+/// are an `op`, and the tag — quotes and all — is a `cf`. `None` if no
+/// tag follows, which leaves the `<<` as the shift operator it is.
+fn ruby_heredoc(rest: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> Option<usize> {
+    let mut at = 2 + usize::from(rest[2..].starts_with(['~', '-']));
+    let quote = rest[at..].chars().next().filter(|c| *c == '\'' || *c == '"');
+    let opened = at + usize::from(quote.is_some());
+    let end = rest[opened..]
+        .find(|c: char| !c.is_alphanumeric() && c != '_')
+        .map_or(rest.len(), |index| opened + index);
+    let tag = &rest[opened..end];
+    if tag.is_empty() {
+        return None;
+    }
+    let closed = end + usize::from(quote.is_some_and(|q| rest[end..].starts_with(q)));
+    push(out, Class::Operator, &rest[..at]);
+    push(out, Class::ControlFlow, &rest[at..closed]);
+    at = closed;
+    state.heredoc = Some((tag.to_owned(), quote.is_none()));
+    Some(at)
+}
+
+/// A line inside a here-document. The body is a `do`; the line that
+/// closes it is a `cf` with its indentation still `do`; and `#{ … }`
+/// interpolates unless the tag was quoted.
+fn ruby_heredoc_body(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> bool {
+    let Some((tag, interpolates)) = state.heredoc.clone() else {
+        return false;
+    };
+    if text.trim() == tag {
+        let indent = text.len() - text.trim_start().len();
+        push(out, Class::Documentation, &text[..indent]);
+        push(out, Class::ControlFlow, text.trim());
+        state.heredoc = None;
+        return true;
+    }
+    let mut at = 0;
+    while at < text.len() {
+        let rest = &text[at..];
+        if interpolates
+            && rest.starts_with("#{")
+            && let Some(end) = rest.find('}')
+        {
+            push(out, Class::SpecialChar, "#{");
+            ruby(&rest[2..end], &mut State::default(), out);
+            push(out, Class::SpecialChar, "}");
+            at += end + 1;
+            continue;
+        }
+        let stop = rest[1..].find("#{").map_or(rest.len(), |index| index + 1);
+        push(out, Class::Documentation, &rest[..stop]);
+        at += stop;
+    }
+    true
+}
+
 /// A `=begin … =end` block, which takes whole lines and nothing less.
 fn ruby_block_comment(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> bool {
     if state.carried == Carried::BlockComment {
@@ -2091,7 +2150,7 @@ fn ruby_block_comment(text: &str, state: &mut State, out: &mut Vec<(Class, Strin
 }
 
 fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
-    if ruby_block_comment(text, state, out) {
+    if ruby_heredoc_body(text, state, out) || ruby_block_comment(text, state, out) {
         return;
     }
     // Whether the scanner stands inside a `def`'s parameter list, where
@@ -2148,6 +2207,15 @@ fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
             at += 1;
             continue;
         }
+        // **`<<TAG` opens a here-document where a value is expected**, and
+        // is the shift operator everywhere else: `x = <<eos` opens one
+        // and `a << b` does not. Same question the regexp asks.
+        if rest.starts_with("<<") && ruby_expects_value(out) {
+            if let Some(run) = ruby_heredoc(rest, state, out) {
+                at += run;
+                continue;
+            }
+        }
         if byte == b'/' && ruby_expects_value(out) {
             at = ruby_regexp(text, at, out);
             continue;
@@ -2161,7 +2229,15 @@ fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
             continue;
         }
         if RUBY.operators.contains(byte as char) {
-            let run = rest.find(|c: char| !RUBY.operators.contains(c)).unwrap_or(rest.len());
+            let mut run = rest.find(|c: char| !RUBY.operators.contains(c)).unwrap_or(rest.len());
+            // **A `:` that begins a symbol ends the operator run.**
+            // `&:to_s` is `op|&` then `wa|:to_s`, not one `op|&:`.
+            if let Some(colon) = rest[..run].find(':')
+                && colon > 0
+                && rest[colon + 1..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            {
+                run = colon;
+            }
             push(out, Class::Operator, &rest[..run]);
             at += run;
             continue;
@@ -2356,6 +2432,13 @@ fn ruby_number(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize
         let run = rest[2..]
             .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
             .map_or(rest.len(), |index| index + 2);
+        push(out, Class::BaseN, &rest[..run]);
+        return from + run;
+    }
+    // **A leading `0` before more digits is octal**, and a `bn` like the
+    // other bases: `0700` is a file mode, not seven hundred.
+    if rest.starts_with('0') && rest[1..].starts_with(|c: char| c.is_ascii_digit()) {
+        let run = rest.find(|c: char| !c.is_ascii_digit() && c != '_').unwrap_or(rest.len());
         push(out, Class::BaseN, &rest[..run]);
         return from + run;
     }
@@ -2977,7 +3060,7 @@ fn placeholders(text: &str, class: Class, syntax: &Syntax, out: &mut Vec<(Class,
         // first line of one already knew that, because `quoted` asks
         // whether the class is `st`; every line after it did not, and
         // `difflib.py` is full of `%d` inside `""" … """`.
-        if class != Class::Documentation
+        if class != Class::Docstring
             && syntax.has(CONVERSIONS)
             && let Some(len) = specifier(rest, syntax.conversions)
         {
@@ -2985,7 +3068,7 @@ fn placeholders(text: &str, class: Class, syntax: &Syntax, out: &mut Vec<(Class,
             at += len;
             continue;
         }
-        if class != Class::Documentation
+        if class != Class::Docstring
             && syntax.has(PLACEHOLDERS)
             && rest.starts_with('{')
             && let Some(end) = rest.find('}')
@@ -3455,7 +3538,7 @@ mod tests {
         // A docstring renders `co` and is **not** a `Comment`: alert
         // words are read in a comment and not in a docstring, so the two
         // cannot share a class. `\"\"\"TODO\"\"\"` carries no `al`.
-        assert_eq!(classes("\"doc\"", "python"), text(&[(Class::Documentation, "\"doc\"")]));
+        assert_eq!(classes("\"doc\"", "python"), text(&[(Class::Docstring, "\"doc\"")]));
         // …but not inside a bracket run, which is what a `__all__` list
         // is full of.
         let mut state = State::default();

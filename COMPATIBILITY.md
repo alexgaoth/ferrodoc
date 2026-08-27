@@ -1073,7 +1073,7 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 | C | `c` | **2/2** | 25/40 system headers | **98%** of 11,154 |
 | Python | `python`, `python3`, `py` | **4/4** | 21/40 standard library | **98%** of 28,813 |
 | bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 7/40 scripts in `/usr/bin` | **96%** of 17,018 |
-| Ruby | `ruby`, `rb` | — | 15/40 standard library | **95%** of 26,777 |
+| Ruby | `ruby`, `rb` | — | 16/40 standard library | **96%** of 26,777 |
 
 **The last two columns measure the same thing and disagree, and the
 disagreement is the useful part.** The file column is whole-file byte
@@ -1161,6 +1161,16 @@ pinned binary rather than reasoned about:
   nothing, and the `=` after the `]` is a **`va`**, not the `op` an
   assignment gets anywhere else
 - `.` — the source builtin — is a `bu`
+- **a ruby here-document**: `<<~`, `<<-` and `<<` are `op`, the tag —
+  quotes and all — is a `cf`, the body is a `do`, and the indentation
+  before a closing tag is `do` while the tag itself is `cf`. `#{ … }`
+  interpolates unless the tag was quoted. **`<<TAG` opens one only where
+  a value is expected**: `x = <<eos` does and `a << b` shifts, which is
+  the same question the regexp asks
+- a leading `0` before more digits is **octal** and a `bn`: `0700` is a
+  file mode, not seven hundred
+- **a `:` that begins a symbol ends an operator run**: `&:to_s` is `op|&`
+  then `wa|:to_s`, not one `op|&:`
 
 `./scripts/real-world.sh` is the second column, and the figures in it were
 taken on 2026-08-26. It **reports and does not gate**: its corpus is
@@ -1223,9 +1233,12 @@ the punctuation only `\\`, `\'` and `\"` count. `"\d"` is an `er` for the
 **backslash alone** and then string — calling it a `ch` was 89 wrong
 spans in forty standard-library files.
 
-**What else is still wrong, measured rather than supposed.** A **heredoc's
-body** is unhandled in both bash and ruby, and that is now the largest
-thing left. Every language here is listed with its numbers beside it rather
+**What else is still wrong, measured rather than supposed.** Nothing on
+the list that opened this cycle is left: the python regexps, the bash
+array subscripts and backticks, and the here-documents in both languages
+are all read now. What remains is a long tail with no single large item
+in it — the figures above are what is left of it, and the sweep that
+produced them is the thing to run next. Every language here is listed with its numbers beside it rather
 than with a claim, because not one of them is finished — and listing them
 is still right, because dropping a language colours nothing where keeping
 it colours 94 to 98 percent of every line correctly.
