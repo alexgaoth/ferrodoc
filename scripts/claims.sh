@@ -83,7 +83,6 @@ gate_claims() {
 "ODT writer	ours	COMPATIBILITY.md	\`diff-odt-write\` | ODT writer" \
 "EPUB reader	ours	COMPATIBILITY.md	\`diff-epub\` | EPUB reader" \
 "EPUB reader (hand-authored)	ours	COMPATIBILITY.md	\`diff-epub\` (hand-authored)" \
-"EPUB reader (spec chunks)	ours	COMPATIBILITY.md	\`corpus/epub-spec\`" \
 "EPUB writer	ours	COMPATIBILITY.md	\`diff-epub-write\` | EPUB writer" \
 "ipynb reader (hand-authored)	ours	COMPATIBILITY.md	\`diff-ipynb\` | notebook reader" \
 "ipynb writer	ours	COMPATIBILITY.md	\`diff-ipynb-write\` | notebook writer" \

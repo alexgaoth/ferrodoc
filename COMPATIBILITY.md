@@ -344,14 +344,19 @@ Three corpora, because they measure three different things:
 |---|---|---|
 | `corpus/epub` | pandoc's own output, 12 documents | **11/12** |
 | `corpus/epub-handmade` | books in shapes pandoc's writer never emits | **3/3** |
-| `corpus/epub-spec` | 22 files of 30 spec examples each | 11/22 |
 
-The last is not a fidelity claim and is not averaged into the others. Each
-of its files bundles 30 spec examples, so **one** of the HTML reader's 26
-known divergences fails a whole document — and at 30 examples per file most
-files contain one. Reporting it as "the EPUB reader scores 36%" would be
-reporting the HTML reader's score under another name. It is still gated,
-because a *drop* there is a real regression.
+There was a third row here, `corpus/epub-spec`, and **it has been
+retired.** Each of its 22 files bundles 30 spec examples, so any one of
+the HTML reader's 26 known divergences fails a whole document, and at 30
+examples per file most files contain one. Its number moved when the HTML
+reader moved and at no other time: it was the HTML reader's score under
+another name, and printing it in a table headed *EPUB* invited exactly
+the reading it did not support. A figure that needs a paragraph
+explaining what it does not mean is better removed than explained.
+
+The corpus stays and `verify.sh` still runs it, held at its level as a
+**regression check** — a drop there is real even though the level is not
+a claim. It is not a score, so it is not published as one.
 
 `corpus/epub-handmade` is the one that found things. It is hand-authored
 rather than produced by another program — EPUB 2 with a `toc.ncx`, an
@@ -748,8 +753,8 @@ only where matching would mean reproducing a parse failure*:
   a comment survives one and not the other — and it is the only part of
   that extension this reader can reach, a comment being a real DOM node
   where a stray `</div>` is discarded before the tree exists. It is worth
-  `diff-epub` 10/12 → **11/12** and the spec chunks 10/22 → **11/22**;
-  `docs/divergences.md` has what the rest of `raw_html` would cost.
+  `diff-epub` 10/12 → **11/12**; `docs/divergences.md` has what the rest
+  of `raw_html` would cost.
 - **`<![CDATA[ … ]]>` is read as text and `<? … ?>` is dropped**, which is
   what pandoc does and what the XML says. An HTML5 tokenizer reads both as
   a bogus comment ending at the **first `>`** — inside the content whenever

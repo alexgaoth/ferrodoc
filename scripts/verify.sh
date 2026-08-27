@@ -194,9 +194,11 @@ if [ "$want_gates" = 1 ]; then
     # of its rules was found by it failing.
     gate "EPUB reader (hand-authored)" $HARNESS diff-epub corpus/epub-handmade --fail-under 100
     # The spec chunks measure the HTML reader compounding, not the EPUB
-    # layer — see corpus/epub-spec/generate.sh. A *drop* is still a
-    # regression, so the level is held.
-    gate "EPUB reader (spec chunks)"   $HARNESS diff-epub corpus/epub-spec --fail-under 50
+    # layer — see corpus/epub-spec/generate.sh. Retired as a published
+    # figure for that reason; kept as a regression check, because a *drop*
+    # here is real even though the level is not a claim.
+    gate "EPUB reader (spec chunks, not a claim)" \
+        $HARNESS diff-epub corpus/epub-spec --fail-under 50
     # Notebooks in the shape Jupyter and Colab write them — nbformat
     # 4.5 with cell ids, streams, execute_results, a base64 `image/png`
     # display_data and an ANSI-coloured traceback — none of which
