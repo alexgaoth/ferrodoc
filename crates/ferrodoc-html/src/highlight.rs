@@ -1112,6 +1112,20 @@ static RUST: Syntax = Syntax {
         ("bool", Class::DataType),
         ("box", Class::Keyword),
         ("break", Class::ControlFlow),
+        ("c_char", Class::DataType),
+        ("c_double", Class::DataType),
+        ("c_float", Class::DataType),
+        ("c_int", Class::DataType),
+        ("c_long", Class::DataType),
+        ("c_longlong", Class::DataType),
+        ("c_schar", Class::DataType),
+        ("c_short", Class::DataType),
+        ("c_uchar", Class::DataType),
+        ("c_uint", Class::DataType),
+        ("c_ulong", Class::DataType),
+        ("c_ulonglong", Class::DataType),
+        ("c_ushort", Class::DataType),
+        ("c_void", Class::DataType),
         ("char", Class::DataType),
         ("const", Class::Keyword),
         ("continue", Class::ControlFlow),
@@ -3336,7 +3350,9 @@ fn bash_string(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class,
             push(out, Class::Str, "\"");
             return at + 1;
         }
-        if rest.starts_with('$') {
+        // A `$` that names nothing stays part of the string: `"a$"` is
+        // one `st` run, not a string broken around a bare sigil.
+        if rest.starts_with('$') && names_something(rest) {
             at = bash_dollar(text, at, state, out);
             continue;
         }
@@ -3359,8 +3375,22 @@ fn bash_string(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class,
 
 /// `$name`, `${…}` and `$( … )`, all of which are `va` — with the
 /// substitution's contents read as code and its `:-` and friends as `op`.
+/// Whether the `$` at the head of `rest` names anything.
+///
+/// **A `$` naming nothing is not a variable.** `$1`, `$a`, `$?`, `$$` and
+/// `$-` are; a `$` before a space, a `"` or the end of the line is an
+/// ordinary character, and `echo "a$"` comes back as one `st` run. The
+/// `'` is here for `$'…'`, ANSI-C quoting; the `"` is deliberately not.
+fn names_something(rest: &str) -> bool {
+    rest[1..].starts_with(|c: char| c.is_alphanumeric() || "_{('?$-!#*@".contains(c))
+}
+
 fn bash_dollar(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class, String)>) -> usize {
     let rest = &text[from..];
+    if !names_something(rest) {
+        push(out, Class::Normal, &rest[..1]);
+        return from + 1;
+    }
     if rest.starts_with("$'") {
         push(out, Class::Str, "$'");
         let mut at = from + 2;

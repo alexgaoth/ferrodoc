@@ -1074,7 +1074,7 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 | Python | `python`, `python3`, `py` | **4/4** | 21/40 standard library | **98%** of 28,813 |
 | bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 7/40 scripts in `/usr/bin` | **96%** of 17,018 |
 | Ruby | `ruby`, `rb` | — | 16/40 standard library | **96%** of 26,777 |
-| Rust | `rust`, `rs` | — | 14/40 this repository | **98%** of 31,436 |
+| Rust | `rust`, `rs` | — | 15/40 this repository | **98%** of 31,463 |
 
 **The last two columns measure the same thing and disagree, and the
 disagreement is the useful part.** The file column is whole-file byte
@@ -1160,6 +1160,13 @@ pinned binary rather than reasoned about:
   emitted `class="sourceCode sourceCode bash"`. Only that class
   deduplicates: a `numberSource` in the block's classes really is written
   twice, which was probed rather than assumed.
+- **a bash `$` that names nothing is not a variable**: `$1`, `$a`, `$?`,
+  `$$` and `$-` are, and a `$` before a space, a `"` or the end of the
+  line is an ordinary character — `echo "a$"` is one `st` run, not a
+  string broken around a bare sigil
+- Rust's fourteen `c_*` FFI types are `dt`; `CStr`, `CString`, `OsStr`
+  and `OsString` carry no class, which is not the grouping anyone would
+  guess
 - **a bash array subscript is an expression**: `${a[$i]}` and `a[$i]=1`
   put a `va` between two `op`, a numeric index is a `dv`, a name or a sum
   carries nothing, and only `[@]` and `[*]` are a single operator
