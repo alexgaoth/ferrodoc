@@ -20,11 +20,18 @@ FERRODOC=${FERRODOC:-target/release/ferrodoc}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# Paths arrive on stdin, one per line, rather than as arguments, so that a
+# path holding a space or a glob character survives.
+#
+# The denominators drift. This sweep found 22 shell scripts in /usr/bin one
+# hour and 24 the next, because the machine installed packages in between.
+# That is the nature of the corpus and not a fault in it — but it is why
+# the figures here are dated where they are quoted, and why this script
+# reports rather than gates.
 score() {
   language=$1
-  shift
   same=0 total=0
-  for file in "$@"; do
+  while IFS= read -r file; do
     [ -f "$file" ] || continue
     total=$((total + 1))
     { printf '```%s\n' "$language"; cat "$file"; printf '```\n'; } > "$work/in.md" 2>/dev/null
@@ -42,7 +49,7 @@ score() {
 
 ruby_lib=$(find "$HOME/.cache" -type d -name '3.4.0' -path '*ruby*' 2>/dev/null | head -1)
 echo "highlighting against code written for somebody else:"
-score c $(ls /usr/include/*.h 2>/dev/null | head -40)
-score python $(ls /usr/lib64/python3*/*.py /usr/lib/python3*/*.py 2>/dev/null | head -40)
-score bash $(grep -rl '^#!/bin/bash\|^#!/usr/bin/env bash' /usr/bin 2>/dev/null | head -40)
-[ -n "$ruby_lib" ] && score ruby $(ls "$ruby_lib"/*.rb 2>/dev/null | head -40)
+ls /usr/include/*.h 2>/dev/null | head -40 | score c
+ls /usr/lib64/python3*/*.py /usr/lib/python3*/*.py 2>/dev/null | head -40 | score python
+grep -rl '^#!/bin/bash\|^#!/usr/bin/env bash' /usr/bin 2>/dev/null | head -40 | score bash
+[ -n "$ruby_lib" ] && ls "$ruby_lib"/*.rb 2>/dev/null | head -40 | score ruby

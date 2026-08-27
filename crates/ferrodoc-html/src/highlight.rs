@@ -95,6 +95,8 @@ struct Syntax {
     /// The quirks this language has, as named bits — a struct of five
     /// booleans is a struct nobody reads correctly at a call site.
     quirks: u8,
+    /// The letters that end a `%…` conversion, which differ by language.
+    conversions: &'static str,
     /// The characters that make an operator span. **Not the same set in
     /// every language**: python leaves `,`, `.`, brackets and `:` plain,
     /// where C makes every one of them an `op`.
@@ -199,6 +201,9 @@ static C: Syntax = Syntax {
     block_comment: Some(("/*", "*/")),
     quotes: &[('"', Class::Str), ('\'', Class::Char)],
     quirks: PREPROCESSOR | CONVERSIONS,
+    // Probed a-z and A-Z one at a time, in `x = "%c"`. C takes `%a` and
+    // `%b`, which python does not; python takes `%r`, which C does not.
+    conversions: "abcdefginopsuxAEFGX%",
     operators: C_OPERATORS,
     string_prefixes: "",
     digit_separator: None,
@@ -501,6 +506,7 @@ static PYTHON: Syntax = Syntax {
     // `%20` inside a string is an `sc` here as `%s` is in C — the same
     // conversion rule, in a language that also spells modulo `%`.
     quirks: CONVERSIONS | DOCSTRINGS | DECORATORS | PLACEHOLDERS,
+    conversions: "cdefgiorsuxEFGX%",
     operators: PYTHON_OPERATORS,
     string_prefixes: "rbfuRBFU",
     digit_separator: Some('_'),
@@ -512,84 +518,366 @@ static PYTHON: Syntax = Syntax {
 /// from it is an `ex`, which is why a missing name is a visible
 /// divergence on a real script rather than a silent one.
 static BASH: Syntax = Syntax {
+    conversions: "",
     canonical: "bash",
     names: &["bash", "sh", "shell", "zsh", "ksh"],
     keywords: &[
+        // The command vocabulary was probed against an external list,
+        // not one written from memory and not one drawn from the files
+        // the gate happens to hold: every name in /usr/bin, 3,130 of
+        // them, read back 200 to a document. 279 came back `fu` and 21
+        // `bu`; the other 2,830 carry no class at all.
         (":", Class::BuiltIn),
-        ("alias", Class::BuiltIn), ("apropos", Class::Function), ("ar", Class::Function),
-        ("awk", Class::Function), ("base64", Class::Function),
-        ("basename", Class::Function), ("bash", Class::Function), ("bc", Class::Function), ("bg", Class::BuiltIn),
-        ("bind", Class::BuiltIn), ("break", Class::ControlFlow),
-        ("builtin", Class::BuiltIn), ("cal", Class::Function), ("caller", Class::BuiltIn),
-        ("case", Class::ControlFlow), ("cat", Class::Function), ("cc", Class::Function), ("cd", Class::BuiltIn),
-        ("chattr", Class::Function), ("chgrp", Class::Function),
-        ("chmod", Class::Function), ("chown", Class::Function), ("clear", Class::Function),
-        ("cmp", Class::Function), ("comm", Class::Function), ("command", Class::BuiltIn),
-        ("compgen", Class::BuiltIn), ("complete", Class::BuiltIn),
-        ("continue", Class::ControlFlow), ("coproc", Class::BuiltIn),
-        ("cp", Class::Function), ("cpio", Class::Function), ("crontab", Class::Function),
-        ("csplit", Class::Function), ("cut", Class::Function), ("date", Class::Function),
-        ("dc", Class::Function), ("dd", Class::Function), ("declare", Class::BuiltIn),
-        ("df", Class::Function), ("diff", Class::Function), ("dirname", Class::Function),
-        ("dirs", Class::BuiltIn), ("disown", Class::BuiltIn), ("do", Class::ControlFlow),
-        ("done", Class::ControlFlow), ("du", Class::Function), ("echo", Class::BuiltIn),
-        ("elif", Class::ControlFlow), ("else", Class::ControlFlow),
-        ("enable", Class::BuiltIn), ("env", Class::Function), ("esac", Class::ControlFlow), ("eval", Class::BuiltIn),
-        ("exec", Class::BuiltIn), ("exit", Class::BuiltIn), ("expand", Class::Function),
-        ("export", Class::BuiltIn), ("expr", Class::Function), ("false", Class::Function),
-        ("fc", Class::BuiltIn), ("fg", Class::BuiltIn), ("fi", Class::ControlFlow),
-        ("file", Class::Function), ("find", Class::Function), ("fmt", Class::Function),
-        ("fold", Class::Function), ("for", Class::ControlFlow), ("free", Class::Function),
-        ("ftp", Class::Function), ("function", Class::Keyword), ("fuser", Class::Function),
-        ("gdb", Class::Function), ("getopts", Class::BuiltIn), ("git", Class::Function),
-        ("grep", Class::Function), ("groups", Class::Function), ("gzip", Class::Function),
-        ("hash", Class::BuiltIn), ("head", Class::Function), ("help", Class::BuiltIn),
-        ("hexdump", Class::Function), ("history", Class::BuiltIn),
-        ("iconv", Class::Function), ("id", Class::Function), ("if", Class::ControlFlow),
-        ("install", Class::Function), ("jobs", Class::BuiltIn), ("join", Class::Function),
-        ("kill", Class::BuiltIn), ("killall", Class::Function), ("last", Class::Function),
-        ("ldd", Class::Function), ("less", Class::Function), ("let", Class::BuiltIn),
-        ("ln", Class::Function), ("local", Class::BuiltIn), ("locate", Class::Function),
-        ("logout", Class::BuiltIn), ("lpr", Class::Function), ("ls", Class::Function),
-        ("lsattr", Class::Function), ("make", Class::Function), ("man", Class::Function),
-        ("md5sum", Class::Function), ("mesg", Class::Function), ("mkdir", Class::Function),
-        ("mkfifo", Class::Function), ("mknod", Class::Function),
-        ("mktemp", Class::Function), ("more", Class::Function), ("mount", Class::Function),
-        ("mv", Class::Function), ("nano", Class::Function), ("netstat", Class::Function),
-        ("nice", Class::Function), ("nl", Class::Function), ("nm", Class::Function),
-        ("nohup", Class::Function), ("od", Class::Function), ("paste", Class::Function),
-        ("pathchk", Class::Function), ("perl", Class::Function), ("ping", Class::Function),
-        ("popd", Class::BuiltIn), ("pr", Class::Function), ("printf", Class::BuiltIn),
-        ("ps", Class::Function), ("ptx", Class::Function), ("pushd", Class::BuiltIn),
-        ("pwd", Class::BuiltIn), ("read", Class::BuiltIn), ("readlink", Class::Function),
-        ("readonly", Class::BuiltIn), ("realpath", Class::Function),
-        ("return", Class::ControlFlow), ("rev", Class::Function), ("rm", Class::Function),
-        ("rmdir", Class::Function), ("rsync", Class::Function), ("scp", Class::Function),
-        ("sed", Class::Function), ("select", Class::ControlFlow), ("seq", Class::Function),
-        ("set", Class::BuiltIn), ("sh", Class::Function), ("sha1sum", Class::Function),
-        ("sha256sum", Class::Function), ("shift", Class::BuiltIn),
-        ("shopt", Class::BuiltIn), ("shuf", Class::Function), ("size", Class::Function),
-        ("sleep", Class::Function), ("sort", Class::Function), ("source", Class::BuiltIn),
-        ("split", Class::Function), ("ssh", Class::Function), ("stat", Class::Function),
-        ("strings", Class::Function), ("strip", Class::Function),
-        ("stty", Class::Function), ("sudo", Class::Function), ("suspend", Class::BuiltIn),
-        ("sync", Class::Function), ("tac", Class::Function), ("tail", Class::Function),
-        ("tar", Class::Function), ("tee", Class::Function), ("test", Class::BuiltIn),
-        ("then", Class::ControlFlow), ("time", Class::BuiltIn), ("times", Class::BuiltIn),
-        ("touch", Class::Function), ("tr", Class::Function), ("trap", Class::BuiltIn),
-        ("true", Class::Function), ("tsort", Class::Function), ("tty", Class::Function),
-        ("type", Class::BuiltIn), ("typeset", Class::BuiltIn), ("ulimit", Class::BuiltIn),
-        ("umask", Class::BuiltIn), ("umount", Class::Function),
-        ("unalias", Class::BuiltIn), ("uname", Class::Function),
-        ("unexpand", Class::Function), ("uniq", Class::Function),
-        ("unset", Class::BuiltIn), ("until", Class::ControlFlow),
-        ("unzip", Class::Function), ("updatedb", Class::Function),
-        ("users", Class::Function), ("valgrind", Class::Function), ("vi", Class::Function),
-        ("wait", Class::BuiltIn), ("wall", Class::Function), ("wc", Class::Function),
-        ("wget", Class::Function), ("whatis", Class::Function), ("which", Class::Function),
-        ("while", Class::ControlFlow), ("who", Class::Function),
-        ("whoami", Class::Function), ("write", Class::Function),
-        ("xargs", Class::Function), ("yes", Class::Function), ("zip", Class::Function)
+        ("aconnect", Class::Function),
+        ("alias", Class::BuiltIn),
+        ("aplay", Class::Function),
+        ("apropos", Class::Function),
+        ("ar", Class::Function),
+        ("arch", Class::Function),
+        ("arecord", Class::Function),
+        ("as", Class::Function),
+        ("awk", Class::Function),
+        ("b2sum", Class::Function),
+        ("base32", Class::Function),
+        ("base64", Class::Function),
+        ("basename", Class::Function),
+        ("bash", Class::Function),
+        ("bc", Class::Function),
+        ("bg", Class::BuiltIn),
+        ("bind", Class::BuiltIn),
+        ("bison", Class::Function),
+        ("break", Class::ControlFlow),
+        ("builtin", Class::BuiltIn),
+        ("bunzip2", Class::Function),
+        ("bzcat", Class::Function),
+        ("bzcmp", Class::Function),
+        ("bzdiff", Class::Function),
+        ("bzegrep", Class::Function),
+        ("bzfgrep", Class::Function),
+        ("bzgrep", Class::Function),
+        ("bzip2", Class::Function),
+        ("bzip2recover", Class::Function),
+        ("bzless", Class::Function),
+        ("bzmore", Class::Function),
+        ("cal", Class::Function),
+        ("caller", Class::BuiltIn),
+        ("case", Class::ControlFlow),
+        ("cat", Class::Function),
+        ("cc", Class::Function),
+        ("cd", Class::BuiltIn),
+        ("cd-read", Class::Function),
+        ("cdrecord", Class::Function),
+        ("chattr", Class::Function),
+        ("chcon", Class::Function),
+        ("chfn", Class::Function),
+        ("chgrp", Class::Function),
+        ("chmod", Class::Function),
+        ("chown", Class::Function),
+        ("chroot", Class::Function),
+        ("chsh", Class::Function),
+        ("chvt", Class::Function),
+        ("cksum", Class::Function),
+        ("clear", Class::Function),
+        ("cmp", Class::Function),
+        ("col", Class::Function),
+        ("comm", Class::Function),
+        ("command", Class::BuiltIn),
+        ("compgen", Class::BuiltIn),
+        ("complete", Class::BuiltIn),
+        ("continue", Class::ControlFlow),
+        ("coproc", Class::BuiltIn),
+        ("cp", Class::Function),
+        ("cpio", Class::Function),
+        ("cpp", Class::Function),
+        ("crontab", Class::Function),
+        ("csplit", Class::Function),
+        ("cut", Class::Function),
+        ("date", Class::Function),
+        ("dc", Class::Function),
+        ("dd", Class::Function),
+        ("deallocvt", Class::Function),
+        ("declare", Class::BuiltIn),
+        ("df", Class::Function),
+        ("diff", Class::Function),
+        ("diff3", Class::Function),
+        ("dir", Class::Function),
+        ("dircolors", Class::Function),
+        ("dirname", Class::Function),
+        ("dirs", Class::BuiltIn),
+        ("disown", Class::BuiltIn),
+        ("dmesg", Class::Function),
+        ("dnsdomainname", Class::Function),
+        ("do", Class::ControlFlow),
+        ("domainname", Class::Function),
+        ("done", Class::ControlFlow),
+        ("du", Class::Function),
+        ("dumpkeys", Class::Function),
+        ("echo", Class::BuiltIn),
+        ("ed", Class::Function),
+        ("egrep", Class::Function),
+        ("elif", Class::ControlFlow),
+        ("else", Class::ControlFlow),
+        ("enable", Class::BuiltIn),
+        ("env", Class::Function),
+        ("esac", Class::ControlFlow),
+        ("eval", Class::BuiltIn),
+        ("exec", Class::BuiltIn),
+        ("exit", Class::BuiltIn),
+        ("expand", Class::Function),
+        ("export", Class::BuiltIn),
+        ("expr", Class::Function),
+        ("false", Class::Function),
+        ("fc", Class::BuiltIn),
+        ("fg", Class::BuiltIn),
+        ("fgconsole", Class::Function),
+        ("fgrep", Class::Function),
+        ("fi", Class::ControlFlow),
+        ("file", Class::Function),
+        ("find", Class::Function),
+        ("flex", Class::Function),
+        ("fmt", Class::Function),
+        ("fold", Class::Function),
+        ("for", Class::ControlFlow),
+        ("free", Class::Function),
+        ("ftp", Class::Function),
+        ("function", Class::Keyword),
+        ("funzip", Class::Function),
+        ("fuser", Class::Function),
+        ("gawk", Class::Function),
+        ("gcc", Class::Function),
+        ("gdb", Class::Function),
+        ("getent", Class::Function),
+        ("getkeycodes", Class::Function),
+        ("getopt", Class::Function),
+        ("getopts", Class::BuiltIn),
+        ("gettext", Class::Function),
+        ("git", Class::Function),
+        ("gmake", Class::Function),
+        ("grep", Class::Function),
+        ("groff", Class::Function),
+        ("groups", Class::Function),
+        ("gs", Class::Function),
+        ("gunzip", Class::Function),
+        ("gzexe", Class::Function),
+        ("gzip", Class::Function),
+        ("hash", Class::BuiltIn),
+        ("head", Class::Function),
+        ("help", Class::BuiltIn),
+        ("hexdump", Class::Function),
+        ("history", Class::BuiltIn),
+        ("hostid", Class::Function),
+        ("hostname", Class::Function),
+        ("iconv", Class::Function),
+        ("id", Class::Function),
+        ("if", Class::ControlFlow),
+        ("install", Class::Function),
+        ("jobs", Class::BuiltIn),
+        ("join", Class::Function),
+        ("kbd_mode", Class::Function),
+        ("kbdrate", Class::Function),
+        ("kill", Class::BuiltIn),
+        ("killall", Class::Function),
+        ("last", Class::Function),
+        ("lastb", Class::Function),
+        ("ld", Class::Function),
+        ("ldd", Class::Function),
+        ("less", Class::Function),
+        ("let", Class::BuiltIn),
+        ("lex", Class::Function),
+        ("link", Class::Function),
+        ("ln", Class::Function),
+        ("loadkeys", Class::Function),
+        ("loadunimap", Class::Function),
+        ("local", Class::BuiltIn),
+        ("locate", Class::Function),
+        ("login", Class::Function),
+        ("logname", Class::Function),
+        ("logout", Class::BuiltIn),
+        ("lp", Class::Function),
+        ("lpr", Class::Function),
+        ("ls", Class::Function),
+        ("lsattr", Class::Function),
+        ("lsmod", Class::Function),
+        ("m4", Class::Function),
+        ("make", Class::Function),
+        ("man", Class::Function),
+        ("mapscrn", Class::Function),
+        ("md5sum", Class::Function),
+        ("mesg", Class::Function),
+        ("mkdir", Class::Function),
+        ("mkfifo", Class::Function),
+        ("mknod", Class::Function),
+        ("mktemp", Class::Function),
+        ("more", Class::Function),
+        ("mount", Class::Function),
+        ("msgfmt", Class::Function),
+        ("mv", Class::Function),
+        ("namei", Class::Function),
+        ("nano", Class::Function),
+        ("netstat", Class::Function),
+        ("nice", Class::Function),
+        ("nisdomainname", Class::Function),
+        ("nl", Class::Function),
+        ("nm", Class::Function),
+        ("nohup", Class::Function),
+        ("nproc", Class::Function),
+        ("nroff", Class::Function),
+        ("numfmt", Class::Function),
+        ("od", Class::Function),
+        ("openvt", Class::Function),
+        ("passwd", Class::Function),
+        ("paste", Class::Function),
+        ("patch", Class::Function),
+        ("pathchk", Class::Function),
+        ("perl", Class::Function),
+        ("pidof", Class::Function),
+        ("ping", Class::Function),
+        ("pinky", Class::Function),
+        ("popd", Class::BuiltIn),
+        ("pr", Class::Function),
+        ("printenv", Class::Function),
+        ("printf", Class::BuiltIn),
+        ("ps", Class::Function),
+        ("ps2ascii", Class::Function),
+        ("ps2epsi", Class::Function),
+        ("ps2pdf", Class::Function),
+        ("ps2ps", Class::Function),
+        ("pstree", Class::Function),
+        ("ptx", Class::Function),
+        ("pushd", Class::BuiltIn),
+        ("pwd", Class::BuiltIn),
+        ("read", Class::BuiltIn),
+        ("readlink", Class::Function),
+        ("readonly", Class::BuiltIn),
+        ("realpath", Class::Function),
+        ("red", Class::Function),
+        ("resizecons", Class::Function),
+        ("return", Class::ControlFlow),
+        ("rev", Class::Function),
+        ("rm", Class::Function),
+        ("rmdir", Class::Function),
+        ("rsync", Class::Function),
+        ("run-parts", Class::Function),
+        ("runcon", Class::Function),
+        ("scp", Class::Function),
+        ("sed", Class::Function),
+        ("select", Class::ControlFlow),
+        ("seq", Class::Function),
+        ("set", Class::BuiltIn),
+        ("setfont", Class::Function),
+        ("setkeycodes", Class::Function),
+        ("setleds", Class::Function),
+        ("setmetamode", Class::Function),
+        ("setterm", Class::Function),
+        ("sh", Class::Function),
+        ("sha1sum", Class::Function),
+        ("sha224sum", Class::Function),
+        ("sha256sum", Class::Function),
+        ("sha384sum", Class::Function),
+        ("sha512sum", Class::Function),
+        ("shift", Class::BuiltIn),
+        ("shopt", Class::BuiltIn),
+        ("showkey", Class::Function),
+        ("shred", Class::Function),
+        ("shuf", Class::Function),
+        ("size", Class::Function),
+        ("skill", Class::Function),
+        ("sleep", Class::Function),
+        ("snice", Class::Function),
+        ("sort", Class::Function),
+        ("source", Class::BuiltIn),
+        ("split", Class::Function),
+        ("ssh", Class::Function),
+        ("ssh-add", Class::Function),
+        ("ssh-agent", Class::Function),
+        ("ssh-keygen", Class::Function),
+        ("ssh-keyscan", Class::Function),
+        ("stat", Class::Function),
+        ("stdbuf", Class::Function),
+        ("strings", Class::Function),
+        ("strip", Class::Function),
+        ("stty", Class::Function),
+        ("su", Class::Function),
+        ("sudo", Class::Function),
+        ("sum", Class::Function),
+        ("suspend", Class::BuiltIn),
+        ("sync", Class::Function),
+        ("tac", Class::Function),
+        ("tail", Class::Function),
+        ("tar", Class::Function),
+        ("tee", Class::Function),
+        ("test", Class::BuiltIn),
+        ("then", Class::ControlFlow),
+        ("time", Class::BuiltIn),
+        ("timeout", Class::Function),
+        ("times", Class::BuiltIn),
+        ("touch", Class::Function),
+        ("tput", Class::Function),
+        ("tr", Class::Function),
+        ("trap", Class::BuiltIn),
+        ("troff", Class::Function),
+        ("true", Class::Function),
+        ("truncate", Class::Function),
+        ("tsort", Class::Function),
+        ("tty", Class::Function),
+        ("type", Class::BuiltIn),
+        ("typeset", Class::BuiltIn),
+        ("ulimit", Class::BuiltIn),
+        ("umask", Class::BuiltIn),
+        ("umount", Class::Function),
+        ("unalias", Class::BuiltIn),
+        ("uname", Class::Function),
+        ("unexpand", Class::Function),
+        ("unicode_start", Class::Function),
+        ("unicode_stop", Class::Function),
+        ("uniq", Class::Function),
+        ("unlink", Class::Function),
+        ("unset", Class::BuiltIn),
+        ("until", Class::ControlFlow),
+        ("unxz", Class::Function),
+        ("unzip", Class::Function),
+        ("updatedb", Class::Function),
+        ("uptime", Class::Function),
+        ("users", Class::Function),
+        ("utmpdump", Class::Function),
+        ("uuidgen", Class::Function),
+        ("valgrind", Class::Function),
+        ("vdir", Class::Function),
+        ("vi", Class::Function),
+        ("vmstat", Class::Function),
+        ("w", Class::Function),
+        ("wait", Class::BuiltIn),
+        ("wall", Class::Function),
+        ("wc", Class::Function),
+        ("wget", Class::Function),
+        ("whatis", Class::Function),
+        ("whereis", Class::Function),
+        ("which", Class::Function),
+        ("while", Class::ControlFlow),
+        ("who", Class::Function),
+        ("whoami", Class::Function),
+        ("write", Class::Function),
+        ("xargs", Class::Function),
+        ("xdg-open", Class::Function),
+        ("xhost", Class::Function),
+        ("xmodmap", Class::Function),
+        ("xz", Class::Function),
+        ("xzcat", Class::Function),
+        ("yes", Class::Function),
+        ("ypdomainname", Class::Function),
+        ("zcat", Class::Function),
+        ("zcmp", Class::Function),
+        ("zdiff", Class::Function),
+        ("zegrep", Class::Function),
+        ("zfgrep", Class::Function),
+        ("zforce", Class::Function),
+        ("zgrep", Class::Function),
+        ("zip", Class::Function),
+        ("zless", Class::Function),
+        ("zmore", Class::Function),
+        ("znew", Class::Function),
+        ("zsh", Class::Function),
+        ("zsoelim", Class::Function),
     ],
     line_comment: &["#"],
     block_comment: None,
@@ -611,6 +899,7 @@ static BASH: Syntax = Syntax {
 /// was read back from the pinned binary one at a time, the way bash's
 /// 204 were.
 static RUBY: Syntax = Syntax {
+    conversions: "",
     canonical: "ruby",
     names: &["ruby", "rb"],
     // Probed over **Ruby's own vocabulary**, the way python's was:
@@ -954,6 +1243,22 @@ fn directive(text: &str, syntax: &Syntax, out: &mut Vec<(Class, String)>) -> usi
     stop
 }
 
+/// A two-character operator neither language spells with its operator set.
+///
+/// **`##` pastes two tokens together and is an `op`**, though the `#` that
+/// opens the directive it sits in is a `pp`. **`:=` is an operator; a bare
+/// `:` is not** — putting `:` in python's set would colour every dict key
+/// and every `def` line.
+fn paired_operator(rest: &str, syntax: &Syntax) -> Option<&'static str> {
+    if rest.starts_with("##") && syntax.has(PREPROCESSOR) {
+        return Some("##");
+    }
+    if rest.starts_with(":=") && std::ptr::eq(syntax, &raw const PYTHON) {
+        return Some(":=");
+    }
+    None
+}
+
 fn scan(text: &str, from: usize, syntax: &Syntax, state: &mut State, out: &mut Vec<(Class, String)>) {
     let bytes = text.as_bytes();
     let mut at = from;
@@ -1038,12 +1343,9 @@ fn scan(text: &str, from: usize, syntax: &Syntax, state: &mut State, out: &mut V
             at += word.len();
             continue;
         }
-        // **`:=` is an operator; a bare `:` is not.** So the pair is
-        // taken here rather than by putting `:` in python's operator set,
-        // which would colour every dict key and every `def` line.
-        if rest.starts_with(":=") && std::ptr::eq(syntax, &raw const PYTHON) {
-            push(out, Class::Operator, ":=");
-            at += 2;
+        if let Some(pair) = paired_operator(rest, syntax) {
+            push(out, Class::Operator, pair);
+            at += pair.len();
             continue;
         }
         // A backslash alone at the end of a line continues it, and pandoc
@@ -1125,7 +1427,7 @@ fn quoted(
     while at < text.len() {
         let rest = &text[at..];
         if syntax.has(CONVERSIONS) && class == Class::Str
-            && let Some(len) = specifier(rest)
+            && let Some(len) = specifier(rest, syntax.conversions)
         {
             push(out, Class::SpecialChar, &rest[..len]);
             at += len;
@@ -2041,7 +2343,7 @@ fn placeholders(text: &str, class: Class, syntax: &Syntax, out: &mut Vec<(Class,
             return;
         }
         if syntax.has(CONVERSIONS)
-            && let Some(len) = specifier(rest)
+            && let Some(len) = specifier(rest, syntax.conversions)
         {
             push(out, Class::SpecialChar, &rest[..len]);
             at += len;
@@ -2064,22 +2366,24 @@ fn placeholders(text: &str, class: Class, syntax: &Syntax, out: &mut Vec<(Class,
 }
 
 /// The length of a `printf` conversion at the front of `rest`.
-fn specifier(rest: &str) -> Option<usize> {
-    let mut chars = rest.char_indices();
-    if chars.next()?.1 != '%' {
-        return None;
-    }
-    let mut end = None;
-    for (index, c) in chars {
+fn specifier(rest: &str, letters: &str) -> Option<usize> {
+    let rest = rest.strip_prefix('%')?;
+    // Python's `%(name)s` names its argument, and the whole of it is one
+    // `sc`. C has nothing of the kind, so the parenthesis is only skipped
+    // where the language's letters include python's `r`.
+    let mut at = if letters.contains('r') && rest.starts_with('(') {
+        rest.find(')')? + 1
+    } else {
+        0
+    };
+    for (index, c) in rest[at..].char_indices() {
         if "-+ #0123456789.*hlLqjzt".contains(c) {
             continue;
         }
-        if "diouxXeEfgGcspn%".contains(c) {
-            end = Some(index + c.len_utf8());
-        }
-        break;
+        at += index;
+        return letters.contains(c).then(|| 1 + at + c.len_utf8());
     }
-    end
+    None
 }
 
 /// A numeric literal, and the suffix letters after it, which pandoc

@@ -1056,28 +1056,84 @@ pre`, `display: inline-block`, the `:empty` height, `color: inherit`,
 lines only one way. Nothing with a colour in it is shared, and
 `crates/ferrodoc-html/styles/highlight.css` says so at the top.
 
-### Syntax highlighting — C, Python, bash
+### Syntax highlighting — C, Python, bash, Ruby
 
 **Code is highlighted, in pandoc's shape, for the languages named here
 and no others.** A language not on the list degrades to exactly what this
 writer emitted before there was a highlighter — `<pre class="whatever">
 <code>` — so a short list costs nothing but colour.
 
-| language | names accepted | gate |
-|---|---|---|
-| C | `c` | **2/2** real source files byte-identical |
-| Python | `python`, `python3`, `py` | **4/4** |
-| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines |
+| language | names accepted | curated gate | code written for somebody else |
+|---|---|---|---|
+| C | `c` | **2/2** | 23/40 system headers |
+| Python | `python`, `python3`, `py` | **4/4** | 16/40 standard library |
+| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 17/24 scripts in `/usr/bin` |
+| Ruby | `ruby`, `rb` | — | 9/40 standard library |
 
-`./scripts/highlight.sh` is that gate, and the inputs are the C binding's
-own example and header and every Python and shell file in the tree —
-2,650 lines that exist in this repository for other reasons and that
-nobody wrote to be highlighted, this project's own harness among them.
-**That distinction is
-the point**: only three of the spec's 652 examples hold a fence in a
-language pandoc knows, nine lines between them, and a highlighter written
-to pass those would be fitted to the fixtures rather than to the
-language.
+**The two columns are the point of this section.** For weeks only the
+first existed, and every language stood at 26/26 in it. Then the same
+highlighters were pointed at files nobody wrote for this repository —
+`/usr/include`, the Python standard library, the scripts in `/usr/bin` —
+and C matched pandoc on **1 header in 40**. Python managed 6, bash 12.
+The gate could not have said so: a gate cannot fail on a construct its
+corpus lacks, and this repository's 2,650 lines of C, Python and shell
+simply do not contain a multi-line `#define`, or a blank line inside a
+licence header, or `f"{x!r}"`.
+
+That blind spot is named in three other places in this file. It was
+sitting under the strongest claim the project makes, and it took eight
+rules to close most of it — every one of them read back off the pinned
+binary, not reasoned about:
+
+- an empty line inside a block comment carries **no span**; we emitted
+  `<span class="co"></span>`, which is every licence header in `/usr/include`
+- **on a directive line nothing is plain**: the spacing before a trailing
+  comment, a macro's parameter names, the body it expands to, all `pp`.
+  This one rule took C from 7/40 to 23/40
+- a directive continued with `\` runs onto the next line, which is `pp`
+  entire, and the `\` itself is an `op`; `##` inside one is an `op` too,
+  though the `#` that opened the directive is a `pp`
+- bash's **doubled** brackets are `kw` and its single ones `bu`
+- python's dunders: of 96 probed, 68 are `fu` wherever they stand —
+  `x.__init__` too — while `__name__` and `__file__` are `va`, and 29
+  including `__dict__` and `__doc__` carry no class at all
+- `match` and `case` are **soft** keywords, `cf` only when a space and an
+  operand follow; `f(match="a")` is an ordinary name. This repository's
+  own test file caught the first attempt, which is the curated gate doing
+  the one job it is still good at
+- an f-string's `!r}` and `:>3}` belong to the placeholder, not to the
+  expression inside it
+- the `%…` conversion letters **differ by language**: C takes `%a` and
+  `%b`, python takes `%r` and `%(name)s`, and each set was probed `a` to
+  `z` and `A` to `Z`
+
+`./scripts/real-world.sh` is the second column, and the figures in it were
+taken on 2026-08-26. It **reports and does not gate**: its corpus is
+whatever the machine happens to hold, so the numbers do not compare
+between machines — and the denominators drift even on one machine, as
+this sweep found 22 shell scripts in `/usr/bin` one hour and 24 the next
+because packages had been installed in between. What it is, is
+re-checkable, which is more than the claim it replaces.
+
+`./scripts/highlight.sh` is the first column, and the inputs are the C
+binding's own example and header and every Python and shell file in the
+tree — 2,650 lines that exist in this repository for other reasons and
+that nobody wrote to be highlighted, this project's own harness among
+them. That was chosen over the spec because only three of its 652
+examples hold a fence in a language pandoc knows, nine lines between
+them, and a highlighter written to pass those would be fitted to the
+fixtures. The lesson of the second column is that *any* fixed corpus is
+fitted to eventually; the defence is to keep pointing the thing at code
+it has never seen.
+
+**What is still wrong, measured rather than supposed.** bash does not
+tokenize an array subscript — `a[$i]` should be `op`/`va`/`op` and comes
+back as one run. Ruby is the furthest behind: `$1` and its friends, a
+heredoc's body, and the `%w[…]` family are all unhandled, which is most
+of the distance between 9/40 and the rest. Ruby is listed anyway because
+the alternative is worse — dropping it colours nothing rather than
+colouring most of a file correctly — but it is listed with its number
+beside it, not with a claim.
 
 Every rule was read off `pandoc -f commonmark -t html`, and the ones that
 would have been guessed wrong are worth naming: `NULL`, `printf` and
@@ -1116,9 +1172,9 @@ probed over **python's own vocabulary** — `dir(builtins)` plus
 how `file` came to be missing on the first attempt, and only a real file
 caught it.
 
-All three cost **80.4 KB, 1.16% of the binary** — most of it bash's table
-of 204 command names — and it is a cargo feature (`highlight`, on by
-default) so a trimmed build can drop it.
+All four cost **80.4 KB, 1.16% of the binary** — most of it bash's table
+of command names — and it is a cargo feature (`highlight`, on by default)
+so a trimmed build can drop it.
 
 **bash is a different kind of job, and that is what made it worth
 doing.** Its classes are **positional** rather than lexical: the same
@@ -1153,9 +1209,14 @@ have produced, every one of them read off the pinned binary:
   whose escapes are `dt`; inside `"…"` only `\"`, `\$`, `\\` and
   `` \` `` are escapes, so `"\t"` is all string.
 
-The command table was probed **one word at a time** — 204 rows — after a
-batched probe came back misaligned and would have coloured 69 words
-wrongly. `samples/06-markdown-to-html` is one bash block and nothing
+The command table was first probed **one word at a time** — 204 rows —
+after a batched probe came back misaligned and would have coloured 69
+words wrongly. It has since been re-probed against an external list
+rather than a remembered one: **every name in `/usr/bin`, 3,130 of
+them**, read back 200 to a document with one word per line, which the
+misalignment cannot survive because each line is read back by its own
+number. 279 came back `fu`, 21 `bu`, and the other 2,830 carry no class
+at all. `samples/06-markdown-to-html` is one bash block and nothing
 else, and it is now byte-identical to pandoc's.
 
 **There is a second oracle, and it had never been used.** Pandoc *writes*
