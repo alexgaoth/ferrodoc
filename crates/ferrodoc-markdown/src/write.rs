@@ -1046,22 +1046,48 @@ fn push_wrapped(out: &mut String, prefix: &str, text: &str, columns: Option<usiz
     }
 }
 
+/// **A word that would re-open a block if a line began with it.**
+///
+/// This is not a matter of matching pandoc's bytes. A fill that leaves a
+/// bare `+` at the start of a line writes a document that **does not read
+/// back as itself**: one paragraph came back as a `Para` and a
+/// `BulletList`, because `+ 8 = 40, …` is a bullet item.
+///
+/// The set is `CommonMark`'s paragraph interrupters, measured against
+/// pandoc one character at a time: `+`, `-`, `*` and `>`; `1.` and `1)`
+/// but **not `2.`, `12.` or `2)`**, because an ordered list may only
+/// interrupt a paragraph when it starts at one. `#`, `=`, `~` and `%` are
+/// allowed, which a reading of the spec would not predict.
+///
+/// `ferrodoc-text` carries the same predicate for the plain writer.
+fn reopens_a_block(word: &str) -> bool {
+    matches!(word, "+" | "-" | "*" | ">" | "1." | "1)")
+}
+
 /// Greedy fill: take words while they fit, break at the last space that
 /// did. A word longer than the width goes on its own line and overruns —
 /// breaking inside it would invent a break the text does not have.
+///
+/// With **one word of lookahead**: a word is refused when taking it would
+/// push a block-reopening word onto the start of the next line.
 fn fill(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut line = String::new();
     let mut line_width = 0;
-    for word in text.split(BREAK) {
+    let words: Vec<&str> = text.split(BREAK).collect();
+    for (index, word) in words.iter().enumerate() {
         let word_width = word.chars().count();
+        let after = line_width + 1 + word_width;
+        let strands_the_next = words.get(index + 1).is_some_and(|next| {
+            reopens_a_block(next) && after + 1 + next.chars().count() > width
+        });
         if line.is_empty() {
             line.push_str(word);
             line_width = word_width;
-        } else if line_width + 1 + word_width <= width {
+        } else if after <= width && !strands_the_next {
             line.push(' ');
             line.push_str(word);
-            line_width += 1 + word_width;
+            line_width = after;
         } else {
             lines.push(std::mem::take(&mut line));
             line.push_str(word);
@@ -1582,6 +1608,34 @@ mod tests {
             Inline::Str("supercalifragilistic".to_owned()),
         ]);
         assert_eq!(write_gfm_wrapped(&long, 5), "a\nsupercalifragilistic\n");
+    }
+
+    /// **A fill must not write a document that reads back as another
+    /// one.** Left to a plain greedy fill, this paragraph put a bare `+`
+    /// at the start of the second line, and `+ 8 = 40, …` is a bullet
+    /// item: the round trip returned a `Para` **and a `BulletList`**.
+    ///
+    /// Pandoc breaks one word earlier for the same reason, so this is
+    /// both a correctness fix and a parity one — but the correctness half
+    /// is why the rule is not optional.
+    #[test]
+    fn a_fill_never_strands_a_bullet_at_the_start_of_a_line() {
+        let long = "x".repeat(64);
+        let text = format!("{long} 8 + 24 + 8 = 40, and the discriminant makes 48 here.");
+        let doc = crate::read_commonmark(&text).expect("read");
+        let written = write_markdown_wrapped(&doc, 72);
+        for line in written.lines() {
+            assert!(
+                !matches!(line.split(' ').next(), Some("+" | "-" | "*" | ">" | "1." | "1)")),
+                "a line opens a block: {line:?}"
+            );
+        }
+        let again = crate::read_commonmark(&written).expect("re-read");
+        assert_eq!(
+            doc.blocks.len(),
+            again.blocks.len(),
+            "the round trip changed the block structure:\n{written}"
+        );
     }
 
     #[test]

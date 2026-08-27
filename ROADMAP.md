@@ -979,14 +979,110 @@ peak RSS on the 10 MB fixture went 391.3 MiB → 380.8 MiB, ~10 MB, with no
 change in time. All 652 CommonMark examples and every differential gate
 unmoved. **Not this card:** replacing Comrak.
 
-**P3 — Make the archive/AST decision from evidence.** Profile the largest
-real EPUB and the 199.6 MiB batch by phase: input archive, decompressed
-chapter, HTML tree, Pandoc AST, and output. Write and review the smallest
-design that can release those buffers early — likely a reader-backed archive
-plus a streaming conversion API. **Done:** a checked design and a prototype
-or a recorded, evidence-backed rejection; it must make the strongest
-reasonable attempt at 140 ms / 55 MiB and 20 s / 180 MiB. **Not this card:**
-a silent public-API break or a new document format.
+**P3 — Make the archive/AST decision from evidence.** ⚠️ **Profiled
+2026-08-27; the premise does not survive the profile.** The evidence is
+below. **Not this card:** a silent public-API break or a new document
+format.
+
+#### P3's evidence, and what it says to do instead
+
+**P3 asked for a reader-backed archive and a streaming output path,
+because "archive readers hold several representations at once". They do.
+It is not what the memory is.**
+
+Ten public-domain EPUBs from Project Gutenberg, `-f epub -t plain`,
+peak RSS as the operating system's high-water mark for one process:
+
+| book | archive | XHTML in it | peak RSS | RSS ÷ XHTML |
+|---|---:|---:|---:|---:|
+| 1342 Pride and Prejudice | 23.7 MB | 0.90 MB | 48.6 MB | 54× |
+| 74 Tom Sawyer | 15.9 MB | 0.55 MB | 32.7 MB | 59× |
+| 76 Huckleberry Finn | 15.3 MB | 0.69 MB | 37.4 MB | 54× |
+| 98 A Tale of Two Cities | 7.6 MB | 0.94 MB | 32.6 MB | 35× |
+| **2600 War and Peace** | **1.8 MB** | **3.90 MB** | **87.3 MB** | **22×** |
+| 2701 Moby-Dick | 0.8 MB | 1.41 MB | 36.2 MB | 26× |
+| 84 Frankenstein | 0.5 MB | 0.46 MB | 16.8 MB | 37× |
+| 1661 Sherlock Holmes | 0.4 MB | 0.60 MB | 20.8 MB | 35× |
+| 5200 Metamorphosis | 0.3 MB | 0.14 MB | 9.2 MB | 66× |
+| 11 Alice | 0.2 MB | 0.19 MB | 9.9 MB | 51× |
+
+Read the two ends against each other. **1342 is 23.7 MB of archive and
+0.9 MB of text and costs 48.6 MB. 2600 is 1.8 MB of archive and 3.9 MB of
+text and costs 87.3 MB.** Thirteen times less archive, nearly twice the
+memory. The archive is real and it is not the ceiling; the text is.
+
+**What the ceiling is, exactly.** War and Peace, read to a Pandoc AST:
+
+```
+total AST nodes         1,136,853
+  Str                     566,718     2,644,228 chars — 4.7 each
+  Space                   515,740
+  SoftBreak                38,696
+  Para                     11,769
+```
+
+and, on this target:
+
+```
+size_of::<Inline>()  =  48 bytes
+size_of::<Block>()   = 144 bytes
+```
+
+1,136,853 × 48 = **54.6 MB of node slots** before a single character of
+text is stored, and 566,718 separate heap allocations to hold an average
+of 4.7 bytes each — a `String` is 24 bytes of pointer, length and
+capacity, and glibc's smallest usable block is larger than the word it
+holds. That is the 87.3 MB.
+
+**`Inline` is 48 bytes because of two variants.** Every other one fits in
+32 or less; `Link(Box<Attr>, Vec<Inline>, Box<Target>)` and `Image` are
+8 + 24 + 8 = 40, and the discriminant makes 48. War and Peace contains
+**no images and 754 spans**, and pays 8 bytes on all 1.1 million of its
+nodes for the two variants it barely uses.
+
+#### The decision this asks the owner for
+
+- Making `Inline` 40 bytes — one box holding both the `Attr` and the
+  `Target` of a `Link`/`Image` — saves 1,136,853 × 8 = **9.1 MB, 10% of
+  peak**, on the workload that matters. It is a **public AST break**: a
+  pattern match on `Inline::Link(attr, inner, target)` stops compiling.
+- Getting to 32 bytes needs every variant at 24 or less, which means
+  boxing `Quoted`, `Cite`, `Code`, `Math`, `RawInline` and `Span` too:
+  **18.2 MB, 21% of peak**, and a much wider break.
+- A small-string optimisation on `Str` would remove 566,718 allocations
+  per book, but `Inline::Str(String)` is the type pandoc JSON
+  compatibility is expressed in, and `String` is in the public signature.
+- **A reader-backed archive is worth 1.8 MB of 87.3 MB — 2% — on
+  2600, and about half on 1342.** It is the right thing for a batch of
+  image-heavy books and it is not the ceiling for anything text-heavy.
+
+Nothing here is done unilaterally: the roadmap says no public AST break
+merely to hit a benchmark, and the benchmark is exactly what this would
+be for. **The prototype worth building first is the one that needs no
+break at all** — the streaming output path, which lets the writer emit
+while the reader is still producing and so never holds both the whole AST
+and the whole output. That does not shrink the AST; it stops the output
+from being added to it.
+
+**Corpus, by URL and checksum** (SHA-256, first 16), as the section above
+requires before any of this becomes a gate:
+
+```
+3fba7e1ecb4a4006   1,835,152  https://www.gutenberg.org/ebooks/2600.epub3.images
+2f39814cbc740d02     812,600  https://www.gutenberg.org/ebooks/2701.epub3.images
+1381ffdb6b07ac19   7,922,074  https://www.gutenberg.org/ebooks/98.epub3.images
+2c1a5bce2f7fb394  24,835,612  https://www.gutenberg.org/ebooks/1342.epub3.images
+6b79f2d23b804172     189,231  https://www.gutenberg.org/ebooks/11.epub3.images
+```
+
+The roadmap's own row names a 6,797,467 B EPUB at 180 ms and 71 MiB. No
+URL or checksum was ever recorded for it, so it cannot be re-measured and
+this table replaces it rather than pretending to continue it. **98.epub
+is the nearest in archive size at 7,922,074 B, and it converts in 138 ms
+at 32.6 MiB** — but it is 7.2 MB of pictures and 0.94 MB of text, so if
+the original row was a text-heavy book the two are not comparable. The
+lesson is the one this file already teaches about inputs: a figure whose
+input cannot be fetched again is not a measurement.
 
 ### 0.8 — The resource contract
 

@@ -461,6 +461,23 @@ impl Writer {
     }
 }
 
+/// **A word that would re-open a block if it began a line.**
+///
+/// Pandoc will not end a filled line in a way that leaves one of these
+/// standing at the start of the next, because the text it wrote would
+/// then read back as a bullet, a blockquote or a list item rather than
+/// as the paragraph it is.
+///
+/// The set is exactly `CommonMark`'s *paragraph interrupters*, and it was
+/// measured character by character rather than reasoned about: `+`, `-`,
+/// `*` and `>` are avoided; `1.` and `1)` are avoided and **`2.`, `12.`
+/// and `2)` are not**, because an ordered list may only interrupt a
+/// paragraph when it starts at one. `#`, `=`, `~` and `%` are all
+/// allowed, which is not what a reading of the spec would predict.
+fn reopens_a_block(word: &str) -> bool {
+    matches!(word, "+" | "-" | "*" | ">" | "1." | "1)")
+}
+
 /// Put `prefix` on every non-empty line of `text`.
 /// Greedy fill: take words while they fit, break at the last mark that
 /// did. A word longer than the width goes on its own line and overruns —
@@ -468,11 +485,19 @@ impl Writer {
 fn fill(line: &str, first: usize, rest: usize, out: &mut String) {
     let mut width = 0;
     let mut limit = first;
-    for (index, word) in line.split([BREAK, SOFT]).enumerate() {
+    let words: Vec<&str> = line.split([BREAK, SOFT]).collect();
+    for (index, word) in words.iter().enumerate() {
         let word_width = word.chars().count();
+        // **One word of lookahead.** Taking this word is refused when it
+        // would push a block-reopening word onto the start of the next
+        // line: break here instead, so that word lands mid-line.
+        let after = width + 1 + word_width;
+        let strands_the_next = words.get(index + 1).is_some_and(|next| {
+            reopens_a_block(next) && after + 1 + next.chars().count() > limit
+        });
         if index == 0 {
             width = word_width;
-        } else if width + 1 + word_width <= limit {
+        } else if width + 1 + word_width <= limit && !strands_the_next {
             out.push(' ');
             width += 1 + word_width;
         } else {
@@ -499,6 +524,39 @@ mod tests {
     use super::*;
     use ferrodoc_ast::{Attr, Caption, Cell, ColSpec, ColWidth, ListAttributes, ListNumberDelim,
         ListNumberStyle, Row, Table, TableBody, TableFoot, TableHead, Target};
+
+    /// **The plain writer breaks one word early rather than strand a
+    /// bullet.** Pandoc does, and the reason it does is the same one that
+    /// makes it a correctness rule in the markdown writers: a line that
+    /// opens with a bare `+` reads as a list item.
+    ///
+    /// The prefix lengths here are the ones that actually diverged —
+    /// found by walking the column and diffing against the pinned binary,
+    /// not chosen.
+    #[test]
+    fn a_filled_line_never_strands_a_bullet() {
+        for prefix in [64usize, 65, 69, 70] {
+            let long = "x".repeat(prefix);
+            let text = format!("{long} 8 + 24 + 8 = 40, and the discriminant makes 48 here.");
+            // Built as an AST rather than parsed, so this crate keeps
+            // its dependencies: `Str` per word, `Space` between.
+            let mut inlines = Vec::new();
+            for (index, word) in text.split(' ').enumerate() {
+                if index > 0 {
+                    inlines.push(Inline::Space);
+                }
+                inlines.push(Inline::Str(word.to_owned()));
+            }
+            let doc = Pandoc::new(vec![Block::Para(inlines)]);
+            let plain = write_text_wrapped(&doc, 72);
+            for line in plain.lines() {
+                assert!(
+                    !matches!(line.split(' ').next(), Some("+" | "-" | "*" | ">" | "1." | "1)")),
+                    "prefix {prefix}: a line opens a block: {line:?}"
+                );
+            }
+        }
+    }
 
     fn ordered() -> ListAttributes {
         ListAttributes {

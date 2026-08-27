@@ -1344,6 +1344,25 @@ directly without asking its reader to survive anything.
 | `commonmark` | 29/40 | 29 |
 | `markdown` | 6/40 | 6 |
 
+**A fill must not write a document that reads back as another one**, and
+until 2026-08-27 these writers did. Given a paragraph whose greedy fill
+left a bare `+` at the start of a line, the markdown writers wrote a
+document that came back as a `Para` **and a `BulletList`** — because
+`+ 8 = 40, …` opening a line is a bullet item.
+
+Pandoc breaks one word early to avoid it, and the set it avoids was
+measured character by character rather than read off the spec: `+`, `-`,
+`*` and `>`; `1.` and `1)` but **not `2.`, `12.` or `2)`**, because an
+ordered list may only interrupt a paragraph when it starts at one. `#`,
+`=`, `~` and `%` are allowed, which is not what the spec would suggest.
+The rule applies to `plain`, `commonmark`, `gfm` and `markdown` and
+**not** to `html`, `latex` or `rst`, where pandoc fills to the full
+column — those outputs are never read back as markdown.
+
+It was found by prose written into `ROADMAP.md`: this repository's own
+files are part of the writer corpus, so a paragraph about the size of an
+`Inline` took `plain` from 38/40 to 37/40 the moment it was committed.
+
 Twenty documents, **each written twice** — as the document falls, and
 filled to 72 columns, which is pandoc's own default. Nothing measured the
 fill until 2026-08-26, and the RST writer had been treating an inline
