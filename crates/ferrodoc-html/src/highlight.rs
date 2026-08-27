@@ -2469,6 +2469,16 @@ fn bash_code(
             at = next;
             continue;
         }
+        // **`&>` and `&>>` redirect; they do not end the command.** The
+        // `&` of one was being read as the separator, which put the
+        // scanner back at command position and made `/dev/null` an `ex`.
+        if let Some(after) = rest.strip_prefix("&>") {
+            let run = 2 + usize::from(after.starts_with('>'));
+            push(out, Class::Operator, &rest[..run]);
+            state.position = Position::Word;
+            at += run;
+            continue;
+        }
         // The operators that end a command and start another.
         let ends_command = ["&&", "||", ";;", ";", "|", "&"]
             .into_iter()
@@ -2483,6 +2493,13 @@ fn bash_code(
             };
             cursor.naming = false;
             at += word.len();
+            continue;
+        }
+        // **A backtick is a command substitution**, and pandoc marks both
+        // of its ticks `kw` with a command between them. Nothing here
+        // read them at all, so `x=`date`` lost the whole run.
+        if rest.starts_with('`') {
+            at = backticked(text, at, state, out, depth);
             continue;
         }
         if rest.starts_with('=') {
@@ -2507,7 +2524,10 @@ fn bash_code(
         }
         let word: String = rest
             .chars()
-            .take_while(|c| !c.is_ascii_whitespace() && !"'\"$;|&<>=()#\\*?".contains(*c))
+            // A backtick ends a word: it closes the command substitution
+            // it opened, and `date` inside one is a command like any
+            // other. Without it here, `` `date` `` was one `ex`.
+            .take_while(|c| !c.is_ascii_whitespace() && !"'\"$;|&<>=()#\\*?`".contains(*c))
             .collect();
         if word.is_empty() {
             at += bash_paren(rest, state, &mut cursor, out);
@@ -2518,6 +2538,29 @@ fn bash_code(
     }
     state.parens += cursor.open;
     text.len()
+}
+
+/// A `` ` … ` `` substitution: both ticks are `kw`, and what lies between
+/// them is a command. Nothing read them at all before, so `` x=`date` ``
+/// lost the whole run.
+fn backticked(
+    text: &str,
+    at: usize,
+    state: &mut State,
+    out: &mut Vec<(Class, String)>,
+    depth: usize,
+) -> usize {
+    push(out, Class::Keyword, "`");
+    let was = (state.position, state.in_test);
+    state.position = Position::Command;
+    state.in_test = false;
+    let end = bash_code(text, at + 1, state, out, depth + 1);
+    (state.position, state.in_test) = was;
+    if text[end..].starts_with('`') {
+        push(out, Class::Keyword, "`");
+        return end + 1;
+    }
+    end
 }
 
 /// The punctuation that reads the same wherever it stands: quotes,
@@ -2608,6 +2651,14 @@ fn bash_paren(
     out: &mut Vec<(Class, String)>,
 ) -> usize {
     let width = rest.chars().next().map_or(1, char::len_utf8);
+    // **A bare `(( … ))` evaluates arithmetic**, where a bare word is a
+    // `va` and the numbers are numbers — the same rules as `$(( … ))`,
+    // but closing on a `kw` rather than a `va`. Without this, `if ((
+    // verboselevel >= t ))` called its variables `ex`.
+    if rest.starts_with("((") && state.position == Position::Command {
+        push(out, Class::Keyword, "((");
+        return bash_arith(rest, 2, Class::Keyword, out);
+    }
     if &rest[..width] == "(" {
         let valued = cursor.valued;
         push(out, if valued { Class::Variable } else { Class::Keyword }, "(");
@@ -2653,6 +2704,18 @@ fn bash_subscript(inside: &str, out: &mut Vec<(Class, String)>) {
     }
 }
 
+/// The name after a `function` keyword, **with the space before it** —
+/// `function f() {` is `kw|function` then `fu| f()`, parens and all.
+fn named_function(after: &str, out: &mut Vec<(Class, String)>) -> usize {
+    let space = after.find(|c: char| !c.is_ascii_whitespace()).unwrap_or(after.len());
+    let named = after[space..]
+        .find(|c: char| !c.is_alphanumeric() && !"_-.:".contains(c))
+        .map_or(after.len(), |index| space + index);
+    let named = named + usize::from(after[named..].starts_with("()")) * 2;
+    push(out, Class::Function, &after[..named]);
+    named
+}
+
 /// One word, classified by where it stands. `at` has already passed it.
 fn bash_word(
     text: &str,
@@ -2687,6 +2750,14 @@ fn bash_word(
             cursor.valued = true;
             return from + close + 1 + usize::from(appends);
         }
+    }
+    // **`function name` names a function, and the space belongs to the
+    // name**: `function f() {` is `kw|function` then `fu| f()`, parens
+    // and all. Without this the name carried no class at all.
+    if commanding && word == "function" {
+        push(out, Class::Keyword, word);
+        state.position = Position::Command;
+        return at + named_function(&text[at..], out);
     }
     // `name()` is one piece, and it is the name of a function.
     if commanding && text[at..].starts_with("()") {
@@ -2834,7 +2905,7 @@ fn bash_dollar(text: &str, from: usize, state: &mut State, out: &mut Vec<(Class,
     }
     if rest.starts_with("$((") {
         push(out, Class::Variable, "$((");
-        return bash_arith(text, from + 3, out);
+        return bash_arith(text, from + 3, Class::Variable, out);
     }
     if rest.starts_with("$(") {
         push(out, Class::Variable, "$(");
@@ -3016,12 +3087,12 @@ pub(crate) fn write_line(out: &mut String, pieces: &[(Class, String)], escape: f
 
 /// The inside of a `$(( … ))`, where a bare name is a variable and the
 /// numbers are numbers.
-fn bash_arith(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize {
+fn bash_arith(text: &str, from: usize, closing: Class, out: &mut Vec<(Class, String)>) -> usize {
     let mut at = from;
     while at < text.len() {
         let rest = &text[at..];
         if rest.starts_with("))") {
-            push(out, Class::Variable, "))");
+            push(out, closing, "))");
             return at + 2;
         }
         if rest.starts_with("${") {
