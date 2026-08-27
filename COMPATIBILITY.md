@@ -1071,7 +1071,7 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 | language | names accepted | curated gate | files written for somebody else | lines of those files |
 |---|---|---|---|---|
 | C | `c` | **2/2** | 25/40 system headers | **98%** of 11,154 |
-| Python | `python`, `python3`, `py` | **4/4** | 16/40 standard library | **98%** of 28,813 |
+| Python | `python`, `python3`, `py` | **4/4** | 21/40 standard library | **98%** of 28,813 |
 | bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 3/40 scripts in `/usr/bin` | **94%** of 17,018 |
 | Ruby | `ruby`, `rb` | — | 15/40 standard library | **95%** of 26,777 |
 
@@ -1161,38 +1161,51 @@ fixtures. The lesson of the second column is that *any* fixed corpus is
 fitted to eventually; the defence is to keep pointing the thing at code
 it has never seen.
 
-**A python raw string is a regular expression to pandoc, and not to this
-highlighter.** That is the largest single gap left, because the standard
-library is full of them:
+**A python raw string is a regular expression to pandoc**, and this
+highlighter now reads it as one. It was the largest gap on the list; it
+took twenty-one probed constructs and four more rules that only real
+files could have found.
 
-```console
-$ printf '```python\nx = r"[a-z]\\d+"\n```\n' | pandoc -f commonmark -t html --wrap=none
-<span class="vs">r&quot;</span><span class="pp">[a-z]</span><span class="dv">\d</span><span class="op">+</span><span class="vs">&quot;</span>
-```
+The sub-language, construct by construct: the prefix and quotes are `vs`;
+`\d` and its letter friends are `dv` while `\1` and `\.` are `ch`; a
+character class is `pp` with its escapes keeping their own classes, and a
+`]` immediately after `[` or `[^` is literal; `.`, `^` and `$` are `dv`;
+`|` is `cf`; `+`, `*`, `?` and a **numeric** `{2,3}` are `op` while `{a}`
+is three ordinary characters; and a group's parentheses take their class
+from what opens it — `kw` plainly, **nothing at all** for `(?: … )`, `ex`
+for a lookahead, `kw` with a `fu` name for `(?P<n> … )`, and one span of
+its own for `(?i)`, `(?#…)` and `(?P=n)`.
 
-The whole of it is one `st` here. Probed, the sub-language is small and
-regular — the `r` prefix and the quotes are `vs`, a character class is
-`pp`, a `\d` shorthand is `dv`, a quantifier is `op`, and an escaped
-backslash is `ch` — and a **non**-raw string's invalid escape is an `er`,
-which this does not have either. It is written down rather than
-implemented because implementing it needs its own probe round, and this
-release had already reached crates.io when the rule turned up.
+Four rules beside it, each found by a real file rather than by reasoning:
 
-**bash's own figure fell, and it fell because the corpus was wrong.** It
-read 17/24 while the sweep found its scripts with
-`grep -rl '^#!/bin/bash' /usr/bin` — which matched `/usr/bin/gh` and
-`/usr/bin/podman`, ELF binaries that happen to contain those bytes after
-a newline somewhere inside, and which missed most of the real scripts. A
-bash script is a file whose **first line** is a bash shebang; asking that
-question finds 108 here, and the first 40 are far longer and harder than
-the 22 the old sweep chose. **3/40 at 94% of lines is the honest number
-against the honest corpus.** It also retires a drift this file recorded
-wrongly once: 22 scripts one hour and 24 the next was never the package
-set changing, it was binaries being read as text.
+- **a lowercase `r` reads the body; a capital `R` does not.** `r"\d"`
+  carries a `dv` and `R"\d"` is one flat `vs`
+- **a triple-quoted raw string is a *verbose* regexp**, where `#`
+  comments to the end of the line — and a single-quoted one is not.
+  `r"a#b"` is flat and `r'''a#b'''` carries a `co`. `doctest.py`'s
+  `_EXAMPLE_RE` is twenty lines of one, and carrying that state across
+  lines is what the rule costs
+- **a raw string can still be a docstring**, and then it is prose rather
+  than a pattern — `doctest.py` opens with one
+- **a docstring holds no conversions, no placeholders and no alert
+  words.** The first line of one already knew about conversions, because
+  the scanner asks whether the class is `st`; every line after it did
+  not, and `difflib.py` is full of `%d` inside a triple-quoted run. A
+  docstring now carries a class of its own for exactly this reason: it
+  renders `co` and it is not a comment
+
+**Python's escapes are exact, and an unknown one is an `er`.** Probed `a`
+to `z`, `A` to `Z` and `0` to `9`, then form by form: `\a \b \f \n \r \t
+\v` are escapes and every other bare letter is not; one to three octal
+digits are; `\x` needs exactly two hex digits, `\u` four and `\U` eight,
+and each is an error without them; `\N{…}` is one whole escape; and of
+the punctuation only `\\`, `\'` and `\"` count. `"\d"` is an `er` for the
+**backslash alone** and then string — calling it a `ch` was 89 wrong
+spans in forty standard-library files.
 
 **What else is still wrong, measured rather than supposed.** A **heredoc's
-body** is unhandled in both bash and ruby, and python's raw strings are
-above. Every language here is listed with its numbers beside it rather
+body** is unhandled in both bash and ruby, and that is now the largest
+thing left. Every language here is listed with its numbers beside it rather
 than with a claim, because not one of them is finished — and listing them
 is still right, because dropping a language colours nothing where keeping
 it colours 94 to 98 percent of every line correctly.
