@@ -1036,7 +1036,159 @@ static RUBY: Syntax = Syntax {
     escape: Class::SpecialChar,
 };
 
-static SYNTAXES: &[&Syntax] = &[&C, &PYTHON, &BASH, &RUBY];
+static RUST: Syntax = Syntax {
+    canonical: "rust",
+    names: &["rust", "rs"],
+    // Probed **one word per document**, because the batched form this
+    // repository warns about was tried first and came back with nine
+    // control-flow words as three: 38 `kw`, 9 `cf`, 25 `dt`, 6 `cn` and
+    // 19 `bu`. `dt` and `cn` are *lists*, not shapes — `MyOwnType` and
+    // `Trait` carry no class at all, so capitalisation decides nothing.
+    keywords: &[
+        ("Add", Class::BuiltIn),
+        ("Any", Class::BuiltIn),
+        ("AsMut", Class::BuiltIn),
+        ("AsRef", Class::BuiltIn),
+        ("Borrow", Class::BuiltIn),
+        ("BorrowMut", Class::BuiltIn),
+        ("Box", Class::DataType),
+        ("Clone", Class::BuiltIn),
+        ("Copy", Class::BuiltIn),
+        ("Debug", Class::BuiltIn),
+        ("Default", Class::BuiltIn),
+        ("Deref", Class::BuiltIn),
+        ("DerefMut", Class::BuiltIn),
+        ("Display", Class::BuiltIn),
+        ("Div", Class::BuiltIn),
+        ("DoubleEndedIterator", Class::BuiltIn),
+        ("Drop", Class::BuiltIn),
+        ("Eq", Class::BuiltIn),
+        ("Err", Class::Constant),
+        ("Error", Class::BuiltIn),
+        ("ExactSizeIterator", Class::BuiltIn),
+        ("Extend", Class::BuiltIn),
+        ("Fn", Class::BuiltIn),
+        ("FnMut", Class::BuiltIn),
+        ("FnOnce", Class::BuiltIn),
+        ("From", Class::BuiltIn),
+        ("FromIterator", Class::BuiltIn),
+        ("Future", Class::BuiltIn),
+        ("Hash", Class::BuiltIn),
+        ("Index", Class::BuiltIn),
+        ("IndexMut", Class::BuiltIn),
+        ("Into", Class::BuiltIn),
+        ("IntoIterator", Class::BuiltIn),
+        ("Iterator", Class::BuiltIn),
+        ("Mul", Class::BuiltIn),
+        ("Neg", Class::BuiltIn),
+        ("None", Class::Constant),
+        ("Not", Class::BuiltIn),
+        ("Ok", Class::Constant),
+        ("Option", Class::DataType),
+        ("Ord", Class::BuiltIn),
+        ("PartialEq", Class::BuiltIn),
+        ("PartialOrd", Class::BuiltIn),
+        ("Path", Class::DataType),
+        ("PathBuf", Class::DataType),
+        ("Rem", Class::BuiltIn),
+        ("Result", Class::DataType),
+        ("Self", Class::DataType),
+        ("Send", Class::BuiltIn),
+        ("Sized", Class::BuiltIn),
+        ("Some", Class::Constant),
+        ("Str", Class::BuiltIn),
+        ("String", Class::DataType),
+        ("Sub", Class::BuiltIn),
+        ("Sync", Class::BuiltIn),
+        ("ToOwned", Class::BuiltIn),
+        ("ToString", Class::BuiltIn),
+        ("TryFrom", Class::BuiltIn),
+        ("TryInto", Class::BuiltIn),
+        ("Unpin", Class::BuiltIn),
+        ("Vec", Class::DataType),
+        ("as", Class::Keyword),
+        ("async", Class::Keyword),
+        ("await", Class::Keyword),
+        ("bool", Class::DataType),
+        ("box", Class::Keyword),
+        ("break", Class::ControlFlow),
+        ("char", Class::DataType),
+        ("const", Class::Keyword),
+        ("continue", Class::ControlFlow),
+        ("crate", Class::Keyword),
+        ("default", Class::Keyword),
+        ("do", Class::Keyword),
+        ("dyn", Class::Keyword),
+        ("else", Class::ControlFlow),
+        ("enum", Class::Keyword),
+        ("extern", Class::Keyword),
+        ("f32", Class::DataType),
+        ("f64", Class::DataType),
+        ("false", Class::Constant),
+        ("final", Class::Keyword),
+        ("fn", Class::Keyword),
+        ("for", Class::ControlFlow),
+        ("i128", Class::DataType),
+        ("i16", Class::DataType),
+        ("i32", Class::DataType),
+        ("i64", Class::DataType),
+        ("i8", Class::DataType),
+        ("if", Class::ControlFlow),
+        ("impl", Class::Keyword),
+        ("in", Class::Keyword),
+        ("isize", Class::DataType),
+        ("let", Class::Keyword),
+        ("loop", Class::ControlFlow),
+        ("macro", Class::Keyword),
+        ("match", Class::ControlFlow),
+        ("mod", Class::Keyword),
+        ("move", Class::Keyword),
+        ("mut", Class::Keyword),
+        ("override", Class::Keyword),
+        ("priv", Class::Keyword),
+        ("pub", Class::Keyword),
+        ("ref", Class::Keyword),
+        ("return", Class::ControlFlow),
+        ("self", Class::Keyword),
+        ("static", Class::Keyword),
+        ("str", Class::DataType),
+        ("struct", Class::Keyword),
+        ("super", Class::Keyword),
+        ("trait", Class::Keyword),
+        ("true", Class::Constant),
+        ("try", Class::Keyword),
+        ("type", Class::Keyword),
+        ("typeof", Class::Keyword),
+        ("u128", Class::DataType),
+        ("u16", Class::DataType),
+        ("u32", Class::DataType),
+        ("u64", Class::DataType),
+        ("u8", Class::DataType),
+        ("union", Class::Keyword),
+        ("unsafe", Class::Keyword),
+        ("unsized", Class::Keyword),
+        ("use", Class::Keyword),
+        ("usize", Class::DataType),
+        ("virtual", Class::Keyword),
+        ("where", Class::Keyword),
+        ("while", Class::ControlFlow),
+        ("yield", Class::Keyword),
+    ],
+    quirks: 0,
+    conversions: "",
+    quotes: &[('"', Class::Str)],
+    // Probed character by character: `#`, `(`, `)`, `[`, `]` and `\\` are
+    // **not** operators here, which no other language in this file agrees
+    // with.
+    operators: "!$%&*+,-./:;<=>?@^{|}~",
+    string_prefixes: "",
+    digit_separator: Some('_'),
+    escape: Class::SpecialChar,
+    line_comment: &["//"],
+    block_comment: Some(("/*", "*/")),
+};
+
+static SYNTAXES: &[&Syntax] = &[&C, &PYTHON, &BASH, &RUBY, &RUST];
 
 /// The syntax a fence's language name asks for, if this knows it.
 fn syntax(name: &str) -> Option<&'static Syntax> {
@@ -1074,6 +1226,11 @@ pub(crate) enum Carried {
 pub(crate) struct State {
     /// What the line before left open, if anything.
     carried: Carried,
+    /// How many `/* … */` are open. **Rust's block comments nest**, so a
+    /// flag cannot carry them: `/* a /* b */ c */` is one comment, and C's
+    /// are not nested, which is why `Carried::BlockComment` stays a state
+    /// rather than becoming a count.
+    comment_depth: usize,
     /// Inside a `"""`/`'''` run: the quote character and the class the
     /// run took where it opened, which is a `co` for a docstring.
     /// The quote, the class the run took, and whether its body is read
@@ -1107,6 +1264,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             carried: Carried::Nothing,
+            comment_depth: 0,
             open_string: None,
             // A code block opens at the start of a command.
             position: Position::Command,
@@ -1200,6 +1358,11 @@ fn uncommented(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)
     let Some(syntax) = syntax(name) else {
         return vec![(Class::Normal, text.to_owned())];
     };
+    if std::ptr::eq(syntax, &raw const RUST) {
+        let mut out = Vec::new();
+        rust(text, state, &mut out);
+        return out;
+    }
     if std::ptr::eq(syntax, &raw const RUBY) {
         let mut out = Vec::new();
         ruby(text, state, &mut out);
@@ -2130,6 +2293,216 @@ fn ruby_heredoc_body(text: &str, state: &mut State, out: &mut Vec<(Class, String
         at += stop;
     }
     true
+}
+
+/// Rust, whose rules were probed like every other language here.
+///
+/// The shape: `//` and a **nesting** `/* … */` are `co`; a string is `st`
+/// with `sc` escapes and a raw or byte string is one flat `st`; `'a'` is a
+/// `ch` and `'a` is an `ot`, told apart by whether a closing quote
+/// follows; `#[ … ]` and its parentheses are `at` around ordinary
+/// contents; `name!` is a `pp` and so is a `a::b::` path prefix, the whole
+/// run of it; a number and its suffix are one `dv`; and the vocabulary is
+/// five probed lists.
+fn rust(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
+    let mut at = rust_block_comment(text, 0, state, out);
+    // Bracket depth inside an attribute, where `(`, `)` and `]` are `at`
+    // and everywhere else they carry no class at all.
+    let mut attribute = 0usize;
+    while at < text.len() {
+        let rest = &text[at..];
+        let byte = rest.as_bytes()[0];
+        if rest.starts_with("//") {
+            push(out, Class::Comment, rest);
+            return;
+        }
+        if rest.starts_with("/*") {
+            state.comment_depth = 1;
+            at = rust_block_comment(text, at, state, out);
+            continue;
+        }
+        if attribute > 0 && matches!(byte, b'(' | b')' | b'[' | b']') {
+            push(out, Class::Attribute, &rest[..1]);
+            match byte {
+                b'(' | b'[' => attribute += 1,
+                _ => attribute -= 1,
+            }
+            at += 1;
+            continue;
+        }
+        if let Some(run) = rust_attribute(rest, &mut attribute, out) {
+            at += run;
+            continue;
+        }
+        if let Some(run) = rust_quoted(rest, out) {
+            at += run;
+            continue;
+        }
+        if byte == b'\'' {
+            at += rust_lifetime_or_char(rest, out);
+            continue;
+        }
+        if byte.is_ascii_digit() {
+            // A number takes its suffix and its separators: `1u8`,
+            // `1_000`, `0xff` and `1.5f64` are each one `dv`.
+            let run = rest
+                .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+                .unwrap_or(rest.len());
+            push(out, Class::DecVal, &rest[..run]);
+            at += run;
+            continue;
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            at += rust_word(rest, out);
+            continue;
+        }
+        // `::` is a path separator and a `pp`; a lone `:` is an `op`.
+        if rest.starts_with("::") {
+            push(out, Class::Preprocessor, "::");
+            at += 2;
+            continue;
+        }
+        if RUST.operators.contains(byte as char) {
+            let run = rest.find(|c: char| !RUST.operators.contains(c)).unwrap_or(rest.len());
+            push(out, Class::Operator, &rest[..run]);
+            at += run;
+            continue;
+        }
+        let width = rest.chars().next().map_or(1, char::len_utf8);
+        push(out, Class::Normal, &rest[..width]);
+        at += width;
+    }
+}
+
+/// Consume as much of an open `/* … */` as this line holds, counting the
+/// nesting Rust allows and C does not.
+fn rust_block_comment(
+    text: &str,
+    from: usize,
+    state: &mut State,
+    out: &mut Vec<(Class, String)>,
+) -> usize {
+    if state.comment_depth == 0 {
+        return from;
+    }
+    let mut at = from;
+    let start = at;
+    if text[at..].starts_with("/*") {
+        at += 2;
+    }
+    while at < text.len() && state.comment_depth > 0 {
+        if text[at..].starts_with("/*") {
+            state.comment_depth += 1;
+            at += 2;
+        } else if text[at..].starts_with("*/") {
+            state.comment_depth -= 1;
+            at += 2;
+        } else {
+            at += text[at..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    push(out, Class::Comment, &text[start..at]);
+    at
+}
+
+/// `#[ … ]` or `#![ … ]`: the opener is an `at`, and so are the brackets
+/// inside it — `#[derive(Debug)]` is `at|#[`, `at|(`, `bu|Debug`, `at|)]`.
+fn rust_attribute(rest: &str, attribute: &mut usize, out: &mut Vec<(Class, String)>) -> Option<usize> {
+    let opener = ["#![", "#["].into_iter().find(|open| rest.starts_with(open))?;
+    push(out, Class::Attribute, opener);
+    *attribute += 1;
+    Some(opener.len())
+}
+
+/// A string: `"…"` carries `sc` escapes, while `r"…"`, `r#"…"#`, `b"…"`
+/// and `br"…"` are one flat `st` — a raw string has no escapes to mark.
+fn rust_quoted(rest: &str, out: &mut Vec<(Class, String)>) -> Option<usize> {
+    // The `#` belongs to the hash count below, never to the prefix —
+    // listing `r#` here as well made `r#"raw"#` close on the bare quote.
+    let prefix = ["br", "r", "b", ""]
+        .into_iter()
+        .find(|p| rest.starts_with(p) && rest[p.len()..].starts_with(['"', '#']))?;
+    let hashes = rest[prefix.len()..].bytes().take_while(|b| *b == b'#').count();
+    let open = prefix.len() + hashes;
+    if !rest[open..].starts_with('"') {
+        return None;
+    }
+    let raw = prefix.contains('r');
+    let closing: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+    if raw {
+        let end = rest[open + 1..]
+            .find(&closing)
+            .map_or(rest.len(), |index| open + 1 + index + closing.len());
+        push(out, Class::Str, &rest[..end]);
+        return Some(end);
+    }
+    let mut at = open + 1;
+    push(out, Class::Str, &rest[..at]);
+    while at < rest.len() {
+        let tail = &rest[at..];
+        if tail.starts_with('"') {
+            push(out, Class::Str, "\"");
+            return Some(at + 1);
+        }
+        if let Some(after) = tail.strip_prefix('\\') {
+            let width = 1 + after.chars().next().map_or(0, char::len_utf8);
+            push(out, Class::SpecialChar, &tail[..width]);
+            at += width;
+            continue;
+        }
+        let stop = tail.find(['"', '\\']).unwrap_or(tail.len());
+        push(out, Class::Str, &tail[..stop.max(1)]);
+        at += stop.max(1);
+    }
+    Some(at)
+}
+
+/// `'a'` is a character and `'a` is a lifetime, and the only thing that
+/// tells them apart is whether a closing quote follows.
+fn rust_lifetime_or_char(rest: &str, out: &mut Vec<(Class, String)>) -> usize {
+    let body = &rest[1..];
+    let width = match body.strip_prefix('\\') {
+        Some(after) => 1 + after.chars().next().map_or(0, char::len_utf8),
+        None => body.chars().next().map_or(0, char::len_utf8),
+    };
+    if width > 0 && body[width..].starts_with('\'') {
+        push(out, Class::Char, "'");
+        let class = if body.starts_with('\\') { Class::SpecialChar } else { Class::Char };
+        push(out, class, &body[..width]);
+        push(out, Class::Char, "'");
+        return 2 + width;
+    }
+    let run = 1 + body.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(body.len());
+    push(out, Class::Other, &rest[..run]);
+    run
+}
+
+/// One word: a macro takes its `!`, a path prefix takes every `::` after
+/// it as one `pp`, and anything else is looked up in the five lists.
+fn rust_word(rest: &str, out: &mut Vec<(Class, String)>) -> usize {
+    let end = rest.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(rest.len());
+    if rest[end..].starts_with('!') {
+        push(out, Class::Preprocessor, &rest[..=end]);
+        return end + 1;
+    }
+    let word = &rest[..end];
+    let known = RUST
+        .keywords
+        .binary_search_by_key(&word, |(name, _)| name)
+        .ok()
+        .map(|index| RUST.keywords[index].1);
+    // **A known word keeps its own class and only the `::` is `pp`;** an
+    // unknown one joins the `pp` run. `Vec::new()` is `dt|Vec` then
+    // `pp|::`, while `std::io::Result` is `pp|std::io::` then `dt|Result`
+    // — one rule, and it took a real file to find it, because every probe
+    // written by hand had used a made-up name.
+    let class = match known {
+        Some(class) => class,
+        None if rest[end..].starts_with("::") => Class::Preprocessor,
+        None => Class::Normal,
+    };
+    push(out, class, word);
+    end
 }
 
 /// A `=begin … =end` block, which takes whole lines and nothing less.

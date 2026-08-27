@@ -1061,7 +1061,7 @@ pre`, `display: inline-block`, the `:empty` height, `color: inherit`,
 lines only one way. Nothing with a colour in it is shared, and
 `crates/ferrodoc-html/styles/highlight.css` says so at the top.
 
-### Syntax highlighting — C, Python, bash, Ruby
+### Syntax highlighting — C, Python, bash, Ruby, Rust
 
 **Code is highlighted, in pandoc's shape, for the languages named here
 and no others.** A language not on the list degrades to exactly what this
@@ -1074,6 +1074,7 @@ writer emitted before there was a highlighter — `<pre class="whatever">
 | Python | `python`, `python3`, `py` | **4/4** | 21/40 standard library | **98%** of 28,813 |
 | bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 7/40 scripts in `/usr/bin` | **96%** of 17,018 |
 | Ruby | `ruby`, `rb` | — | 16/40 standard library | **96%** of 26,777 |
+| Rust | `rust`, `rs` | — | 14/40 this repository | **98%** of 31,436 |
 
 **The last two columns measure the same thing and disagree, and the
 disagreement is the useful part.** The file column is whole-file byte
@@ -1138,6 +1139,23 @@ pinned binary rather than reasoned about:
   signature; `def self.cp(a, noop: nil)` gives `noop` a `wa` because
   `self` is not a method name. The simpler rule — *a `def` line has no
   symbols* — was written first, measured, and was worse
+- **Rust's `::` binds to whichever side is unknown.** A word in the
+  vocabulary keeps its own class and only the `::` is `pp` —
+  `dt|Vec` then `pp|::` — while an unknown one joins the run, so
+  `std::io::Result` is `pp|std::io::` then `dt|Result`. Every probe
+  written by hand had used a made-up name and missed this; a real file
+  found it. `dt` and `cn` are **lists**, not shapes: `MyOwnType` and
+  `Trait` carry no class at all.
+- Rust's block comments **nest** (`/* a /* b */ c */` is one), `'a'` is a
+  `ch` and `'a` an `ot` told apart only by the closing quote, and `#`,
+  `(`, `)`, `[`, `]` are **not** operators — which no other language here
+  agrees with.
+- **`sourceCode` is written once.** Reading pandoc's own HTML back gives a
+  code block whose classes contain `sourceCode` — both readers agree, the
+  ASTs are identical — and this writer added another, so `html -> html`
+  emitted `class="sourceCode sourceCode bash"`. Only that class
+  deduplicates: a `numberSource` in the block's classes really is written
+  twice, which was probed rather than assumed.
 - **a bash array subscript is an expression**: `${a[$i]}` and `a[$i]=1`
   put a `va` between two `op`, a numeric index is a `dv`, a name or a sum
   carries nothing, and only `[@]` and `[*]` are a single operator

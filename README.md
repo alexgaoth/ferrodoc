@@ -337,7 +337,7 @@ at a time is what let the default flip.
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
 real pandoc command lines — collected from public Makefiles, CI files and
 scripts — through both binaries and compares every byte either wrote,
-stdout, output files and stderr. **11/48 command lines identical**, with
+stdout, output files and stderr. **12/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of
@@ -345,7 +345,7 @@ pandoc's own features switched off at a time — on **both** sides, since
 this now highlights too — and names the smallest set that makes the two
 agree. Reading `markdown` as pandoc's dialect rather than CommonMark —
 on the way in, on the way out, and under the deprecated name
-`markdown_github` — accounts for **22** misses on its own and **10** more
+`markdown_github` — accounts for **23** misses on its own and **9** more
 together with syntax highlighting, which accounts for **2** by itself.
 One row is a difference this project has decided to keep. **That leaves
 2**: a `--reference-doc` DOCX and a LaTeX document. It left eight before

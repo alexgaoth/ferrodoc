@@ -1059,7 +1059,15 @@ fn write_highlighted(out: &mut String, attr: &Attr, text: &str, language: &str, 
     // The classes as they were written: the *reader* lowercases a
     // fence's info string, the writer does not touch it, and `{.C}`
     // written out by hand stays `C` here and matches `c` all the same.
-    classes.extend(attr.classes.iter().cloned());
+    //
+    // **`sourceCode` is dropped from the block's own classes**, because
+    // this writer has already put one at the front. Reading pandoc's HTML
+    // back gives a block that carries it — the AST keeps it, both readers
+    // agree — so `html -> html` was emitting
+    // `class="sourceCode sourceCode bash"`. Only this class deduplicates:
+    // `numberSource` in the block's classes really is written twice, which
+    // was probed rather than assumed.
+    classes.extend(attr.classes.iter().filter(|c| *c != "sourceCode").cloned());
     out.push_str("<pre");
     write_attr(out, &Attr { classes, ..Attr::default() });
     // **No break opportunity before the `<code>`'s class.** The div's
@@ -2139,11 +2147,32 @@ mod tests {
         );
     }
 
+    /// A language this highlighter does not know degrades to exactly what
+    /// the writer emitted before there was a highlighter.
+    ///
+    /// **This test named `rust` until rust was implemented**, and then
+    /// asserted the opposite of the truth. A test whose subject is "a
+    /// language we do not support" goes stale the moment one is added, so
+    /// it names a language nobody here intends to write: if `haskell`
+    /// ever ships, this needs another, not a new expectation.
     #[test]
-    fn code_block_with_language() {
+    fn an_unknown_language_is_not_highlighted() {
+        assert_eq!(
+            html("```haskell\nmain = pure ()\n```\n"),
+            "<pre class=\"haskell\"><code>main = pure ()</code></pre>\n"
+        );
+    }
+
+    /// And a language it does know is highlighted, in pandoc's wrapper.
+    #[test]
+    fn a_known_language_is_highlighted() {
         assert_eq!(
             html("```rust\nfn x() {}\n```\n"),
-            "<pre class=\"rust\"><code>fn x() {}</code></pre>\n"
+            "<div class=\"sourceCode\" id=\"cb1\"><pre class=\"sourceCode rust\">\
+             <code class=\"sourceCode rust\"><span id=\"cb1-1\">\
+             <a href=\"#cb1-1\" aria-hidden=\"true\" tabindex=\"-1\"></a>\
+             <span class=\"kw\">fn</span> x() <span class=\"op\">{}</span>\
+             </span></code></pre></div>\n"
         );
     }
 

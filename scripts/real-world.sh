@@ -80,3 +80,12 @@ ls /usr/include/*.h 2>/dev/null | head -40 | score c
 ls /usr/lib64/python3*/*.py /usr/lib/python3*/*.py 2>/dev/null | head -40 | score python
 shell_scripts | head -40 | score bash
 [ -n "$ruby_lib" ] && ls "$ruby_lib"/*.rb 2>/dev/null | head -40 | score ruby
+# Rust's corpus is this repository — the one language where that is not a
+# compromise, since nobody wrote these 31,000 lines to be highlighted.
+#
+# **`git ls-files`, not `find`.** `find crates bindings -name '*.rs'` pulls
+# in `target/**`, and four copies of a *generated* 11,844-line entity table
+# turned 40 files into 104,428 lines of machine output. The same mistake as
+# the ELF binaries above, from the other direction: ask the tool that knows
+# what is source.
+git ls-files '*.rs' 2>/dev/null | head -40 | score rust

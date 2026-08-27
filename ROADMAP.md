@@ -783,7 +783,7 @@ and every `.py` in the repository. Its table was probed over *python's
 own* vocabulary (`dir(builtins)` plus `keyword.kwlist`, 211 names),
 because choosing a probe set by hand is how `file` came to be missing on
 the first attempt and only a real file caught it. **Drop-in 10/48 to
-11/48.**
+11/48**, and Rust later took it to 12/48.
 
 **bash followed Python, and it is a different kind of job.** Its classes
 are positional rather than lexical: the same word is `fu` at the start of
