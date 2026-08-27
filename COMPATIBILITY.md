@@ -1131,7 +1131,24 @@ fixtures. The lesson of the second column is that *any* fixed corpus is
 fitted to eventually; the defence is to keep pointing the thing at code
 it has never seen.
 
-**What is still wrong, measured rather than supposed.** bash does not
+**A python raw string is a regular expression to pandoc, and not to this
+highlighter.** That is the largest single gap left, because the standard
+library is full of them:
+
+```console
+$ printf '```python\nx = r"[a-z]\\d+"\n```\n' | pandoc -f commonmark -t html --wrap=none
+<span class="vs">r&quot;</span><span class="pp">[a-z]</span><span class="dv">\d</span><span class="op">+</span><span class="vs">&quot;</span>
+```
+
+The whole of it is one `st` here. Probed, the sub-language is small and
+regular — the `r` prefix and the quotes are `vs`, a character class is
+`pp`, a `\d` shorthand is `dv`, a quantifier is `op`, and an escaped
+backslash is `ch` — and a **non**-raw string's invalid escape is an `er`,
+which this does not have either. It is written down rather than
+implemented because implementing it needs its own probe round, and this
+release had already reached crates.io when the rule turned up.
+
+**What else is still wrong, measured rather than supposed.** bash does not
 tokenize an array subscript — `a[$i]` should be `op`/`va`/`op` and comes
 back as one run. Ruby is the furthest behind: `$1` and its friends, a
 heredoc's body, and the `%w[…]` family are all unhandled, which is most

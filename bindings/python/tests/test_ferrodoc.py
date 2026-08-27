@@ -40,7 +40,11 @@ def test_a_table_survives_markdown_to_docx_and_back():
     # easily lost, and the one people notice.
     docx = ferrodoc.convert(MARKDOWN, "gfm", "docx")
     back = ferrodoc.convert(docx, "docx", "gfm")
-    assert "| a | b |" in back.replace("  ", " ")
+    # Drop the spaces rather than collapse them: a pipe table's cells are
+    # padded to their column, so `| a | b |` comes back `| a   | b   |`.
+    # `replace("  ", " ")` is a single pass and leaves three spaces as
+    # two, which is why this read as a lost table for four days.
+    assert "|a|b|" in back.replace(" ", "")
     assert "Title" in back
 
 
