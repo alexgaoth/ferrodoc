@@ -13,14 +13,20 @@
 #
 #   ( ulimit -v 3000000; ferrodoc ~/.cache/ferrodoc-bombs/ratio.docx -f docx -t plain )
 #
-# Measured 2026-08-27, before any bound existed:
+# Measured 2026-08-27, both converters, -t plain:
 #
-#   ratio.docx   458 KB on disk -> 1.28 GB peak RSS   2,900x
-#   ratio.epub   218 KB on disk -> 1.18 GB peak RSS   5,400x
+#                decompressed        pandoc          ferrodoc
+#   ratio.docx        131 MB        refuses      1315 MB  10.0x
+#   ratio.epub         72 MB   4001 MB 54.9x     1155 MB  15.8x
 #
-# `verify.sh` gates peak RSS at **80x input**. Neither of these is in the
-# corpus that gate runs on, which is why the bound has been stated and
-# not defended.
+# **Read those against the decompressed bytes.** Against the archive they
+# are 2,900x and 5,400x, which is the same denominator mistake `bench-sizes`
+# made: a compressed byte is not a parsed byte. The amplification is fine
+# and better than pandoc's; what is missing is a ceiling, since 10x of a
+# 131 MB decompression is still 1.3 GB from a 457 KB file.
+#
+# `bench-rss` gates 80x of the *source document* — an end-to-end contract,
+# not a claim about a hostile archive, and its corpus has never held one.
 set -euo pipefail
 out="${1:-$HOME/.cache/ferrodoc-bombs}"
 mkdir -p "$out"

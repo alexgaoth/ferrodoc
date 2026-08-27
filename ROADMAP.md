@@ -1109,34 +1109,44 @@ outranks a speculative one; by 0.8 there are installed users to measure.
 - Source bytes, decompressed archive bytes and entry count, retained media,
   structural depth, output bytes.
 
-**Measured 2026-08-27, so the size of the hole is known before the work
-starts.** `corpus/bombs/generate.sh` writes two archives of ordinary
-shape — no nesting, no trickery, just a compressible body:
+**Measured 2026-08-27**, with `bash corpus/bombs/generate.sh` and a valid
+high-ratio docx built from pandoc's own output. Peak RSS, both converters,
+same inputs, `-t plain`:
 
-| fixture | on disk | decompressed | peak RSS | ratio |
+| fixture | on disk | decompressed | pandoc | ferrodoc |
 |---|---:|---:|---:|---:|
-| `ratio.docx` | 457 KB | 131 MB | **1.28 GB** | **2,900×** |
-| `ratio.epub` | 218 KB | 72 MB | **1.18 GB** | **5,400×** |
+| `ratio.docx` | 457 KB | 131 MB | *refuses* | 1315 MB — **10.0×** |
+| `ratio.epub` | 218 KB | 72 MB | 4001 MB — 54.9× | 1155 MB — **15.8×** |
+| `big-valid.docx` | 153 KB | 41 MB | 2917 MB — 70.7× | 266 MB — **6.5×** |
 
-`verify.sh` gates peak RSS at **80× input** and reports `docx-to-markdown
-at 60.0x, within the 80.0x bound`. Neither fixture is in the corpus that
-gate runs over, so **the bound is stated and not defended** — the same
-blind spot this file names for the highlighters, in the resource
-contract. Structural depth is bounded (`MAX_NESTING`); decompressed bytes
-are not bounded anywhere.
+**Read the ratios against the decompressed bytes, which is the only
+denominator that means anything here.** Against the *archive* the same
+numbers read 2,900× and 5,400×, and that is the `bench-sizes` denominator
+bug in another costume: a compressed byte is not a parsed byte. This
+section said 2,900× before it was corrected, which invited exactly the
+wrong conclusion.
 
-Under memory pressure the process **aborts** rather than returning an
-error — `memory allocation of 192 bytes failed` — which is Rust's OOM
-path and not a panic in this code, but it is not refusing hostile input
-either. Pandoc, for comparison, rejects the same `ratio.docx` in 0.00 s
-at 15 MB, though for its own reasons rather than a size rule.
+So the amplification is not the problem — **6.5× to 15.8× is inside the
+published 80× bound, and pandoc is three to eleven times worse on the
+same inputs.** What is missing is any *ceiling*: 10× of a 131 MB
+decompression is still 1.3 GB from a 457 KB file, and under pressure the
+process aborts (`memory allocation of 192 bytes failed`, Rust's OOM path)
+rather than refusing. Structural depth is bounded by `MAX_NESTING`;
+decompressed bytes are bounded nowhere, **and pandoc does not bound them
+either** — so there is no oracle to copy here, which is rare in this
+project and is why the next paragraph is a decision rather than a probe.
+
+`bench-rss` gates peak RSS at 80× **of the source document**, which is a
+sound end-to-end contract — "converting your 1 MB file costs at most
+80 MB" — and it is not a statement about a hostile archive. Its corpus is
+documents this repository generates, so it has never seen one.
 
 **The threshold is not a session's to choose.** A decompression budget is
 a user-visible refusal: set it low and a legitimate 200 MB manuscript
 stops converting, set it high and it defends nothing. Rule 3 of this file
-says a measured production limit outranks a speculative one, which is
-exactly why 0.8 sits after the embedders. The measurement above is what
-that decision now has to work from.
+says a measured production limit outranks a speculative one, which is why
+0.8 sits after the embedders. The table above is what that decision now
+has to work from.
 - A typed `ResourceLimit` naming the budget crossed, identical in Rust,
   CLI, Python, C and WASM.
 - Zip-bomb and giant-media fixtures in the corpus; rejection before
