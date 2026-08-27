@@ -87,7 +87,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrodoc"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-asciidoc",
  "ferrodoc-ast",
@@ -105,14 +105,14 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-asciidoc"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
 ]
 
 [[package]]
 name = "ferrodoc-ast"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-docx"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
  "quick-xml",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-epub"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-docx",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-harness"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "comrak",
@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-html"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-markdown",
@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-ipynb"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-markdown",
@@ -181,14 +181,14 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-latex"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
 ]
 
 [[package]]
 name = "ferrodoc-markdown"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "comrak",
  "ferrodoc-ast",
@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-odt"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-docx",
@@ -208,14 +208,14 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-rst"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
 ]
 
 [[package]]
 name = "ferrodoc-text"
-version = "0.2.0"
+version = "0.7.0"
 dependencies = [
  "ferrodoc-ast",
 ]

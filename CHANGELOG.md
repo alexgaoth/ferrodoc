@@ -8,7 +8,111 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
-## Unreleased
+## 0.7.0 — 2026-08-26
+
+### Syntax highlighting, in pandoc's shape
+
+Code fences are coloured for **C, Python, bash and Ruby**, in the exact
+markup pandoc's skylighting emits: `<div class="sourceCode" id="cbN">`
+with the block's attributes on that div, `<pre>` carrying the block's
+classes, `<code>` carrying the syntax's canonical name, and one
+`<span id="cbN-M">` per line with an anchor in it. A language not on the
+list degrades to what this writer emitted before — `<pre><code>` — so a
+short list costs nothing but colour.
+
+`--no-highlight` and `--syntax-highlighting=none` turn it off. Any other
+style value is **refused by name**, because a style that silently does
+nothing is worse than one that says so. It is a cargo feature
+(`highlight`, on by default) worth 80.4 KB, 1.16% of the binary.
+
+Every rule was read off the pinned `pandoc 3.8.2.1` rather than reasoned
+about, and the ones that would have been guessed wrong are worth naming:
+`NULL`, `printf` and `malloc` are **not** classed; adjacent operator
+characters are one span; a numeric suffix is a `bu` beside the number
+rather than part of it; and bash's classes are **positional** — the same
+word is `fu` at the start of a command and plain text one word later.
+
+**The gate was wrong, and this release says so.** `scripts/highlight.sh`
+compares 26 files chosen from this repository and stood at 26/26 for
+weeks. Pointed at code nobody wrote for this project, the same
+highlighters matched pandoc on **1 system header in 40**. A gate cannot
+fail on a construct its corpus lacks, and 2,650 lines of our own C,
+Python and shell contain no multi-line `#define`, no blank line inside a
+licence header, no `f"{x!r}"`. Eight probed rules later:
+
+```console
+$ ./scripts/real-world.sh
+highlighting against code written for somebody else:
+  c        23/40
+  python   16/40
+  bash     17/24
+  ruby     9/40
+```
+
+That script reports and does not gate — its corpus is whatever the
+machine holds, and the denominators drift as packages are installed.
+COMPATIBILITY.md carries both columns and names what is still wrong:
+bash does not tokenize an array subscript, and Ruby's `$1`, heredoc
+bodies and `%w[…]` are unhandled. **Ruby ships with its number beside it
+rather than with a claim.**
+
+The highlighting stylesheet is **ours**, in
+`crates/ferrodoc-html/styles/highlight.css`, written against the class
+names skylighting emits rather than copied from pandoc. Nine structural
+declarations coincide with pandoc's because there is one way to write
+them; nothing carrying a colour is shared. Before it, `-s` output had
+the spans and none of the colours.
+
+### The text writers are pandoc's, and lines are filled to 72 columns
+
+Five writers were rebuilt against a second oracle nobody had used:
+pandoc *writes* LaTeX, RST, AsciiDoc, plain and markdown from the same
+AST, so the bytes compare directly without asking its reader to survive
+anything. `./scripts/writers.sh` gates every one of them:
+
+```console
+$ ./scripts/writers.sh | tail -1
+byte-identical: html 38/40, commonmark 29/40, markdown 6/40, gfm 28/40, latex 36/40, rst 34/40, asciidoc 38/40, plain 38/40 on corpus/*.md, corpus/gfm/*.gfm and this repository's own prose
+```
+
+Twenty documents, each written twice — as the document falls, and filled
+to a column.
+
+> **Behaviour change.** `--wrap=auto` at **72 columns** is now the
+> default, which is pandoc's. A 0.2 caller who relied on lines being
+> emitted as the document fell should pass `--wrap=preserve`.
+
+### Binary writers are judged by what pandoc reads back
+
+`./scripts/roundtrip.sh` writes a DOCX, ODT, EPUB or notebook and hands
+it to **pandoc's own reader**, comparing the AST that comes back. It
+normalises only what cannot match — an EPUB's identifier and date, a
+notebook cell's UUID, a media file's number — and reports a refused
+conversion separately from a mismatch, because pandoc writes nothing
+when it refuses and the previous document's bytes were being compared
+three times before that was noticed.
+
+```console
+$ ./scripts/roundtrip.sh | tail -1
+read back by pandoc: docx 14/16, odt 16/16, epub 0/16, ipynb 11/16 (2 unwritten) over corpus/*.md and this repository's own prose
+```
+
+### pandoc's markdown dialect, and the drop-in count
+
+`smart`, `implicit_figures`, inline attributes, `^[…]` inline notes,
+bracketed spans, `{#id .class k=v}` after a fence, metadata block
+scalars, and raw HTML the way pandoc's markdown reads it. Scored over
+the CommonMark spec's 652 examples rather than twenty documents:
+**498/652**. Real command lines from `dropin/` that run byte-identically:
+**11 of 48**. Flag combinations byte-identical: **224/224**.
+
+### Retired: the `epub-spec` figure
+
+It was the HTML reader's score printed in a table headed EPUB — each of
+its 22 files bundles 30 spec examples, so any one of the reader's known
+divergences fails a whole document. The corpus and its gate stay as a
+regression check; the number is no longer published.
+
 
 ### `--reference-doc` for DOCX and ODT, and no refusals left in the corpus
 
@@ -62,7 +166,7 @@ the comment out of the raw text and keeps the block, so the newline that
 followed it survives; and an **unterminated** `<!--` is left alone rather
 than swallowing the rest of the document.
 
-### Standalone HTML is pandoc's page, byte for byte (0.5)
+### Standalone HTML is pandoc's page, byte for byte
 
 `-s` output was one fixed page shape against pandoc's template language,
 and 176 lines away from it. Pandoc's default template and default
