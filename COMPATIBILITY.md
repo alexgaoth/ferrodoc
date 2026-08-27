@@ -1068,12 +1068,20 @@ and no others.** A language not on the list degrades to exactly what this
 writer emitted before there was a highlighter — `<pre class="whatever">
 <code>` — so a short list costs nothing but colour.
 
-| language | names accepted | curated gate | code written for somebody else |
-|---|---|---|---|
-| C | `c` | **2/2** | 23/40 system headers |
-| Python | `python`, `python3`, `py` | **4/4** | 16/40 standard library |
-| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 17/24 scripts in `/usr/bin` |
-| Ruby | `ruby`, `rb` | — | 9/40 standard library |
+| language | names accepted | curated gate | files written for somebody else | lines of those files |
+|---|---|---|---|---|
+| C | `c` | **2/2** | 25/40 system headers | **98%** of 11,154 |
+| Python | `python`, `python3`, `py` | **4/4** | 16/40 standard library | **98%** of 28,813 |
+| bash | `bash`, `sh`, `shell`, `zsh`, `ksh` | **20/20**, 2,065 lines | 3/40 scripts in `/usr/bin` | **94%** of 17,018 |
+| Ruby | `ruby`, `rb` | — | 15/40 standard library | **95%** of 26,777 |
+
+**The last two columns measure the same thing and disagree, and the
+disagreement is the useful part.** The file column is whole-file byte
+identity: a 3,000-line file earns its point only with 3,000 consecutive
+correct lines, so a highlighter that is right about 95% of lines can score
+3/40 and read as broken. The line column says how far off it actually is.
+Read the file score for *is this finished* — nothing here is — and the
+line score for *how far*.
 
 **The two columns are the point of this section.** For weeks only the
 first existed, and every language stood at 26/26 in it. Then the same
@@ -1087,8 +1095,8 @@ licence header, or `f"{x!r}"`.
 
 That blind spot is named in three other places in this file. It was
 sitting under the strongest claim the project makes, and it took eight
-rules to close most of it — every one of them read back off the pinned
-binary, not reasoned about:
+rules to close most of it — fourteen now, every one read back off the
+pinned binary rather than reasoned about:
 
 - an empty line inside a block comment carries **no span**; we emitted
   `<span class="co"></span>`, which is every licence header in `/usr/include`
@@ -1111,6 +1119,28 @@ binary, not reasoned about:
 - the `%…` conversion letters **differ by language**: C takes `%a` and
   `%b`, python takes `%r` and `%(name)s`, and each set was probed `a` to
   `z` and `A` to `Z`
+- **a comment carries alert words, in every language alike**: `TODO`,
+  `FIXME`, `NOTE`, `BUG`, `HACK`, `WARNING`, `NOTICE`, `DEPRECATED`,
+  `ALERT`, `ATTENTION`, `CAUTION`, `DANGER`, `SECURITY` and `###` — but
+  **not** `XXX`, `REVIEW`, `OPTIMIZE`, `IMPORTANT`, `TIP` or `ERROR`,
+  which is why the list was probed word by word. They match on word
+  boundaries where `#` and `_` count as *word* characters, so `# TODO` is
+  an alert and `#TODO` is not, and `# ###` is one where `# ####` is not
+- ruby's `..` and `...` are ranges, not two attribute dots
+- **a ruby percent literal** — `%w[a b]`, `%q(x)`, `%r{re}` — is `ot`
+  around a body whose class the letter decides: `q`/`w`/`i` give a `vs`,
+  their capitals and `r` an `st`, `%s` a `wa`, `%x` an `in`. A `%`
+  followed by a letter or a space is the modulo operator
+- the inside of ruby's `#{ … }` is **code**: `"#{@addr}"` carries an `ot`
+- **a ruby `def` signature suppresses exactly one symbol** and then
+  stops. `def cp(a, b: 1, c: 2)` gives `b` an `op` and `c` a `wa`;
+  `def f; g(a: 1); end` gives `a` a `wa` because the `;` ended the
+  signature; `def self.cp(a, noop: nil)` gives `noop` a `wa` because
+  `self` is not a method name. The simpler rule — *a `def` line has no
+  symbols* — was written first, measured, and was worse
+- **a bash array subscript is an expression**: `${a[$i]}` and `a[$i]=1`
+  put a `va` between two `op`, a numeric index is a `dv`, a name or a sum
+  carries nothing, and only `[@]` and `[*]` are a single operator
 
 `./scripts/real-world.sh` is the second column, and the figures in it were
 taken on 2026-08-26. It **reports and does not gate**: its corpus is
@@ -1148,14 +1178,24 @@ which this does not have either. It is written down rather than
 implemented because implementing it needs its own probe round, and this
 release had already reached crates.io when the rule turned up.
 
-**What else is still wrong, measured rather than supposed.** bash does not
-tokenize an array subscript — `a[$i]` should be `op`/`va`/`op` and comes
-back as one run. Ruby is the furthest behind: `$1` and its friends, a
-heredoc's body, and the `%w[…]` family are all unhandled, which is most
-of the distance between 9/40 and the rest. Ruby is listed anyway because
-the alternative is worse — dropping it colours nothing rather than
-colouring most of a file correctly — but it is listed with its number
-beside it, not with a claim.
+**bash's own figure fell, and it fell because the corpus was wrong.** It
+read 17/24 while the sweep found its scripts with
+`grep -rl '^#!/bin/bash' /usr/bin` — which matched `/usr/bin/gh` and
+`/usr/bin/podman`, ELF binaries that happen to contain those bytes after
+a newline somewhere inside, and which missed most of the real scripts. A
+bash script is a file whose **first line** is a bash shebang; asking that
+question finds 108 here, and the first 40 are far longer and harder than
+the 22 the old sweep chose. **3/40 at 94% of lines is the honest number
+against the honest corpus.** It also retires a drift this file recorded
+wrongly once: 22 scripts one hour and 24 the next was never the package
+set changing, it was binaries being read as text.
+
+**What else is still wrong, measured rather than supposed.** A **heredoc's
+body** is unhandled in both bash and ruby, and python's raw strings are
+above. Every language here is listed with its numbers beside it rather
+than with a claim, because not one of them is finished — and listing them
+is still right, because dropping a language colours nothing where keeping
+it colours 94 to 98 percent of every line correctly.
 
 Every rule was read off `pandoc -f commonmark -t html`, and the ones that
 would have been guessed wrong are worth naming: `NULL`, `printf` and

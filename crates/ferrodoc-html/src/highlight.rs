@@ -43,6 +43,10 @@ pub(crate) enum Class {
     VerbatimString,
     /// A capitalised name — Ruby's constants.
     Constant,
+    /// A word pandoc marks inside a comment: `TODO`, `FIXME`, `###`.
+    Alert,
+    /// What `%x( … )` — a shell command — comes back as.
+    Information,
     /// **A Ruby symbol.** Skylighting files `:name` under the class it
     /// uses for warnings; probed, not guessed.
     Warning,
@@ -74,6 +78,8 @@ impl Class {
             Class::Other => "ot",
             Class::VerbatimString => "vs",
             Class::Constant => "cn",
+            Class::Alert => "al",
+            Class::Information => "in",
             Class::Warning => "wa",
         })
     }
@@ -1104,6 +1110,80 @@ impl Default for State {
 /// One line, as a run of `(class, text)` pieces with adjacent pieces of
 /// the same class already merged — pandoc emits one span per run.
 pub(crate) fn line(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)> {
+    alerted(uncommented(text, name, state))
+}
+
+/// **Words pandoc marks inside a comment, whatever the language is.**
+/// Probed against C, python, bash and ruby, which all four agree; and
+/// probed word by word, because the list is not the one it looks like —
+/// `XXX`, `REVIEW`, `OPTIMIZE`, `IMPORTANT`, `TIP` and `ERROR` are *not*
+/// on it, and `###` is.
+const ALERTS: &[&str] = &[
+    "###",
+    "ALERT",
+    "ATTENTION",
+    "BUG",
+    "CAUTION",
+    "DANGER",
+    "DEPRECATED",
+    "FIXME",
+    "HACK",
+    "NOTE",
+    "NOTICE",
+    "SECURITY",
+    "TODO",
+    "WARNING",
+];
+
+/// Whether `#` or `_` or an alphanumeric — the characters that keep an
+/// alert word from starting or ending here.
+///
+/// Counting `#` is what makes `#TODO` plain where `# TODO` is an alert,
+/// and `# ####` plain where `# ###` is one. Both were measured; neither
+/// would have been guessed.
+fn wordish(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '#'
+}
+
+/// Split the alert words out of every comment run.
+fn alerted(pieces: Vec<(Class, String)>) -> Vec<(Class, String)> {
+    if !pieces.iter().any(|(class, text)| {
+        *class == Class::Comment && ALERTS.iter().any(|word| text.contains(word))
+    }) {
+        return pieces;
+    }
+    let mut out = Vec::with_capacity(pieces.len());
+    for (class, text) in pieces {
+        if class != Class::Comment {
+            out.push((class, text));
+            continue;
+        }
+        let mut at = 0;
+        while at < text.len() {
+            let before_is_word = text[..at].ends_with(wordish);
+            let found = (!before_is_word)
+                .then(|| {
+                    ALERTS.iter().find(|word| {
+                        text[at..].starts_with(**word)
+                            && !text[at + word.len()..].starts_with(wordish)
+                    })
+                })
+                .flatten();
+            if let Some(word) = found {
+                push(&mut out, Class::Alert, word);
+                at += word.len();
+            } else {
+                let width = text[at..].chars().next().map_or(1, char::len_utf8);
+                push(&mut out, Class::Comment, &text[at..at + width]);
+                at += width;
+            }
+        }
+    }
+    out
+}
+
+/// One line, before its comments are read for alert words.
+fn uncommented(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)> {
     let Some(syntax) = syntax(name) else {
         return vec![(Class::Normal, text.to_owned())];
     };
@@ -1626,23 +1706,93 @@ fn bash(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
 /// at a time, **each in its own document**: a probe with one construct
 /// per line puts an unterminated quote in the middle and every line
 /// after it comes back a string.
-fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
+/// One ruby word, and how much of the line it took — including the
+/// trailing `?` or `!` that belongs to the name, and the `:` that
+/// makes it a symbol where a `def` signature has not claimed one.
+fn ruby_word(rest: &str, signature: &mut bool, out: &mut Vec<(Class, String)>) -> usize {
+    let word: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    let mut end = word.len();
+    // **A trailing `?` or `!` is part of the name**, not an operator after
+    // it: `block_given?` and `exit!` are one `fu` each, and `.include?`
+    // one `at`. Leaving them out put 62 stray `op` spans in twelve stdlib
+    // files.
+    if rest[end..].starts_with(['?', '!']) && !rest[end + 1..].starts_with('=') {
+        end += 1;
+    }
+    let full = &rest[..end];
+    let symbolic = rest[end..].starts_with(':') && !rest[end..].starts_with("::");
+    // **A `def` signature suppresses exactly one symbol**, and then stops.
+    // `def cp(a, b: 1, c: 2)` gives `b` an `op` and `c` a `wa`;
+    // `def f; g(a: 1); end` gives `a` a `wa`, because the `;` ended the
+    // signature; and `def self.cp(a, noop: nil)` gives `noop` a `wa`,
+    // because `self` is not a method name. Every one of those four was
+    // probed, and a simpler rule — "a `def` line has no symbols" — was
+    // measured and was worse.
+    if symbolic && *signature {
+        *signature = false;
+        push(out, class_of_word(full), full);
+        return end;
+    }
+    if symbolic {
+        push(out, Class::Warning, &rest[..=end]);
+        return end + 1;
+    }
+    // `def` opens a signature; `self` right after it closes one, because
+    // `def self.cp` names no method here.
+    match full {
+        "def" => *signature = true,
+        "self" => *signature = false,
+        _ => {}
+    }
+    push(out, class_of_word(full), full);
+    end
+}
+
+/// One ruby word's class: the table first, then the shape of the name —
+/// capitalised with a lowercase letter in it is a `dt`, capitalised
+/// without one is a `cn`, anything else is plain.
+fn class_of_word(word: &str) -> Class {
+    if let Ok(index) = RUBY.keywords.binary_search_by_key(&word, |(name, _)| name) {
+        return RUBY.keywords[index].1;
+    }
+    if word.starts_with(char::is_uppercase) {
+        if word.contains(char::is_lowercase) { Class::DataType } else { Class::Constant }
+    } else {
+        Class::Normal
+    }
+}
+
+/// A `=begin … =end` block, which takes whole lines and nothing less.
+fn ruby_block_comment(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> bool {
     if state.carried == Carried::BlockComment {
         push(out, Class::Comment, text);
         if text.starts_with("=end") {
             state.carried = Carried::Nothing;
         }
-        return;
+        return true;
     }
     if text.starts_with("=begin") {
         state.carried = Carried::BlockComment;
         push(out, Class::Comment, text);
+        return true;
+    }
+    false
+}
+
+fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
+    if ruby_block_comment(text, state, out) {
         return;
     }
+    // Whether the scanner stands inside a `def`'s parameter list, where
+    // the first `name:` is an argument rather than a symbol.
+    let mut signature = false;
     let mut at = 0;
     while at < text.len() {
         let rest = &text[at..];
         let byte = rest.as_bytes()[0];
+        if byte == b';' {
+            signature = false;
+        }
         if byte == b'#' {
             push(out, Class::Comment, rest);
             return;
@@ -1671,6 +1821,12 @@ fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
             at += end;
             continue;
         }
+        if byte == b'%'
+            && let Some(run) = ruby_percent_literal(rest, out)
+        {
+            at += run;
+            continue;
+        }
         if let Some((class, run)) = ruby_sigil(rest) {
             push(out, class, &rest[..run]);
             at += run;
@@ -1690,37 +1846,7 @@ fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
             continue;
         }
         if byte.is_ascii_alphabetic() || byte == b'_' {
-            let word: String =
-                rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
-            let mut end = word.len();
-            // **A trailing `?` or `!` is part of the name**, not an
-            // operator after it: `block_given?` and `exit!` are one `fu`
-            // each, and `.include?` one `at`. Leaving them out put 62
-            // stray `op` spans in twelve stdlib files.
-            if rest[end..].starts_with(['?', '!']) && !rest[end + 1..].starts_with('=') {
-                end += 1;
-            }
-            let full = &rest[..end];
-            if rest[end..].starts_with(':') && !rest[end..].starts_with("::") {
-                push(out, Class::Warning, &rest[..=end]);
-                at += end + 1;
-                continue;
-            }
-            let class = if let Ok(index) =
-                RUBY.keywords.binary_search_by_key(&full, |(name, _)| name)
-            {
-                RUBY.keywords[index].1
-            } else if full.starts_with(char::is_uppercase) {
-                if full.contains(char::is_lowercase) {
-                    Class::DataType
-                } else {
-                    Class::Constant
-                }
-            } else {
-                Class::Normal
-            };
-            push(out, class, full);
-            at += end;
+            at += ruby_word(rest, &mut signature, out);
             continue;
         }
         if RUBY.operators.contains(byte as char) {
@@ -1733,6 +1859,57 @@ fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
         push(out, Class::Normal, &rest[..width]);
         at += width;
     }
+}
+
+/// Write one percent literal, and say how much of the line it took.
+fn ruby_percent_literal(rest: &str, out: &mut Vec<(Class, String)>) -> Option<usize> {
+    let (body, open, close) = ruby_percent(rest)?;
+    let opened = rest.len() - open.len();
+    push(out, Class::Other, &rest[..=opened]);
+    let inside = &open[1..];
+    let end = inside.find(close).unwrap_or(inside.len());
+    push(out, body, &inside[..end]);
+    let closed = end < inside.len();
+    if closed {
+        push(out, Class::Other, &inside[end..=end]);
+    }
+    Some(opened + 1 + end + usize::from(closed))
+}
+
+/// A percent literal — `%w[a b]`, `%q(x)`, `%r{re}` — as the class its
+/// body takes, the text from its opening delimiter, and the character
+/// that closes it.
+///
+/// **The letter decides whether the body interpolates**, and the answers
+/// were probed rather than reasoned: the lowercase `q`, `w` and `i` give
+/// a `vs`, their capitals and `r` and a bare `%` give an `st`, `%s` is a
+/// `wa` and `%x` — a shell command — is an `in`. The delimiter may be any
+/// punctuation; the bracketing four close with their partners and
+/// everything else closes with itself.
+///
+/// A `%` followed by a letter or a space is the modulo operator, which is
+/// what keeps `5 % 2` and `a%b` out of here.
+fn ruby_percent(rest: &str) -> Option<(Class, &str, char)> {
+    let after = &rest[1..];
+    let (body, open) = match after.chars().next()? {
+        letter @ ('q' | 'w' | 'i') => (Class::VerbatimString, &after[letter.len_utf8()..]),
+        letter @ ('Q' | 'W' | 'I' | 'r') => (Class::Str, &after[letter.len_utf8()..]),
+        's' => (Class::Warning, &after[1..]),
+        'x' => (Class::Information, &after[1..]),
+        _ => (Class::Str, after),
+    };
+    let delimiter = open.chars().next()?;
+    if delimiter.is_alphanumeric() || delimiter.is_whitespace() || delimiter == '_' {
+        return None;
+    }
+    let close = match delimiter {
+        '[' => ']',
+        '(' => ')',
+        '{' => '}',
+        '<' => '>',
+        same => same,
+    };
+    Some((body, open, close))
 }
 
 /// A name introduced by a sigil: `$global` and `@ivar` and `:symbol` and
@@ -1759,6 +1936,10 @@ fn ruby_sigil(rest: &str) -> Option<(Class, usize)> {
             1 => None,
             run => Some((Class::Warning, run)),
         },
+        // **`..` and `...` are ranges, not two attribute dots.**
+        b'.' if rest.starts_with("..") => {
+            Some((Class::Operator, if rest.starts_with("...") { 3 } else { 2 }))
+        }
         b'.' if rest[1..].starts_with(|c: char| c.is_lowercase() || c == '_') => {
             Some((Class::Attribute, named(1)))
         }
@@ -1838,7 +2019,11 @@ fn ruby_string(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize
         if rest.starts_with("#{") {
             push(out, Class::SpecialChar, "#{");
             let end = rest.find('}').unwrap_or(rest.len());
-            push(out, Class::Normal, &rest[2..end]);
+            // **The inside of `#{ … }` is code**, and comes back with its
+            // own classes: `"#{@addr}"` carries an `ot`, not a run of
+            // plain text. A fresh state, because nothing an interpolation
+            // opens can outlive the string it sits in.
+            ruby(&rest[2..end], &mut State::default(), out);
             if end < rest.len() {
                 push(out, Class::SpecialChar, "}");
             }
@@ -2142,6 +2327,17 @@ fn bash_paren(
     width
 }
 
+/// The inside of an array subscript. A numeric index is a `dv`; a name or
+/// a sum carries no class at all, which is measured rather than assumed —
+/// `${a[foo]}` and `${a[i+1]}` both come back bare.
+fn bash_subscript(inside: &str, out: &mut Vec<(Class, String)>) {
+    if !inside.is_empty() && inside.bytes().all(|byte| byte.is_ascii_digit()) {
+        push(out, Class::DecVal, inside);
+    } else {
+        bash_expanded(inside, Class::Normal, out);
+    }
+}
+
 /// One word, classified by where it stands. `at` has already passed it.
 fn bash_word(
     text: &str,
@@ -2152,6 +2348,31 @@ fn bash_word(
     out: &mut Vec<(Class, String)>,
 ) -> usize {
     let commanding = state.position == Position::Command;
+    // **`name[index]=` assigns to one slot of an array.** The name is a
+    // `va`, the brackets are `op` with the index tokenized between them,
+    // and the `]` merges with the `=` that follows. Taken before the word
+    // is classified, because the word scan stops at the `$` of `a[$i]=1`
+    // and leaves `a[` looking like a command.
+    if (commanding || cursor.naming)
+        && let Some(open) = word.find('[')
+        && !word[..open].is_empty()
+        && let Some(close) = text[at - word.len() + open..].find(']')
+    {
+        let from = at - word.len() + open;
+        let after = &text[from + close + 1..];
+        if after.starts_with('=') || after.starts_with("+=") {
+            push(out, Class::Variable, &word[..open]);
+            push(out, Class::Operator, "[");
+            bash_subscript(&text[from + 1..from + close], out);
+            // `]+=` is one operator run, so the `+` of an append goes
+            // here rather than being left for the scan.
+            let appends = after.starts_with("+=");
+            push(out, Class::Operator, if appends { "]+" } else { "]" });
+            state.position = Position::Word;
+            cursor.valued = true;
+            return from + close + 1 + usize::from(appends);
+        }
+    }
     // `name()` is one piece, and it is the name of a function.
     if commanding && text[at..].starts_with("()") {
         push(out, Class::Function, &format!("{word}()"));
@@ -2532,7 +2753,18 @@ fn bash_braced(inner: &str, out: &mut Vec<(Class, String)>) {
     };
     if head == b'[' {
         let end = tail.find(']').map_or(tail.len(), |index| index + 1);
-        push(out, Class::Operator, &tail[..end]);
+        // **A subscript is an expression, not part of the bracket.**
+        // `${a[$i]}` carries a `va` between two `op`, and `${a["$k"]}` a
+        // quoted run — only `[@]` and `[*]`, which name no index, come
+        // back as one operator.
+        let inside = tail[1..end].strip_suffix(']').unwrap_or(&tail[1..end]);
+        if inside == "@" || inside == "*" {
+            push(out, Class::Operator, &tail[..end]);
+        } else {
+            push(out, Class::Operator, "[");
+            bash_subscript(inside, out);
+            push(out, Class::Operator, "]");
+        }
         bash_braced(&tail[end..], out);
         return;
     }
