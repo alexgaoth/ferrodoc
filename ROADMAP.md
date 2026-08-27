@@ -940,21 +940,44 @@ or unbounded partial rewrite is acceptable merely to hit a benchmark.
 
 #### Initial execution cards
 
-**P1 — Remove unconditional HTML copies.** Replace the mutable clone in the
-footnote preflight with an immutable walk; make `Wrap::None` and
-`Wrap::Preserve` layout one-pass. Add unit tests for no note, nested note,
-and each wrap mode; run the HTML differential gate and the pinned 918,295 B
-benchmark. **Done:** identical output and a recorded movement toward
-40 ms / 24 MiB. **Not this card:** changing the public AST or implementing
-streaming.
+**P1 — Remove unconditional HTML copies.** ✅ **Done 2026-08-27.** The
+footnote preflight is an immutable short-circuiting walk and `Wrap::None`
+and `Wrap::Preserve` resolve their markers in one pass. Three unit tests
+pin it — a note in each place a shallow walk misses, a note inside a note,
+and every wrap mode including a marker at either end. Output is
+byte-identical on all eight writers and `verify.sh` is green.
 
-**P2 — Keep ordinary Markdown input borrowed.** Carry `Cow<str>` through
-the Markdown parser setup, allocating only for tabs, carriage returns,
-missing final newlines, or the empty-front-matter exception. Run the 652
-CommonMark examples, AST round-trip gate, and the pinned large Markdown
-benchmark. **Done:** no compatibility loss and an allocation/profile record
-showing whether the input copy was removed. **Not this card:** replacing
-Comrak.
+Interleaved against a baseline binary, medians, ratios rather than
+absolute timings:
+
+| workload | ratio | note |
+|---|---:|---|
+| 918,295 B Rust release notes | **0.85** | 47.8 ms → 40.5 ms; the target is ≤ 40 ms |
+| 1 MB generated prose | **0.79** | 139 ms → 110 ms |
+| 10 MB generated prose | **0.76** | 1041 ms → 788 ms |
+
+**The time target is reached and the memory target is not.** Peak RSS on
+the release notes went 32.1 MiB → 31.2 MiB against a target of ≤ 24 MiB.
+The reason is recorded rather than the target revised: on *generated
+prose* the same change moved RSS 26% (57.2 → 42.3 MiB at 1 MB, 529.5 →
+380.8 MiB at 10 MB), because the tree clone dominated there. On a real
+document dense with code blocks and links, what remains resident is the
+owned Pandoc AST itself — hot path 4 above, which this card explicitly
+does not cover and which the roadmap already marks as architectural work
+needing its own reviewed design.
+
+**Not this card:** changing the public AST or implementing streaming.
+
+**P2 — Keep ordinary Markdown input borrowed.** ✅ **Done 2026-08-27.**
+`read` carried a `Cow` from `preprocess` and then called `into_owned` on
+it immediately, throwing away the borrowed fast path for a front-matter
+workaround that almost never fires. It now allocates only when
+`preprocess` had to, or when that workaround actually strips something.
+
+The copy removed is exactly the size of the input, and shows as that:
+peak RSS on the 10 MB fixture went 391.3 MiB → 380.8 MiB, ~10 MB, with no
+change in time. All 652 CommonMark examples and every differential gate
+unmoved. **Not this card:** replacing Comrak.
 
 **P3 — Make the archive/AST decision from evidence.** Profile the largest
 real EPUB and the 199.6 MiB batch by phase: input archive, decompressed

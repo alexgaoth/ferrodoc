@@ -66,12 +66,20 @@ or Node pipeline normally starts once per file.
 
 | real document | input | ferrodoc | pandoc subprocess | time | ferrodoc peak RSS | pandoc peak RSS |
 |---|---:|---:|---:|---:|---:|---:|
-| [Rust README](https://github.com/rust-lang/rust/blob/master/README.md) | 3,304 B | **0.172 ms** | 29.2 ms | **170× faster** | **5.1 MiB** | 30.9 MiB |
-| [CommonMark spec source](https://github.com/commonmark/commonmark-spec/blob/master/spec.txt) | 206,108 B | **8.43 ms** | 336 ms | **39.9× faster** | **10.5 MiB** | 141.1 MiB |
-| [Kubernetes 1.34 changelog](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.34.md) | 440,462 B | **18.20 ms** | 494 ms | **27.2× faster** | **16.1 MiB** | 157.5 MiB |
-| [Rust release notes](https://github.com/rust-lang/rust/blob/master/RELEASES.md) | 918,295 B | **53.20 ms** | 1.059 s | **19.9× faster** | **31.5 MiB** | 253.3 MiB |
+| [Rust README](https://github.com/rust-lang/rust/blob/master/README.md) | 3,304 B | **0.133 ms** | 20.3 ms | **152.7× faster** | **4.9 MiB** | 31.2 MiB |
+| [CommonMark spec source](https://github.com/commonmark/commonmark-spec/blob/master/spec.txt) | 206,108 B | **8.15 ms** | 317 ms | **38.9× faster** | **9.7 MiB** | 200.3 MiB |
+| [Kubernetes 1.34 changelog](https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG/CHANGELOG-1.34.md) | 440,462 B | **15.10 ms** | 510 ms | **33.8× faster** | **15.6 MiB** | 157.5 MiB |
+| [Rust release notes](https://github.com/rust-lang/rust/blob/master/RELEASES.md) | 918,295 B | **45.44 ms** | 1.165 s | **25.6× faster** | **31.2 MiB** | 231.1 MiB |
 
-These rows were downloaded and measured on 2026-08-25 on the machine below.
+These rows were downloaded and measured on 2026-08-27 on the machine below,
+both programs in the same session — which is the only way these numbers
+mean anything, because this machine's absolute timings drift by about 2×
+between sessions. **Do not compare a row here against a row in an older
+copy of this file.** The previous set, taken on 2026-08-25, read 0.172 ms,
+8.43 ms, 18.20 ms and 53.20 ms; the three of those that moved, moved
+because of the work recorded in `ROADMAP.md`'s 0.7.5 cards, and the only
+sound measurement of that work is the interleaved one in the commit that
+did it — 0.85 on this document, 0.76 on a 10 MB one.
 Peak RSS is the operating system's high-water mark for one conversion,
 including each program's allocator and executable; it is why memory savings
 should be reported per path and document, not as one universal multiplier.
