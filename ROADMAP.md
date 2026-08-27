@@ -1056,13 +1056,26 @@ nodes for the two variants it barely uses.
   2600, and about half on 1342.** It is the right thing for a batch of
   image-heavy books and it is not the ceiling for anything text-heavy.
 
-Nothing here is done unilaterally: the roadmap says no public AST break
-merely to hit a benchmark, and the benchmark is exactly what this would
-be for. **The prototype worth building first is the one that needs no
-break at all** — the streaming output path, which lets the writer emit
-while the reader is still producing and so never holds both the whole AST
-and the whole output. That does not shrink the AST; it stops the output
-from being added to it.
+The streaming output path was the obvious thing to prototype first,
+because it needs no break at all. It was measured before it was built:
+War and Peace produces **3.14 MB of plain text against an 87 MB peak**, so
+never holding the finished output is worth **4%**. That is not the card's
+target and it is not worth an architectural change; it is written down so
+the next person does not build it on the strength of the same intuition.
+
+**So the whole of the remaining distance is the AST representation, and
+none of it can be taken without a decision that is the owner's.** The
+roadmap says no public AST break merely to hit a benchmark, and a
+benchmark is exactly what this would be for. The three options above are
+9.1 MB, 18.2 MB and an unknown-but-larger number, against a 63 MB gap
+between 87 MB and the ≤ 55 MiB target — so even the widest of them does
+not reach it alone.
+
+**P3 is therefore closed as a recorded rejection, which is one of the two
+outcomes the card allows.** What it rejects is its own premise: the
+buffers are not where the memory is. What it leaves open is a question
+about `Inline`, and the honest thing is that it stays open until somebody
+decides what the public AST is allowed to cost.
 
 **Corpus, by URL and checksum** (SHA-256, first 16), as the section above
 requires before any of this becomes a gate:
