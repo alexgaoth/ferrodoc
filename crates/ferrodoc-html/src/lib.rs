@@ -142,12 +142,14 @@ pub fn write_html(doc: &Pandoc) -> String {
 /// [`Sections`] for what changes.
 #[must_use]
 pub fn write_html_section_divs(doc: &Pandoc) -> String {
-    // **Not highlighted.** Pandoc's EPUB writer colours code, and
-    // `diff-epub-write` mutes it on pandoc's side because scoring against
-    // skylighting would measure skylighting rather than this writer.
-    // Colouring here and not there would make that gate compare two
-    // different questions — see ROADMAP 0.7.
-    write_body(doc, "", Wrap::None, Sections::Made, Highlighting::None)
+    // **Highlighted, since 2026-08-27.** This was `Highlighting::None`
+    // while there was no highlighter: pandoc's EPUB writer colours code,
+    // and scoring against skylighting would have measured skylighting.
+    // That reasoning expired the moment this project had a highlighter of
+    // its own that matches skylighting byte for byte — muting a feature
+    // you *have* is the trap this repository documents, and the EPUB
+    // writer was the last place still doing it.
+    write_body(doc, "", Wrap::None, Sections::Made, Highlighting::Default)
 }
 
 /// The same, with `--id-prefix` on the identifiers this writer *invents*.

@@ -15,7 +15,13 @@ comrak = { workspace = true }
 zip = { version = "8", default-features = false, features = ["deflate"] }
 ferrodoc-ast = { workspace = true }
 ferrodoc-markdown = { workspace = true }
-ferrodoc-html = { workspace = true }
+# **With `highlight`.** The workspace dependency is
+# `default-features = false`, so the harness was linking a
+# ferrodoc-html with the highlighter compiled out — and
+# `diff-epub-write` was therefore comparing our *unhighlighted* book
+# against pandoc's highlighted one. A trimmed build is a different
+# program, and this gate was measuring one.
+ferrodoc-html = { workspace = true, features = ["highlight"] }
 ferrodoc-text = { workspace = true }
 ferrodoc-docx = { workspace = true }
 ferrodoc-odt = { workspace = true }

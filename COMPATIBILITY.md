@@ -1445,6 +1445,25 @@ round-tripping pandoc's own output through pandoc:**
   `pandoc -t commonmark` on `- a` / `* b` returns a three-block document
   where a two-block one went in. The bullet switch returns the two.
 
+**The EPUB writer colours code as of 2026-08-27.** It did not while
+there was no highlighter — pandoc's does, and scoring against skylighting
+would have measured skylighting — and `diff-epub-write` muted pandoc's
+side to match. **That reasoning expired the moment this project had a
+highlighter of its own**, and muting a feature you *have* is the trap
+named further up this page. The gate no longer mutes it, `epubcheck`
+accepts every book, and the round trip moved sharply: eight of sixteen
+documents are now at the `dc:title` baseline where four were, and
+`docs/divergences.md` went from **193 differing lines to 9**.
+
+Turning it on took the EPUB writer gate from 10/13 to 9/13 before it
+took it back, and the reason is worth keeping: **the harness was linking
+a `ferrodoc-html` with the highlighter compiled out.** The workspace
+dependency is `default-features = false`, nothing in the harness's graph
+turned `highlight` back on, and so a gate that had always agreed with the
+CLI was quietly measuring a different program. A trimmed build is a
+different program — this page says so about the *shipped* trimmed build,
+and it is just as true of a test harness.
+
 **The binary writers have a judge of their own since 2026-08-26.** A
 DOCX, an ODT, an EPUB and a notebook have no bytes worth comparing — the
 two tools zip different files in a different order — so

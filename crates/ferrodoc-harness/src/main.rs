@@ -1215,15 +1215,11 @@ fn diff_round_trip(
         if matches!(format, "latex" | "rst") {
             command.arg("--wrap=preserve");
         }
-        // The same flag the HTML gate passes, for the same reason:
-        // pandoc's EPUB writer runs its syntax highlighter and emits a
-        // `<div class="sourceCode" id="cbN">` around every code block
-        // with a language. Highlighting is a rendering choice this
-        // project does not make, so scoring against it would measure
-        // skylighting rather than the writer.
-        if format == "epub" {
-            command.arg("--syntax-highlighting=none");
-        }
+        // **No longer muted.** This passed `--syntax-highlighting=none`
+        // for epub while highlighting was a choice this project did not
+        // make; it makes it now, and muting one side of a feature both
+        // sides have is how a gate comes to compare two different
+        // questions. The EPUB writer colours code as of 2026-08-27.
         let status = command
             .args(["-f", "json", "-t", format, "--resource-path"])
             .arg(&base)
