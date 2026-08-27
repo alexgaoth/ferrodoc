@@ -25,7 +25,13 @@ html5ever = "0.39.0"
 markup5ever_rcdom = "0.39.0"
 
 [dev-dependencies]
-ferrodoc-markdown = { workspace = true }
+# **Path only, deliberately: no version.** `ferrodoc-markdown` depends on
+# this crate, so a dev-dependency carrying a version closes a cycle that
+# `cargo publish` cannot order, and the whole workspace becomes
+# unpublishable. Without a version cargo drops the dev-dependency from the
+# packaged manifest — consumers never build the tests — and the cycle goes
+# with it. `workspace = true` would inherit the version and bring it back.
+ferrodoc-markdown = { path = "../ferrodoc-markdown" }
 
 [lints]
 workspace = true

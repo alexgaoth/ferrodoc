@@ -51,13 +51,64 @@ cargo publish --dry-run --workspace
 Twelve crates package and verify: `ferrodoc-ast`, `-asciidoc`, `-docx`,
 `-markdown`, `-html`, `-epub`, `-ipynb`, `-latex`, `-odt`, `-rst`,
 `-text`, and `ferrodoc`. `ferrodoc-harness` is `publish = false` — it
-shells out to pandoc and reads the corpus.
+shells out to pandoc and reads the corpus. Cargo packages them in
+dependency order and resolves each against the ones it has just packaged,
+so a version bump rehearses fine even though the new version is on no
+registry yet.
+
+**Unless the workspace contains a dependency cycle, and 0.7.0 did.**
+
+```console
+$ cargo publish --dry-run --workspace
+   Packaging ferrodoc-markdown v0.7.0
+error: failed to prepare local package for uploading
+  failed to select a version for the requirement `ferrodoc-html = "^0.7.0"`
+  candidate versions found which didn't match: 0.2.0, 0.1.0
+```
+
+Read that error carefully, because it names the wrong thing. Nothing is
+wrong with the index; cargo could not put `ferrodoc-html` *before*
+`ferrodoc-markdown` in the packaging order, so it fell back to looking the
+dependency up. It could not order them because **`ferrodoc-html`
+dev-depends on `ferrodoc-markdown` while `ferrodoc-markdown` depends on
+`ferrodoc-html`.**
+
+The dev-dependency had been there since the first commit and was harmless
+for two releases. `db5ae21` closed the loop from the other side, and
+nothing caught it: no test builds a packaged manifest, and the rehearsal
+that would have caught it is this one — which nobody had run since the
+dependency was added.
+
+The fix is to declare the dev-dependency **path-only, with no version**:
+
+```toml
+[dev-dependencies]
+ferrodoc-markdown = { path = "../ferrodoc-markdown" }   # not workspace = true
+```
+
+Cargo drops a version-less dev-dependency from the packaged manifest —
+consumers never build our tests — and the cycle goes with it.
+`workspace = true` would inherit the version and bring it back.
+
+**Run this rehearsal on any release that adds a dependency between two
+crates in this workspace.** It is the only check that reads the manifests
+the way crates.io will.
 
 ```sh
 ./bindings/wasm/build.sh && (cd bindings/wasm && npm pack)
 ```
 
-Writes `bindings/wasm/ferrodoc-0.2.0.tgz`: five files, `js/ferrodoc.wasm`
+`cargo publish --workspace` is therefore the first command that exercises
+the packaged manifests. It publishes in dependency order and waits for
+each crate to reach the index before packaging its dependents, which is
+why it is one command and not a loop. `ferrodoc-harness` is
+`publish = false` — it shells out to pandoc and reads the corpus.
+
+```sh
+./bindings/wasm/build.sh && (cd bindings/wasm && npm pack)
+```
+
+Writes `bindings/wasm/ferrodoc-<version>.tgz`: five files, `js/ferrodoc.wasm`
 at 1,855,728 bytes. **Check that number.** A build that fell back to the
 CLI stub produces a module around 31 KB, and it has been shipped that way
 once — the package would install and convert nothing.
@@ -66,7 +117,11 @@ once — the package would install and convert nothing.
 maturin build --release -m bindings/python/Cargo.toml
 ```
 
-Fails until step 2 has happened. That is the ordering above, not a
+Fails until step 2 has happened, and so does the **Wheels** workflow on
+every push between the version bump and the crates.io publish — its first
+step is a guard named *the version this asks for must already be on
+crates.io*. That red is the ordering, not a regression, and it clears
+itself when step 2 lands. That is the ordering above, not a
 problem to be worked around: patching the dependency to a path would
 break the sdist, and the sdist building on its own is what proves the
 wheel is self-contained.
