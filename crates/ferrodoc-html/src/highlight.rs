@@ -39,6 +39,13 @@ pub(crate) enum Class {
     Function,
     Extension,
     Other,
+    /// Ruby's single-quoted string, which interpolates nothing.
+    VerbatimString,
+    /// A capitalised name — Ruby's constants.
+    Constant,
+    /// **A Ruby symbol.** Skylighting files `:name` under the class it
+    /// uses for warnings; probed, not guessed.
+    Warning,
 }
 
 impl Class {
@@ -65,6 +72,9 @@ impl Class {
             Class::Function => "fu",
             Class::Extension => "ex",
             Class::Other => "ot",
+            Class::VerbatimString => "vs",
+            Class::Constant => "cn",
+            Class::Warning => "wa",
         })
     }
 }
@@ -209,6 +219,10 @@ static PYTHON: Syntax = Syntax {
     // exception and warning), 86 are `bu`, and `self` sits with `True`
     // and `None` as a `va`.
     keywords: &[
+        // The dunders were probed the same way, 96 of them: 68 are
+        // `fu` wherever they stand — `x.__init__` too — while
+        // `__name__` and `__file__` are `va`, and 29 others,
+        // `__dict__` and `__doc__` among them, carry no class at all.
         ("ArithmeticError", Class::Preprocessor),
         ("AssertionError", Class::Preprocessor),
         ("AttributeError", Class::Preprocessor),
@@ -281,17 +295,82 @@ static PYTHON: Syntax = Syntax {
         ("ValueError", Class::Preprocessor),
         ("Warning", Class::Preprocessor),
         ("ZeroDivisionError", Class::Preprocessor),
+        ("__abs__", Class::Function),
+        ("__add__", Class::Function),
+        ("__aenter__", Class::Function),
+        ("__aexit__", Class::Function),
+        ("__aiter__", Class::Function),
         ("__all__", Class::Variable),
+        ("__and__", Class::Function),
+        ("__anext__", Class::Function),
+        ("__await__", Class::Function),
+        ("__bool__", Class::Function),
+        ("__bytes__", Class::Function),
+        ("__call__", Class::Function),
+        ("__ceil__", Class::Function),
         ("__class__", Class::Variable),
+        ("__class_getitem__", Class::Function),
+        ("__complex__", Class::Function),
+        ("__contains__", Class::Function),
         ("__debug__", Class::Variable),
+        ("__del__", Class::Function),
+        ("__delattr__", Class::Function),
+        ("__delete__", Class::Function),
+        ("__delitem__", Class::Function),
         ("__dir__", Class::Function),
+        ("__enter__", Class::Function),
+        ("__eq__", Class::Function),
+        ("__exit__", Class::Function),
         ("__file__", Class::Variable),
+        ("__float__", Class::Function),
+        ("__floor__", Class::Function),
+        ("__floordiv__", Class::Function),
         ("__format__", Class::Function),
-        ("__init__", Class::Function),
-        ("__qualname__", Class::Variable),
-        ("__slots__", Class::Variable),
+        ("__ge__", Class::Function),
+        ("__get__", Class::Function),
+        ("__getattr__", Class::Function),
+        ("__getitem__", Class::Function),
+        ("__gt__", Class::Function),
+        ("__hash__", Class::Function),
         ("__import__", Class::BuiltIn),
+        ("__index__", Class::Function),
+        ("__init__", Class::Function),
+        ("__init_subclass__", Class::Function),
+        ("__instancecheck__", Class::Function),
+        ("__int__", Class::Function),
+        ("__invert__", Class::Function),
+        ("__iter__", Class::Function),
+        ("__le__", Class::Function),
+        ("__len__", Class::Function),
+        ("__length_hint__", Class::Function),
+        ("__lshift__", Class::Function),
+        ("__lt__", Class::Function),
+        ("__match_args__", Class::Function),
+        ("__missing__", Class::Function),
+        ("__mod__", Class::Function),
+        ("__mul__", Class::Function),
         ("__name__", Class::Variable),
+        ("__ne__", Class::Function),
+        ("__neg__", Class::Function),
+        ("__new__", Class::Function),
+        ("__next__", Class::Function),
+        ("__or__", Class::Function),
+        ("__pow__", Class::Function),
+        ("__qualname__", Class::Variable),
+        ("__repr__", Class::Function),
+        ("__round__", Class::Function),
+        ("__rshift__", Class::Function),
+        ("__set__", Class::Function),
+        ("__set_name__", Class::Function),
+        ("__setattr__", Class::Function),
+        ("__setitem__", Class::Function),
+        ("__slots__", Class::Variable),
+        ("__str__", Class::Function),
+        ("__sub__", Class::Function),
+        ("__subclasscheck__", Class::Function),
+        ("__truediv__", Class::Function),
+        ("__trunc__", Class::Function),
+        ("__xor__", Class::Function),
         ("abs", Class::BuiltIn),
         ("aiter", Class::BuiltIn),
         ("all", Class::BuiltIn),
@@ -313,6 +392,7 @@ static PYTHON: Syntax = Syntax {
         ("bytearray", Class::BuiltIn),
         ("bytes", Class::BuiltIn),
         ("callable", Class::BuiltIn),
+        ("case", Class::ControlFlow),
         ("chr", Class::BuiltIn),
         ("class", Class::Keyword),
         ("classmethod", Class::BuiltIn),
@@ -366,6 +446,7 @@ static PYTHON: Syntax = Syntax {
         ("locals", Class::BuiltIn),
         ("long", Class::BuiltIn),
         ("map", Class::BuiltIn),
+        ("match", Class::ControlFlow),
         ("max", Class::BuiltIn),
         ("memoryview", Class::BuiltIn),
         ("min", Class::BuiltIn),
@@ -434,6 +515,7 @@ static BASH: Syntax = Syntax {
     canonical: "bash",
     names: &["bash", "sh", "shell", "zsh", "ksh"],
     keywords: &[
+        (":", Class::BuiltIn),
         ("alias", Class::BuiltIn), ("apropos", Class::Function), ("ar", Class::Function),
         ("awk", Class::Function), ("base64", Class::Function),
         ("basename", Class::Function), ("bash", Class::Function), ("bc", Class::Function), ("bg", Class::BuiltIn),
@@ -519,7 +601,136 @@ static BASH: Syntax = Syntax {
     escape: Class::SpecialChar,
 };
 
-static SYNTAXES: &[&Syntax] = &[&C, &PYTHON, &BASH];
+
+/// Ruby, whose classes are the least guessable of the four.
+///
+/// **`true`, `false`, `nil`, `self` and `super` are `dv`** — the class
+/// skylighting gives a decimal number — and a **symbol is `wa`**, the
+/// class it gives a warning. Neither is a slip: `ROADMAP.md` recorded
+/// both from a probe before any of this was written, and every word here
+/// was read back from the pinned binary one at a time, the way bash's
+/// 204 were.
+static RUBY: Syntax = Syntax {
+    canonical: "ruby",
+    names: &["ruby", "rb"],
+    // Probed over **Ruby's own vocabulary**, the way python's was:
+    // `Kernel.private_instance_methods` plus `Kernel.methods` from the
+    // 3.4.3 on this machine, 95 names, each read back one at a time.
+    // 50 are `fu`, `private`/`public`/`protected` are `at`, and
+    // `caller` sits with `true` and `nil` as a `dv`.
+    keywords: &[
+        ("BEGIN", Class::ControlFlow),
+        ("END", Class::ControlFlow),
+        ("abort", Class::Function),
+        ("alias", Class::Keyword),
+        ("and", Class::ControlFlow),
+        ("at_exit", Class::Function),
+        ("attr_accessor", Class::Other),
+        ("attr_reader", Class::Other),
+        ("attr_writer", Class::Other),
+        ("autoload", Class::Function),
+        ("autoload?", Class::Function),
+        ("begin", Class::ControlFlow),
+        ("binding", Class::Function),
+        ("block_given?", Class::Function),
+        ("break", Class::ControlFlow),
+        ("caller", Class::DecVal),
+        ("case", Class::ControlFlow),
+        ("catch", Class::Function),
+        ("class", Class::ControlFlow),
+        ("def", Class::ControlFlow),
+        ("defined?", Class::ControlFlow),
+        ("do", Class::ControlFlow),
+        ("else", Class::ControlFlow),
+        ("elsif", Class::ControlFlow),
+        ("end", Class::ControlFlow),
+        ("ensure", Class::ControlFlow),
+        ("eval", Class::Function),
+        ("exec", Class::Function),
+        ("exit", Class::Function),
+        ("exit!", Class::Function),
+        ("extend", Class::Function),
+        ("fail", Class::Function),
+        ("false", Class::DecVal),
+        ("for", Class::ControlFlow),
+        ("fork", Class::Function),
+        ("format", Class::Function),
+        ("gets", Class::Function),
+        ("global_variables", Class::Function),
+        ("if", Class::ControlFlow),
+        ("in", Class::ControlFlow),
+        ("include", Class::Function),
+        ("iterator?", Class::Function),
+        ("lambda", Class::Function),
+        ("load", Class::Function),
+        ("local_variables", Class::Function),
+        ("loop", Class::Function),
+        ("module", Class::ControlFlow),
+        ("next", Class::ControlFlow),
+        ("nil", Class::DecVal),
+        ("not", Class::ControlFlow),
+        ("open", Class::Function),
+        ("or", Class::ControlFlow),
+        ("p", Class::Function),
+        ("prepend", Class::Function),
+        ("print", Class::Function),
+        ("printf", Class::Function),
+        ("private", Class::Attribute),
+        ("proc", Class::Function),
+        ("protected", Class::Attribute),
+        ("public", Class::Attribute),
+        ("putc", Class::Function),
+        ("puts", Class::Function),
+        ("raise", Class::Function),
+        ("rand", Class::Function),
+        ("readline", Class::Function),
+        ("readlines", Class::Function),
+        ("redo", Class::ControlFlow),
+        ("require", Class::Function),
+        ("require_relative", Class::Function),
+        ("rescue", Class::ControlFlow),
+        ("retry", Class::ControlFlow),
+        ("return", Class::ControlFlow),
+        ("select", Class::Function),
+        ("self", Class::DecVal),
+        ("set_trace_func", Class::Function),
+        ("sleep", Class::Function),
+        ("sprintf", Class::Function),
+        ("srand", Class::Function),
+        ("super", Class::DecVal),
+        ("syscall", Class::Function),
+        ("system", Class::Function),
+        ("test", Class::Function),
+        ("then", Class::ControlFlow),
+        ("throw", Class::Function),
+        ("trace_var", Class::Function),
+        ("trap", Class::Function),
+        ("true", Class::DecVal),
+        ("undef", Class::Keyword),
+        ("unless", Class::ControlFlow),
+        ("until", Class::ControlFlow),
+        ("untrace_var", Class::Function),
+        ("warn", Class::Function),
+        ("when", Class::ControlFlow),
+        ("while", Class::ControlFlow),
+        ("yield", Class::ControlFlow),
+    ],
+    line_comment: &["#"],
+    block_comment: None,
+    quotes: &[('"', Class::Str), ('\'', Class::VerbatimString)],
+    quirks: 0,
+    // Probed one character at a time, each in its own document — a
+    // single document with one line per character puts an unterminated
+    // `"` in the middle of it and every line after that comes back `st`.
+    // `(`, `)`, `,` and `;` are **plain** in Ruby where C makes them
+    // operators; `[` and `]` are `kw`; `.` is an `at`.
+    operators: "!%&*+-/:<=>?^{|}~",
+    string_prefixes: "",
+    digit_separator: Some('_'),
+    escape: Class::SpecialChar,
+};
+
+static SYNTAXES: &[&Syntax] = &[&C, &PYTHON, &BASH, &RUBY];
 
 /// The syntax a fence's language name asks for, if this knows it.
 fn syntax(name: &str) -> Option<&'static Syntax> {
@@ -543,9 +754,20 @@ pub(crate) fn canonical(name: &str) -> &'static str {
 /// Whether the scanner is inside a block comment when the next line
 /// starts. A run of code is highlighted line by line, so the state has
 /// to survive between them.
+/// What a line can leave open for the next one to finish.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Carried {
+    Nothing,
+    /// A `/* … */` that has not closed.
+    BlockComment,
+    /// A preprocessor directive ended with `\`, so the next line is its.
+    Directive,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct State {
-    in_block_comment: bool,
+    /// What the line before left open, if anything.
+    carried: Carried,
     /// Inside a `"""`/`'''` run: the quote character and the class the
     /// run took where it opened, which is a `co` for a docstring.
     open_string: Option<(char, Class)>,
@@ -576,7 +798,7 @@ pub(crate) struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
-            in_block_comment: false,
+            carried: Carried::Nothing,
             open_string: None,
             // A code block opens at the start of a command.
             position: Position::Command,
@@ -596,6 +818,11 @@ pub(crate) fn line(text: &str, name: &str, state: &mut State) -> Vec<(Class, Str
     let Some(syntax) = syntax(name) else {
         return vec![(Class::Normal, text.to_owned())];
     };
+    if std::ptr::eq(syntax, &raw const RUBY) {
+        let mut out = Vec::new();
+        ruby(text, state, &mut out);
+        return out;
+    }
     if std::ptr::eq(syntax, &raw const BASH) {
         let mut out = Vec::new();
         bash(text, state, &mut out);
@@ -621,20 +848,60 @@ pub(crate) fn line(text: &str, name: &str, state: &mut State) -> Vec<(Class, Str
                 state.open_string = None;
             }
         }
-    } else if state.in_block_comment {
+    } else if state.carried == Carried::BlockComment {
         let (_, close) = syntax.block_comment.expect("only set inside one");
         match text.find(close) {
+            // **An empty line inside a block comment carries no span.**
+            // Returning one unconditionally put `<span class="co"></span>`
+            // on every blank line of every licence header — the single
+            // largest source of divergence on real C files.
+            None if text.is_empty() => return Vec::new(),
             None => return vec![(Class::Comment, text.to_owned())],
             Some(end) => {
                 push(&mut out, Class::Comment, &text[..end + close.len()]);
                 at = end + close.len();
-                state.in_block_comment = false;
+                state.carried = Carried::Nothing;
             }
         }
+    } else if state.carried == Carried::Directive {
+        // **A directive continued with `\` runs on**: the whole of the next
+        // line is `pp`, and its own trailing `\` continues it again.
+        let end = text.strip_suffix('\\').map_or(text.len(), str::len);
+        push(&mut out, Class::Preprocessor, &text[..end]);
+        if end < text.len() {
+            push(&mut out, Class::Operator, "\\");
+        }
+        state.carried =
+            if end < text.len() { Carried::Directive } else { Carried::Nothing };
+        return out;
     } else if syntax.has(PREPROCESSOR) {
         at = directive(text, syntax, &mut out);
+        if at > 0 && text.ends_with('\\') {
+            state.carried = Carried::Directive;
+        }
+        if at > 0 {
+            scan(text, at, syntax, state, &mut out);
+            return preprocessed(out);
+        }
     }
     scan(text, at, syntax, state, &mut out);
+    out
+}
+
+/// **On a directive line nothing is plain.** The spacing before a trailing
+/// comment, a macro's parameter names, the body it expands to — all of it
+/// comes back `pp`, while the strings, numbers, operators and comments in
+/// it keep their own classes. Leaving those runs `Normal` was why real
+/// headers diverged on almost every `#define` and `#include`.
+fn preprocessed(pieces: Vec<(Class, String)>) -> Vec<(Class, String)> {
+    let mut out: Vec<(Class, String)> = Vec::with_capacity(pieces.len());
+    for (class, text) in pieces {
+        let class = if class == Class::Normal { Class::Preprocessor } else { class };
+        match out.last_mut() {
+            Some((last, run)) if *last == class => run.push_str(&text),
+            _ => out.push((class, text)),
+        }
+    }
     out
 }
 
@@ -703,7 +970,7 @@ fn scan(text: &str, from: usize, syntax: &Syntax, state: &mut State, out: &mut V
             match rest[open.len()..].find(close) {
                 None => {
                     push(out, Class::Comment, rest);
-                    state.in_block_comment = true;
+                    state.carried = Carried::BlockComment;
                     return;
                 }
                 Some(end) => {
@@ -753,8 +1020,37 @@ fn scan(text: &str, from: usize, syntax: &Syntax, state: &mut State, out: &mut V
                 .keywords
                 .binary_search_by_key(&word.as_str(), |(name, _)| name)
                 .map_or(Class::Normal, |index| syntax.keywords[index].1);
+            // **`match` and `case` are soft keywords**: `cf` only when a
+            // space and then an operand follow. `match = 1`, `match(x)`
+            // and `f(match="a")` are all ordinary names — probed, and the
+            // reason a test file in this repo caught the first attempt.
+            let class = if (word == "match" || word == "case")
+                && std::ptr::eq(syntax, &raw const PYTHON)
+                && !rest[word.len()..]
+                    .strip_prefix(' ')
+                    .is_some_and(|after| after.starts_with(|c: char| c != '=' && c != ' '))
+            {
+                Class::Normal
+            } else {
+                class
+            };
             push(out, class, &word);
             at += word.len();
+            continue;
+        }
+        // **`:=` is an operator; a bare `:` is not.** So the pair is
+        // taken here rather than by putting `:` in python's operator set,
+        // which would colour every dict key and every `def` line.
+        if rest.starts_with(":=") && std::ptr::eq(syntax, &raw const PYTHON) {
+            push(out, Class::Operator, ":=");
+            at += 2;
+            continue;
+        }
+        // A backslash alone at the end of a line continues it, and pandoc
+        // classes it `op` — the `\` of a multi-line `#define`.
+        if rest == "\\" {
+            push(out, Class::Operator, rest);
+            at += 1;
             continue;
         }
         if syntax.operators.contains(char::from(byte)) {
@@ -824,6 +1120,8 @@ fn quoted(
     };
     push(out, class, &text[from..from + skip + delimiter.len()]);
     let mut at = from + skip + delimiter.len();
+    // Where an f-string placeholder's `!r` or `:>3` begins, if it has one.
+    let mut spec: Option<usize> = None;
     while at < text.len() {
         let rest = &text[at..];
         if syntax.has(CONVERSIONS) && class == Class::Str
@@ -863,6 +1161,9 @@ fn quoted(
         // what lies between them is ordinary code.
         if class == Class::SpecialString && rest.starts_with('{') {
             push(out, Class::SpecialChar, &rest[..1]);
+            spec = rest.find('}').and_then(|end| {
+                rest[1..end].find([':', '!']).map(|index| at + 1 + index)
+            });
             at += 1;
             continue;
         }
@@ -871,11 +1172,27 @@ fn quoted(
             at += 1;
             continue;
         }
+        // **A conversion or a format spec belongs to the placeholder**, not
+        // to the expression: in `f"{x!r}"` the `!r}` is one `sc` run, as is
+        // the `:>3}` of `f"{x:>3}"`. Only inside a placeholder — `spec` is
+        // set when the `{` is read — so an ordinary `:` in the text is safe.
+        if let Some(spec_at) = spec
+            && spec_at == at
+            && let Some(end) = rest.find('}')
+        {
+            push(out, Class::SpecialChar, &rest[..=end]);
+            at += end + 1;
+            spec = None;
+            continue;
+        }
 
         if class == Class::SpecialString
             && out.last().is_some_and(|(kind, run)| *kind == Class::SpecialChar && run.ends_with('{'))
         {
-            at += interior(rest, syntax, state, out);
+            // Bounded at the spec, so `!r` in `f"{x!r}"` is not read as
+            // the operator it would be in ordinary code.
+            let limit = spec.map_or(rest.len(), |spec_at| spec_at - at);
+            at += interior(&rest[..limit], syntax, state, out);
             continue;
         }
         if rest.starts_with(delimiter) {
@@ -996,6 +1313,272 @@ fn bash(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
         return;
     }
     bash_code(text, from, state, out, 0);
+}
+
+/// One line of Ruby. The generic scanner gets keywords and numbers right
+/// and nothing else: Ruby files its symbols under `wa`, its
+/// single-quoted strings under `vs`, its instance variables under `ot`,
+/// and splits capitalised names between `cn` and `dt` on whether they
+/// hold a lowercase letter — `ABC` and `A_B` are constants, `Ab` and
+/// `AbC` types. Every rule was read off the pinned binary one construct
+/// at a time, **each in its own document**: a probe with one construct
+/// per line puts an unterminated quote in the middle and every line
+/// after it comes back a string.
+fn ruby(text: &str, state: &mut State, out: &mut Vec<(Class, String)>) {
+    if state.carried == Carried::BlockComment {
+        push(out, Class::Comment, text);
+        if text.starts_with("=end") {
+            state.carried = Carried::Nothing;
+        }
+        return;
+    }
+    if text.starts_with("=begin") {
+        state.carried = Carried::BlockComment;
+        push(out, Class::Comment, text);
+        return;
+    }
+    let mut at = 0;
+    while at < text.len() {
+        let rest = &text[at..];
+        let byte = rest.as_bytes()[0];
+        if byte == b'#' {
+            push(out, Class::Comment, rest);
+            return;
+        }
+        if byte.is_ascii_whitespace() {
+            let run = rest.find(|c: char| !c.is_ascii_whitespace()).unwrap_or(rest.len());
+            push(out, Class::Normal, &rest[..run]);
+            at += run;
+            continue;
+        }
+        if byte == b'"' {
+            at = ruby_string(text, at, out);
+            continue;
+        }
+        if byte == b'\'' {
+            let end = rest[1..].find('\'').map_or(rest.len(), |index| index + 2);
+            // **One character between single quotes is a `ch`**, two or
+            // more a `vs`. Double quotes are `st` at every length.
+            let quoted = &rest[..end];
+            let class = if quoted.chars().count() == 3 {
+                Class::Char
+            } else {
+                Class::VerbatimString
+            };
+            push(out, class, quoted);
+            at += end;
+            continue;
+        }
+        if let Some((class, run)) = ruby_sigil(rest) {
+            push(out, class, &rest[..run]);
+            at += run;
+            continue;
+        }
+        if byte == b'[' || byte == b']' {
+            push(out, Class::Keyword, &rest[..1]);
+            at += 1;
+            continue;
+        }
+        if byte == b'/' && ruby_expects_value(out) {
+            at = ruby_regexp(text, at, out);
+            continue;
+        }
+        if byte.is_ascii_digit() {
+            at = ruby_number(text, at, out);
+            continue;
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let word: String =
+                rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            let mut end = word.len();
+            // **A trailing `?` or `!` is part of the name**, not an
+            // operator after it: `block_given?` and `exit!` are one `fu`
+            // each, and `.include?` one `at`. Leaving them out put 62
+            // stray `op` spans in twelve stdlib files.
+            if rest[end..].starts_with(['?', '!']) && !rest[end + 1..].starts_with('=') {
+                end += 1;
+            }
+            let full = &rest[..end];
+            if rest[end..].starts_with(':') && !rest[end..].starts_with("::") {
+                push(out, Class::Warning, &rest[..=end]);
+                at += end + 1;
+                continue;
+            }
+            let class = if let Ok(index) =
+                RUBY.keywords.binary_search_by_key(&full, |(name, _)| name)
+            {
+                RUBY.keywords[index].1
+            } else if full.starts_with(char::is_uppercase) {
+                if full.contains(char::is_lowercase) {
+                    Class::DataType
+                } else {
+                    Class::Constant
+                }
+            } else {
+                Class::Normal
+            };
+            push(out, class, full);
+            at += end;
+            continue;
+        }
+        if RUBY.operators.contains(byte as char) {
+            let run = rest.find(|c: char| !RUBY.operators.contains(c)).unwrap_or(rest.len());
+            push(out, Class::Operator, &rest[..run]);
+            at += run;
+            continue;
+        }
+        let width = rest.chars().next().map_or(1, char::len_utf8);
+        push(out, Class::Normal, &rest[..width]);
+        at += width;
+    }
+}
+
+/// A name introduced by a sigil: `$global` and `@ivar` and `:symbol` and
+/// `.method`. Each takes a trailing `?` or `!` where Ruby allows one.
+fn ruby_sigil(rest: &str) -> Option<(Class, usize)> {
+    let named = |from: usize| {
+        let mut run = rest[from..]
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .map_or(rest.len(), |index| index + from);
+        if rest[run..].starts_with(['?', '!']) && !rest[run + 1..].starts_with('=') {
+            run += 1;
+        }
+        run
+    };
+    match rest.as_bytes().first()? {
+        b'$' => {
+            // `$!` and `$0` are globals too, so a sigil on its own still
+            // takes the character after it.
+            let run = named(1);
+            Some((Class::Variable, if run == 1 { 2.min(rest.len()) } else { run }))
+        }
+        b'@' => Some((Class::Other, named(1 + usize::from(rest[1..].starts_with('@'))))),
+        b':' if !rest.starts_with("::") => match named(1) {
+            1 => None,
+            run => Some((Class::Warning, run)),
+        },
+        b'.' if rest[1..].starts_with(|c: char| c.is_lowercase() || c == '_') => {
+            Some((Class::Attribute, named(1)))
+        }
+        b'.' => Some((Class::Attribute, 1)),
+        _ => None,
+    }
+}
+
+/// Whether a `/` here opens a regexp rather than dividing.
+///
+/// **This is a literal set, not a notion of expression position.** Probed
+/// against the binary: a regexp opens a line, and follows `=` `~` `(` `,`
+/// `&` `|` `?` or one of the words below — but *not* `[`, `:`, `return`,
+/// `case`, `next`, `break`, `yield`, `in`, or a bare method name, all of
+/// which take the `op` reading. `[/re/]` really does come back `op`.
+fn ruby_expects_value(out: &[(Class, String)]) -> bool {
+    /// Keywords a regexp may follow. `if` and `unless` are here; `case`
+    /// and `return`, which read the same way to a person, are not.
+    const OPENING: &[&str] = &[
+        "and", "begin", "do", "elsif", "if", "not", "or", "rescue", "then", "unless", "until",
+        "when", "while",
+    ];
+    let Some((class, text)) = out.iter().rev().find(|(_, text)| !text.trim().is_empty()) else {
+        return true;
+    };
+    match class {
+        Class::Operator => text.ends_with(['=', '~', '&', '|', '?']),
+        Class::ControlFlow | Class::Keyword => OPENING.contains(&text.as_ref()),
+        Class::Normal => text.ends_with(['(', ',']),
+        _ => false,
+    }
+}
+
+/// A regexp: `ss` throughout, save escapes, which are `sc`. Trailing
+/// flags belong to the literal — `/a/i` is one `ss` run.
+fn ruby_regexp(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize {
+    let mut at = from + 1;
+    let mut start = from;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with('\\') {
+            let width = 2.min(rest.len());
+            push(out, Class::SpecialString, &text[start..at]);
+            push(out, Class::SpecialChar, &rest[..width]);
+            at += width;
+            start = at;
+            continue;
+        }
+        if let Some(after) = rest.strip_prefix('/') {
+            let flags = after.find(|c: char| !c.is_ascii_alphabetic()).map_or(rest.len(), |i| i + 1);
+            push(out, Class::SpecialString, &text[start..at + flags]);
+            return at + flags;
+        }
+        at += rest.chars().next().map_or(1, char::len_utf8);
+    }
+    // Unterminated: the rest of the line is still the literal.
+    push(out, Class::SpecialString, &text[start..]);
+    at
+}
+
+/// A double-quoted run, whose `#{ … }` marks are `sc` and whose contents
+/// between them are ordinary code.
+fn ruby_string(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize {
+    push(out, Class::Str, "\"");
+    let mut at = from + 1;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with('"') {
+            push(out, Class::Str, "\"");
+            return at + 1;
+        }
+        if rest.starts_with('\\') {
+            push(out, Class::SpecialChar, &rest[..2.min(rest.len())]);
+            at += 2.min(rest.len());
+            continue;
+        }
+        if rest.starts_with("#{") {
+            push(out, Class::SpecialChar, "#{");
+            let end = rest.find('}').unwrap_or(rest.len());
+            push(out, Class::Normal, &rest[2..end]);
+            if end < rest.len() {
+                push(out, Class::SpecialChar, "}");
+            }
+            at += end + 1;
+            continue;
+        }
+        let stop = rest.find(['"', '\\', '#']).unwrap_or(rest.len());
+        push(out, Class::Str, &rest[..stop.max(1)]);
+        at += stop.max(1);
+    }
+    at
+}
+
+/// A number: `dv` plainly, `fl` with a point or an exponent, `bn` in any
+/// base but ten. `_` groups digits and belongs to the number.
+fn ruby_number(text: &str, from: usize, out: &mut Vec<(Class, String)>) -> usize {
+    let rest = &text[from..];
+    if rest.starts_with("0x") || rest.starts_with("0b") || rest.starts_with("0o") {
+        let run = rest[2..]
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .map_or(rest.len(), |index| index + 2);
+        push(out, Class::BaseN, &rest[..run]);
+        return from + run;
+    }
+    let mut run = rest.find(|c: char| !c.is_ascii_digit() && c != '_').unwrap_or(rest.len());
+    let mut float = false;
+    if rest[run..].starts_with('.') && rest[run + 1..].starts_with(|c: char| c.is_ascii_digit()) {
+        float = true;
+        run += 1 + rest[run + 1..]
+            .find(|c: char| !c.is_ascii_digit() && c != '_')
+            .unwrap_or(rest.len() - run - 1);
+    }
+    if rest[run..].starts_with(['e', 'E']) {
+        float = true;
+        let mut end = run + 1;
+        if rest[end..].starts_with(['+', '-']) {
+            end += 1;
+        }
+        run = end + rest[end..].find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len() - end);
+    }
+    push(out, if float { Class::Float } else { Class::DecVal }, &rest[..run]);
+    from + run
 }
 
 /// Words after which a bare word is a variable name rather than a value.
@@ -1302,7 +1885,11 @@ fn bash_word(
         return at;
     }
     if word == "[" || word == "]" || word == "[[" || word == "]]" {
-        push(out, Class::BuiltIn, word);
+        // **The doubled brackets are `kw`, the single ones `bu`.** Probed:
+        // `[[ -f x ]]` comes back kw/ot/kw, `[ -f x ]` bu/ot/bu. Calling
+        // all four `bu` was the single largest divergence on real scripts.
+        let class = if word.len() == 2 { Class::Keyword } else { Class::BuiltIn };
+        push(out, class, word);
         state.in_test = word.starts_with('[');
         state.position = Position::Word;
         return at;
@@ -1764,7 +2351,7 @@ fn heredoc(rest: &str, state: &mut State, out: &mut Vec<(Class, String)>) -> usi
 
 #[cfg(test)]
 mod tests {
-    use super::{Class, State, line};
+    use super::{Carried, Class, State, line};
 
     fn classes(code: &str, language: &str) -> Vec<(Class, String)> {
         let mut state = State::default();
@@ -1845,7 +2432,7 @@ mod tests {
         let mut state = State::default();
         assert_eq!(line("/* one", "c", &mut state), vec![(Class::Comment, "/* one".to_owned())]);
         assert_eq!(line(" two */ x", "c", &mut state)[0], (Class::Comment, " two */".to_owned()));
-        assert!(!state.in_block_comment);
+        assert!(state.carried != Carried::BlockComment);
     }
 
     /// bash's rules, which are positional rather than lexical.
