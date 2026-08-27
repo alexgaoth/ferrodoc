@@ -1363,6 +1363,22 @@ It was found by prose written into `ROADMAP.md`: this repository's own
 files are part of the writer corpus, so a paragraph about the size of an
 `Inline` took `plain` from 38/40 to 37/40 the moment it was committed.
 
+**Whether it was one bug or a class was then checked, and it is one bug.**
+Every document in the corpus and every `.md` in this repository was
+written to `commonmark` and read back, and the resulting AST compared
+with the original:
+
+```
+self-round-trip at --wrap=none:  pandoc 2/19   ours 2/19
+```
+
+and **on the same documents, one for one**. A markdown round trip is
+lossy for reasons that have nothing to do with filling — a heading gains
+an identifier, raw HTML is re-read as something else — and this writer is
+lossy in exactly the places pandoc is. The stranded bullet was the
+outlier, not the first of many. Recorded because a negative result that
+closes a line of enquiry is worth as much as the fix that opened it.
+
 Twenty documents, **each written twice** — as the document falls, and
 filled to 72 columns, which is pandoc's own default. Nothing measured the
 fill until 2026-08-26, and the RST writer had been treating an inline
