@@ -15,8 +15,54 @@ on:
   workflow_dispatch:
 
 jobs:
+  # This crate depends on `ferrodoc` from crates.io rather than by path,
+  # which is what makes maturin's sdist — only this directory — build for
+  # anyone. The cost is an ordering: between the version bump and the
+  # crates.io publish, **nothing below can be built by anyone**, and it is
+  # not a fault in the code.
+  #
+  # It used to be a failing step inside every wheel job, so the workflow
+  # went red for that window. A red that is expected is a red nobody
+  # reads: a genuine failure — the binding's table test — sat behind one
+  # of these for four days and was taken for the same thing. So the
+  # question is asked once, here, and the answer *skips* the build on a
+  # push and *fails* it on a release, where the ordering must already
+  # hold. See docs/releasing.md.
+  publishable:
+    name: is the version this asks for on crates.io yet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.ask.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ask
+        shell: bash
+        run: |
+          want=$(sed -n 's/^ferrodoc = "\(.*\)"$/\1/p' bindings/python/Cargo.toml)
+          have=$(cargo search ferrodoc --limit 1 | sed -n 's/^ferrodoc = "\(.*\)".*/\1/p')
+          echo "Cargo.toml asks for ferrodoc $want; crates.io has $have"
+          case "$have" in
+            "$want"|"$want".*)
+              echo "ready=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "ready=false" >> "$GITHUB_OUTPUT"
+              if [ "${{ github.event_name }}" = "release" ]; then
+                echo "::error::publish ferrodoc $want to crates.io first — the" \
+                     "wheel cannot resolve until then, see docs/releasing.md"
+                exit 1
+              fi
+              echo "::notice::ferrodoc $want is not on crates.io yet, so no wheel" \
+                   "can be built from this commit. Skipping. This is the release" \
+                   "ordering in docs/releasing.md, not a failure."
+              ;;
+          esac
+
   wheels:
     name: ${{ matrix.platform.name }}
+    needs: publishable
+    if: needs.publishable.outputs.ready == 'true'
     runs-on: ${{ matrix.platform.runner }}
     # Bounds how long a job may *run*, not how long it may wait for a
     # runner — the 24-hour wait that prompted this was queue time, which
@@ -47,24 +93,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.9"
-
-      # This crate depends on `ferrodoc` from crates.io rather than by
-      # path, which is what makes maturin's sdist — only this directory —
-      # build for anyone. The cost is an ordering: until the registry has
-      # the version asked for, nothing here can be built, and maturin
-      # reports that as a resolution error thirty lines deep. Say it here
-      # instead. See docs/releasing.md.
-      - name: the version this asks for must already be on crates.io
-        shell: bash
-        run: |
-          want=$(sed -n 's/^ferrodoc = "\(.*\)"$/\1/p' bindings/python/Cargo.toml)
-          have=$(cargo search ferrodoc --limit 1 | sed -n 's/^ferrodoc = "\(.*\)".*/\1/p')
-          echo "Cargo.toml asks for ferrodoc $want; crates.io has $have"
-          case "$have" in
-            "$want"|"$want".*) ;;
-            *) echo "::error::publish ferrodoc $want to crates.io first — the wheel" \
-                    "cannot resolve until then, see docs/releasing.md"; exit 1 ;;
-          esac
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -110,6 +138,8 @@ jobs:
           path: bindings/python/dist/*.whl
 
   sdist:
+    needs: publishable
+    if: needs.publishable.outputs.ready == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

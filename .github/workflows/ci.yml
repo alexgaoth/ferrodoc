@@ -211,8 +211,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: a minimal TeX, which is the point
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          .github/apt-install.sh \
             texlive-latex-base texlive-latex-recommended texlive-luatex
       - name: every corpus document compiles
         run: |
@@ -261,7 +260,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: |
           python3 -m pip install --quiet sphinx
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends asciidoctor
+          .github/apt-install.sh asciidoctor
       # For the one case sphinx refuses: the question is then whether this
       # writer produced it or the format cannot express the document, and
       # only pandoc's answer settles that.
@@ -354,6 +353,34 @@ jobs:
           done
           exit $fail
 
+  # **Can this workspace still be published at all?**
+  #
+  # 0.7.0 could not. `ferrodoc-html` dev-depends on `ferrodoc-markdown`;
+  # a commit five days earlier gave `ferrodoc-markdown` a dependency on
+  # `ferrodoc-html`, closing a cycle cargo cannot order — and the error it
+  # raises names the *index*, not the cycle:
+  #
+  #   failed to select a version for `ferrodoc-html = "^0.7.0"`
+  #   candidate versions found which didn't match: 0.2.0, 0.1.0
+  #
+  # Nothing here could have caught it. `verify.sh` builds and tests from
+  # the working tree; it never packages, so it never reads a manifest the
+  # way crates.io will. This does, on every push, so the answer arrives on
+  # the commit that breaks it rather than on release day.
+  #
+  # It does not need the version to be on crates.io: cargo packages the
+  # members in dependency order and resolves each against the ones it has
+  # just packaged. That is precisely what a cycle takes away.
+  publishable:
+    name: the workspace can still be packaged
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo publish --dry-run --workspace
+
   # The C ABI, which is how Go, Java, C#, Ruby and Julia would link this.
   # Memory is the whole risk of the item: a leak of one result per
   # document is invisible in one conversion and fatal in a batch, and it
@@ -367,7 +394,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind
+      - run: .github/apt-install.sh valgrind
       - name: build, test, and run the C example under valgrind
         run: ./scripts/verify.sh --c
 

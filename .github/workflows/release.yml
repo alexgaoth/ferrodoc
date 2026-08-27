@@ -40,7 +40,7 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Install musl tools
         if: endsWith(matrix.target, '-musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+        run: .github/apt-install.sh musl-tools
       - run: cargo build --release -p ferrodoc --target ${{ matrix.target }}
       - name: Package
         shell: bash

@@ -90,9 +90,10 @@ Cargo drops a version-less dev-dependency from the packaged manifest —
 consumers never build our tests — and the cycle goes with it.
 `workspace = true` would inherit the version and bring it back.
 
-**Run this rehearsal on any release that adds a dependency between two
-crates in this workspace.** It is the only check that reads the manifests
-the way crates.io will.
+**CI runs this on every push now** — the `the workspace can still be
+packaged` job — so a cycle arrives on the commit that closes it rather
+than on release day. It is the only check that reads the manifests the
+way crates.io will; `verify.sh` never packages.
 
 ```sh
 ./bindings/wasm/build.sh && (cd bindings/wasm && npm pack)
