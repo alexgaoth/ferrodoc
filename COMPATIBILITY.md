@@ -83,6 +83,74 @@ The two round-trip gates are where ferrodoc is measurably *ahead*: pandoc's
 own writers lose 59 of the same 652 documents in `commonmark` and 66 of 655
 in `gfm`, at their best setting.
 
+## Six places pandoc loses what this keeps
+
+Every other page here measures how close this comes to pandoc. These six
+go the other way, and they are collected because they were found one at a
+time over two days of pointing the writers at documents nobody wrote to
+be converted — and because "byte-identical to pandoc" would have meant
+adopting each of them.
+
+Every command below runs as printed, from the repository root, against
+the pinned pandoc 3.8.2.1.
+
+**1. Two adjacent bullet lists.** They need something between them or
+they merge. Pandoc writes an HTML comment, and its own reader gives that
+comment back as a `RawBlock` that was never in the document. This
+switches the bullet from `-` to `*`, which adds no block.
+
+    printf -- '- a\n\n* b\n' > /tmp/t.md
+    pandoc /tmp/t.md -f commonmark -t commonmark | pandoc -f commonmark -t json |
+      python3 -c 'import json,sys; print([b["t"] for b in json.load(sys.stdin)["blocks"]])'
+    # ['BulletList', 'RawBlock', 'BulletList'] — two blocks in, three out
+
+**2 and 3. A code block that opens a blockquote or a list item.** It
+comes back a paragraph.
+
+    printf '> ```\n> code\n> ```\n' > /tmp/t.md
+    pandoc /tmp/t.md -f commonmark -t commonmark | pandoc -f commonmark -t json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin)["blocks"][0]["c"][0]["t"])'
+    # Para — a CodeBlock went in
+
+**4. A pipe inside a table cell.** Pandoc writes `` `x|y` `` unescaped,
+and its own reader then splits the row at that pipe, taking the code span
+with it.
+
+    printf '| h |\n|---|\n| `x\\|y` |\n' > /tmp/t.md
+    pandoc /tmp/t.md -f gfm -t gfm | pandoc -f gfm -t json | grep -c '"Code"'
+    # 0 — the code span is gone
+
+**5. Emphasis nested in strong, written to RST.** RST cannot nest inline
+markup. Pandoc keeps the outer marker and drops the emphasis; this closes
+the outer marker and reopens it, keeping all three marks.
+
+    printf 'a **bold *emph* inside** b\n' > /tmp/t.md
+    pandoc /tmp/t.md -f commonmark -t rst | pandoc -f rst -t json | grep -c Emph
+    # 0
+
+**6. A code span with a space at each end.** A reader strips one from
+each, so the bare form pandoc writes gives back neither.
+
+    printf '{"pandoc-api-version":[1,23,1],"meta":{},"blocks":[{"t":"Para","c":[{"t":"Code","c":[["",[],[]]," both "]}]}]}' > /tmp/t.json
+    pandoc /tmp/t.json -f json -t gfm | pandoc -f gfm -t json | grep -o '" both "\|"both"'
+    # "both" — the spaces are gone
+
+**And one that is pandoc's reader rather than its writer.** The
+`CommonMark` specification says a list is loose "if any of its
+constituent list items directly contain two block-level elements with a
+blank line between them". Pandoc reads the list below as **tight**, and
+reads the same list loose once the indented code block is removed.
+
+    printf -- '- first\n- second\n  - nested item:\n\n        code line\n\n  trailing para\n' > /tmp/t.md
+    pandoc /tmp/t.md -f commonmark -t json |
+      python3 -c 'import json,sys; b=json.load(sys.stdin)["blocks"][0]; print([[k["t"] for k in i] for i in b["c"]])'
+    # [['Plain'], ['Plain', 'BulletList', 'Plain']] — Para here, in all three
+
+None of these is a reason to prefer one tool: pandoc reads forty formats
+and this reads eleven. They are here because a compatibility page that
+only ever measured one direction would be quietly misleading about what
+matching costs.
+
 ## Known losses, one by one
 
 Nothing here is a surprise waiting to happen; each is a decision or a
