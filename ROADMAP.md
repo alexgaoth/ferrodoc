@@ -318,10 +318,13 @@ Byte-identical standalone HTML means reproducing **pandoc's default
 template and its default stylesheet**: a 70-line template and a 212-line
 `templates/styles.html`, both printable from the pinned binary
 (`pandoc --print-default-template=html5`,
-`pandoc --print-default-data-file=templates/styles.html`). That is 174 of
-the 176 lines by which `ferrodoc -s -t html` differs from
-`pandoc -s -t html` today; the other two are `<html lang=…>` and the
-`<title>`.
+`pandoc --print-default-data-file=templates/styles.html`). Those 174 of
+176 lines were what `ferrodoc -s -t html` differed from
+`pandoc -s -t html` by when this was written; the other two were
+`<html lang=…>` and the `<title>`. A page with no highlighted code has
+been byte-identical since, and one **with** highlighted code differs by
+the highlighting CSS alone — pandoc's 65 lines against this project's
+own 47, for the licence reason below.
 
 Pandoc is GPL-2.0-or-later, so the question is whether that is even
 available to an MIT/Apache-2.0 project. **It is:** pandoc's `COPYRIGHT`
@@ -802,12 +805,20 @@ wrongly. The gate is now **26/26 files, 2,650 lines**.
    `at`, `true` is a `dv`, a single-quoted string is `vs` — and there is
    no real Ruby in this repository to gate it on. Writing some would be
    the fixture-fitting this card just avoided.
-2. **The stylesheet is a licence question.** A standalone page with a
-   highlighted block wants 66 lines of CSS, and that CSS is skylighting's
-   style rather than `data/templates` — so the BSD carve-out the template
-   is vendored under does not reach it. The spans are written; the
-   colours are not. **That one is the owner's call**, and it is the only
-   thing between `-s` output and parity.
+2. ~~**The stylesheet is a licence question.**~~ **Decided 2026-08-26:
+   write one.** The 65 lines pandoc adds are skylighting's style rather
+   than `data/templates`, so the BSD carve-out the template is vendored
+   under does not reach them. Rather than leave the spans uncoloured,
+   this now ships **47 lines of its own** under the project's licence, in
+   pandoc's position and on pandoc's condition — the same `<style>`,
+   after the default stylesheet, only where a code block is in a language
+   the highlighter knows.
+
+   What that buys and what it costs, both measured: a `-s` page with no
+   highlighted code stays **byte-identical**; one with highlighted code
+   went from 65 diverging lines to **112**, and from uncoloured spans to
+   coloured ones. Parity on such a page was never reachable without
+   copying the CSS, which is the thing the licence forbids.
 
 #### What the measurement said before any of it — 2026-08-24
 

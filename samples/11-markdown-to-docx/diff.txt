@@ -1,5 +1,5 @@
---- samples/11-markdown-to-docx/pandoc.readback.md	2026-08-24 21:31:12.365553883 -0700
-+++ samples/11-markdown-to-docx/ferrodoc.readback.md	2026-08-24 21:31:12.321553923 -0700
+--- samples/11-markdown-to-docx/pandoc.readback.md	2026-08-26 18:57:49.089868694 -0700
++++ samples/11-markdown-to-docx/ferrodoc.readback.md	2026-08-26 18:57:48.950868671 -0700
 @@ -62,7 +62,7 @@
  
  A link with a title: [the spec](https://example.com/spec). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.

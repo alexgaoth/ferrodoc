@@ -21,6 +21,19 @@ use ferrodoc_ast::{MetaValue, Pandoc};
 const DEFAULT_TEMPLATE: &str = include_str!("../templates/html5.html");
 /// Pandoc's default stylesheet, verbatim. See `templates/LICENSE`.
 const DEFAULT_STYLES: &str = include_str!("../templates/styles.html");
+/// The colours for highlighted code — **this project's own**, and kept
+/// out of `templates/` for that reason. Pandoc appends its equivalent to
+/// the same `<style>` element, after the default stylesheet, and only
+/// when the document holds a code block in a language it can highlight.
+/// Its own version of this file is part of `skylighting`'s style set
+/// rather than of `data/templates`, so the BSD-3 carve-out that lets
+/// this repository vendor the *template* does not reach it: the spans
+/// were written and the colours were not, until 2026-08-26.
+#[cfg(feature = "highlight")]
+const HIGHLIGHT_STYLES: &str = include_str!("../styles/highlight.css");
+/// A build with no highlighter writes no spans, so it needs no colours.
+#[cfg(not(feature = "highlight"))]
+const HIGHLIGHT_STYLES: &str = "";
 
 /// What goes into the page besides the document.
 #[derive(Debug, Default)]
@@ -216,11 +229,41 @@ pub fn write_page(doc: &Pandoc, page: &Page<'_>) -> Result<String, String> {
     }
 
     let template = page.template.unwrap_or(DEFAULT_TEMPLATE);
+    let coloured = page.highlighting == Highlighting::Default && highlights_something(doc);
     let partials = |name: &str| match name {
+        "styles.html" if coloured => Some(format!("{DEFAULT_STYLES}{HIGHLIGHT_STYLES}")),
         "styles.html" => Some(DEFAULT_STYLES.to_owned()),
         _ => None,
     };
     render(template, &context, &partials)
+}
+
+/// Whether any code block in the document is in a language the
+/// highlighter knows — which is exactly when pandoc adds its colours,
+/// and when a page with none would show a `<span class="kw">` styled by
+/// nothing at all.
+#[cfg(feature = "highlight")]
+fn highlights_something(doc: &Pandoc) -> bool {
+    fn walk(blocks: &[ferrodoc_ast::Block]) -> bool {
+        blocks.iter().any(|block| match block {
+            ferrodoc_ast::Block::CodeBlock(attr, _) => {
+                attr.classes.iter().any(|class| crate::highlight::known(class))
+            }
+            ferrodoc_ast::Block::Div(_, inner) | ferrodoc_ast::Block::BlockQuote(inner) => {
+                walk(inner)
+            }
+            ferrodoc_ast::Block::BulletList(items) | ferrodoc_ast::Block::OrderedList(_, items) => {
+                items.iter().any(|item| walk(item))
+            }
+            _ => false,
+        })
+    }
+    walk(&doc.blocks)
+}
+
+#[cfg(not(feature = "highlight"))]
+fn highlights_something(_doc: &Pandoc) -> bool {
+    false
 }
 
 /// A fragment as a template value: no trailing newline, because the

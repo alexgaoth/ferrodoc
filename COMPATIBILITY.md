@@ -1032,12 +1032,29 @@ nothing at all**, not an empty `<nav>`; **`-H`, `-B` and `-A` imply
 document's metadata as variables**, so `-M linkcolor="#007bff"` colours
 the links, with `-V` beating `-M` where both name one.
 
-What `-s` still differs on is the **highlighting stylesheet**: a page
-with a highlighted code block makes pandoc add 66 lines of CSS, and that
-CSS comes from skylighting's style rather than from `data/templates`, so
-the BSD carve-out this repository vendors the template under does not
-reach it. The spans are written; the colours that would style them are
-not. `samples/15-markdown-to-html-page` is exactly that difference.
+What `-s` still differs on is the **highlighting stylesheet**, and it is
+now a difference in colours rather than an absence of them. A page with a
+highlighted code block makes pandoc add 65 lines of CSS from
+skylighting's style set — not from `data/templates`, so the BSD carve-out
+this repository vendors the template under does not reach it. Since
+2026-08-26 this writes **its own** 47 lines instead, under this project's
+licence, in the same place: appended to the same `<style>` element, after
+the default stylesheet, and only when the document holds a code block in
+a language the highlighter knows. That is exactly pandoc's condition,
+probed one shape at a time.
+
+The trade is stated rather than buried. A standalone page **with no
+highlighted code is byte-identical to pandoc's**, as it always was. One
+*with* highlighted code differed by 65 lines when the colours were
+missing and differs by **112** now that both sides have their own — and
+renders as highlighted code instead of as uncoloured spans.
+`samples/15-markdown-to-html-page` is that difference.
+
+Nine structural declarations coincide with pandoc's — `white-space:
+pre`, `display: inline-block`, the `:empty` height, `color: inherit`,
+`overflow: auto` and the two print rules. A `<span>` per line renders as
+lines only one way. Nothing with a colour in it is shared, and
+`crates/ferrodoc-html/styles/highlight.css` says so at the top.
 
 ### Syntax highlighting — C, Python, bash
 
