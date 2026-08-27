@@ -1562,6 +1562,65 @@ mod tests {
 
     use super::*;
 
+    /// **The preflight must not clone, and must still find every note.**
+    /// `has_note` reached the mutable walker through `blocks.to_vec()`
+    /// until 2026-08-27 — a full-tree allocation on every document,
+    /// including the ones with no note at all. These pin the answers the
+    /// immutable walk has to keep giving, in the places a shallow walk
+    /// would miss: inside an inline, inside a list, inside a table cell.
+    #[test]
+    fn the_footnote_preflight_finds_a_note_wherever_it_is() {
+        let note = || Inline::Note(vec![Block::Para(vec![Inline::Str("body".into())])]);
+        let para = |inline| Block::Para(vec![inline]);
+
+        assert!(!has_note(&[para(Inline::Str("plain".into()))]));
+        assert!(!has_note(&[]));
+        assert!(has_note(&[para(note())]));
+        // Inside an inline, which is where looking only at the top level
+        // of a run left one behind.
+        assert!(has_note(&[para(Inline::Emph(vec![note()]))]));
+        assert!(has_note(&[para(Inline::Link(
+            Box::default(),
+            vec![Inline::Strong(vec![note()])],
+            Box::new(ferrodoc_ast::Target { url: "u".into(), title: String::new() }),
+        ))]));
+        // Inside a block that holds blocks.
+        assert!(has_note(&[Block::BlockQuote(vec![para(note())])]));
+        assert!(has_note(&[Block::BulletList(vec![vec![para(note())]])]));
+    }
+
+    /// A note whose body holds a note is numbered after every note the
+    /// document itself holds, and the borrowed fast path must not swallow
+    /// it — the outer note is what makes the tree owned in the first place.
+    #[test]
+    fn a_note_inside_a_note_is_still_written() {
+        let inner = Inline::Note(vec![Block::Para(vec![Inline::Str("inner".into())])]);
+        let outer = Inline::Note(vec![Block::Para(vec![Inline::Str("outer".into()), inner])]);
+        let html = write_html(&Pandoc::new(vec![Block::Para(vec![outer])]));
+        assert!(html.contains("id=\"fn1\""), "{html}");
+        assert!(html.contains("id=\"fn2\""), "{html}");
+        assert!(html.contains("inner"), "{html}");
+    }
+
+    /// **One pass over the layout markers, and the same bytes.** `lay_out`
+    /// chained `String::replace` until 2026-08-27; these pin what each
+    /// wrap mode does with a `BREAK`, a `SOFT` and a `STOP`.
+    #[test]
+    fn each_wrap_mode_resolves_its_markers() {
+        let marked = format!("a{BREAK}b{SOFT}c{STOP}d");
+        // A `BREAK` becomes a space, a `SOFT` becomes a space or a
+        // newline by mode, and a `STOP` is **dropped** — so `c{STOP}d`
+        // closes up rather than gaining a space.
+        assert_eq!(lay_out(&marked, Wrap::None), "a b cd");
+        assert_eq!(lay_out(&marked, Wrap::Preserve), "a b\ncd");
+        // Nothing to resolve is the common case, and must come back whole.
+        assert_eq!(lay_out("plain text", Wrap::None), "plain text");
+        assert_eq!(lay_out("", Wrap::None), "");
+        // A marker at either end, where an off-by-one would show.
+        assert_eq!(lay_out(&format!("{BREAK}a{BREAK}"), Wrap::None), " a ");
+        assert_eq!(lay_out(&format!("{STOP}a{STOP}"), Wrap::Preserve), "a");
+    }
+
     /// The footnote section, with the two rules that are not guessable.
     ///
     /// Every line here is `pandoc -f json -t html --wrap=none` output,
