@@ -199,7 +199,7 @@ def sweep(writer, ours, theirs):
 # of variants and pandoc is pinned, so a number that falls here is always
 # a regression. Raise a floor when a fix lands; never lower one.
 FLOORS = {"markdown": 133, "commonmark": 131, "gfm": 129, "html": 135,
-          "latex": 117, "rst": 109, "asciidoc": 109, "plain": 131}
+          "latex": 117, "rst": 131, "asciidoc": 136, "plain": 131}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]

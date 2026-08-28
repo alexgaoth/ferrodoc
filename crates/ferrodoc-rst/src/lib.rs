@@ -363,23 +363,24 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
         Block::OrderedList(attrs, items) => {
             for (index, item) in items.iter().enumerate() {
                 let number = attrs.start + i64::try_from(index).unwrap_or(0);
-                let marker = match attrs.style {
-                    // RST's `#.` is auto-numbering; a literal marker is
-                    // what keeps a start value other than one.
-                    ListNumberStyle::LowerAlpha => format!("{}.", alpha(number, false)),
-                    ListNumberStyle::UpperAlpha => format!("{}.", alpha(number, true)),
-                    ListNumberStyle::LowerRoman => format!("{}.", roman(number, false)),
-                    ListNumberStyle::UpperRoman => format!("{}.", roman(number, true)),
-                    _ => format!("{number}."),
-                };
-                // The delimiter the list was written with. RST reads both
-                // `1.` and `1)`, and a list that said `)` comes back
-                // saying `.` unless this does.
-                let marker = match attrs.delim {
-                    ListNumberDelim::OneParen | ListNumberDelim::TwoParens => {
-                        marker.replace('.', ")")
+                // **`#.` is RST's auto-numbering**, and pandoc writes it
+                // for the list that asks for nothing — no style and no
+                // delimiter. Anything else gets a literal marker, which
+                // is also what keeps a start value other than one.
+                //
+                // The delimiter is the list's own: RST reads `1.`, `1)`
+                // and `(1)`, and all three came out as one before.
+                let marker = if attrs.style == ListNumberStyle::DefaultStyle
+                    && attrs.delim == ListNumberDelim::DefaultDelim
+                {
+                    "#.".to_owned()
+                } else {
+                    let label = attrs.style.label(number);
+                    match attrs.delim {
+                        ListNumberDelim::TwoParens => format!("({label})"),
+                        ListNumberDelim::OneParen => format!("{label})"),
+                        _ => format!("{label}."),
                     }
-                    _ => marker,
                 };
                 item_to(item, &marker, tight(items), out, def);
             }
@@ -436,7 +437,7 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
                 out.push_str(&indent(&text));
             }
         }
-        Block::Div(_, inner) => blocks(inner, out, def),
+        Block::Div(attr, inner) => container_to(attr, inner, out, def),
         Block::RawBlock(format, text) => raw_block_to(&format.0, text, out),
     }
 }
@@ -461,13 +462,39 @@ fn hard_broken_para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
 /// `.. raw:: html` is RST's way to carry another format's syntax through,
 /// and a toolchain that emits that format uses it. Dropping the block
 /// deleted every table and comment a converted page had.
+/// **A div is a `container` directive**, which is what pandoc's own RST
+/// reader reads back as a `Div`. Writing only the content dropped the
+/// grouping and every attribute on it — the classes become the
+/// directive's argument and the identifier its `:name:` option.
+fn container_to(attr: &ferrodoc_ast::Attr, inner: &[Block], out: &mut String, def: &mut Defs) {
+            let argument = attr.classes.join(" ");
+            let _ = writeln!(out, "{}", format!(".. container:: {argument}").trim_end());
+            if !attr.identifier.is_empty() {
+                let _ = writeln!(out, "{INDENT}:name: {}", attr.identifier);
+            }
+            out.push('\n');
+            let mut body = String::new();
+            blocks(inner, &mut body, def);
+            for line in body.trim_end().lines() {
+                if line.is_empty() {
+                    out.push('\n');
+                } else {
+                    let _ = writeln!(out, "{INDENT}{line}");
+                }
+            }
+}
+
 fn raw_block_to(format: &str, text: &str, out: &mut String) {
     if format == "rst" {
         out.push_str(text);
         out.push('\n');
         return;
     }
-    let _ = writeln!(out, ".. raw:: {format}\n");
+    // **`tex` is spelled `latex` in a directive.** Pandoc names the raw
+    // block `tex` in its AST and writes `.. raw:: latex`, which is the
+    // name docutils knows; `.. raw:: tex` is a format nothing handles.
+    let named = if format == "tex" { "latex" } else { format };
+    let _ = writeln!(out, ".. raw:: {named}\n");
     for line in text.lines() {
         if line.is_empty() {
             out.push('\n');
@@ -529,6 +556,25 @@ fn indent(text: &str) -> String {
 /// A grid table, because it is the only RST table that can hold a cell
 /// with more than one line in it.
 fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
+    // **A caption makes the whole table a `table` directive**, with the
+    // caption as its argument and the grid indented under it. Written
+    // without one the caption simply vanished.
+    if !table.caption.blocks.is_empty() {
+        let mut caption = String::new();
+        blocks(&table.caption.blocks, &mut caption, def);
+        let _ = writeln!(out, ".. table:: {}\n", trimmed(&caption.replace('\n', " ")));
+        let mut body = String::new();
+        let bare = Table { caption: ferrodoc_ast::Caption::default(), ..table.clone() };
+        table_to(&bare, &mut body, def);
+        for line in body.trim_end().lines() {
+            if line.is_empty() {
+                out.push('\n');
+            } else {
+                let _ = writeln!(out, "{INDENT}{line}");
+            }
+        }
+        return;
+    }
     if simple_enough(table) {
         simple_table_to(table, out, def);
         return;
@@ -610,8 +656,20 @@ fn simple_enough(table: &Table) -> bool {
 /// the last padded to its column and one space between.
 fn simple_table_to(table: &Table, out: &mut String, def: &mut Defs) {
     let columns = table.colspecs.len();
-    let head: Vec<Vec<String>> =
-        table.head.rows.iter().map(|row| simple_cells(row, columns, def)).collect();
+    // **A header row of nothing but empty cells is not a header** — the
+    // same rule the HTML writer and the markdown simple table follow.
+    // Kept, it wrote an escaped `\ ` row and widened every column to
+    // hold it; pandoc writes the body alone.
+    let head: Vec<Vec<String>> = table
+        .head
+        .rows
+        .iter()
+        // Asked **before** `simple_cells`, which fills an empty leading
+        // cell with `\ ` to stop the row reading as a continuation — so
+        // by then no row looks empty any more.
+        .filter(|row| row.cells.iter().any(|cell| !cell.blocks.is_empty()))
+        .map(|row| simple_cells(row, columns, def))
+        .collect();
     let body: Vec<Vec<String>> = table
         .bodies
         .iter()
@@ -780,12 +838,14 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
         // text. `COMPATIBILITY.md` records the loss.
         Inline::SoftBreak => out.push(SOFT),
         Inline::LineBreak => out.push('\n'),
-        Inline::Emph(inner) => wrap("*", inner, out, def),
-        // RST has no underline and no small caps; both keep their content
-        // rather than inventing a role a toolchain would not have. A
-        // citation and a span are their content for the same reason.
-        Inline::Underline(inner)
-        | Inline::SmallCaps(inner)
+        // **An underline is written as emphasis**, which is what pandoc
+        // does: RST has no underline role, and dropping to bare content
+        // lost the markup where `*x*` keeps something a reader sees.
+        Inline::Emph(inner) | Inline::Underline(inner) => wrap("*", inner, out, def),
+        // RST has no small caps; it keeps its content rather than
+        // inventing a role a toolchain would not have. A citation and a
+        // span are their content for the same reason.
+        Inline::SmallCaps(inner)
         | Inline::Cite(_, inner)
         | Inline::Span(_, inner) => inlines(inner, out, def),
         // Strikeout has no RST markup either, and pandoc spells it
@@ -797,8 +857,11 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             out.push(']');
         }
         Inline::Strong(inner) => wrap("**", inner, out, def),
-        Inline::Superscript(inner) => role("superscript", inner, out, def),
-        Inline::Subscript(inner) => role("subscript", inner, out, def),
+        // **`sup` and `sub`, not the long spellings.** Both are standard
+        // roles and pandoc writes the short ones; docutils accepts
+        // either, so nothing rendered wrongly and no gate could see it.
+        Inline::Superscript(inner) => role("sup", inner, out, def),
+        Inline::Subscript(inner) => role("sub", inner, out, def),
         Inline::Quoted(kind, inner) => {
             let (open, close) = match kind {
                 QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
@@ -830,8 +893,13 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             let _ = write!(out, ":math:`{math}`");
         }
         Inline::RawInline(format, text) => {
+            // **RST can carry raw LaTeX**, through the `raw-latex` role
+            // its own reader gives back; anything else has no home and
+            // is dropped rather than written as prose.
             if format.0 == "rst" {
                 out.push_str(text);
+            } else if format.0 == "tex" || format.0 == "latex" {
+                let _ = write!(out, ":raw-latex:`{text}`");
             }
         }
         Inline::Link(_, inner, target) => {
@@ -1056,40 +1124,6 @@ fn escape(text: &str) -> String {
         previous = Some(ch);
     }
     out
-}
-
-/// `a`, `b`, … `z`, `aa`, … for an alphabetic list marker.
-fn alpha(mut number: i64, upper: bool) -> String {
-    if number < 1 {
-        return String::from("a");
-    }
-    let base = if upper { b'A' } else { b'a' };
-    let mut out = Vec::new();
-    while number > 0 {
-        let digit = u8::try_from((number - 1) % 26).unwrap_or(0);
-        out.push(base + digit);
-        number = (number - 1) / 26;
-    }
-    out.reverse();
-    String::from_utf8(out).unwrap_or_else(|_| String::from("a"))
-}
-
-/// Roman numerals, for the list styles that ask for them.
-fn roman(number: i64, upper: bool) -> String {
-    const VALUES: &[(i64, &str)] = &[
-        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
-        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
-        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
-    ];
-    let mut remaining = number.max(1);
-    let mut out = String::new();
-    for (value, numeral) in VALUES {
-        while remaining >= *value {
-            out.push_str(numeral);
-            remaining -= value;
-        }
-    }
-    if upper { out.to_uppercase() } else { out }
 }
 
 #[cfg(test)]

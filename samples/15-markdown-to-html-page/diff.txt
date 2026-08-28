@@ -1,5 +1,5 @@
---- samples/15-markdown-to-html-page/pandoc.html	2026-08-27 21:17:02.349086323 -0700
-+++ samples/15-markdown-to-html-page/ferrodoc.html	2026-08-27 21:17:02.249086500 -0700
+--- samples/15-markdown-to-html-page/pandoc.html	2026-08-28 10:28:29.303928573 -0700
++++ samples/15-markdown-to-html-page/ferrodoc.html	2026-08-28 10:28:29.191928694 -0700
 @@ -169,71 +169,66 @@
        vertical-align: middle;
      }

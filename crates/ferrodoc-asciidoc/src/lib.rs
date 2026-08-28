@@ -199,12 +199,32 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
             let mut text = String::new();
             inlines(list, &mut text);
             let text = text.trim_end();
-            // A paragraph opening with `[` would be read as a block
-            // attribute line — `[line-through]#struck#` at the start of
-            // one is an attribute list, not markup. `{empty}` is the
-            // no-width attribute that stops that, and it is what pandoc
-            // writes.
-            if text.starts_with('[') {
+            // **`{empty}` guards two shapes, and pandoc's rule for the
+            // second is a quirk rather than a reason.**
+            //
+            // A line that would open a list is the plain case: `1. x` at
+            // the start of a paragraph is an ordered item, and the
+            // no-width attribute stops it being read as one.
+            //
+            // A leading `[` is guarded **only when the paragraph also
+            // holds a footnote**. That is not a rule anyone would design
+            // — the two have nothing to do with each other — but it is
+            // what the binary does, measured five ways round:
+            //
+            // ```text
+            // [line-through]#x#                 bare
+            // [line-through]#x# and             bare
+            // [line-through]#x# + a footnote    {empty}
+            // text + a footnote                 bare
+            // _emph_ + a footnote               bare
+            // ```
+            //
+            // This wrote `{empty}` for every leading `[` until
+            // 2026-08-28, which cost four constructs in the AST sweep;
+            // dropping it entirely cost `samples/09-markdown-to-asciidoc`
+            // its byte identity, and that sample is the reason the shape
+            // above got measured at all.
+            if opens_a_list(text) || (text.starts_with('[') && holds_a_note(list)) {
                 out.push_str("{empty}");
             }
             let _ = writeln!(out, "{text}");
@@ -220,35 +240,27 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
             }
             out.push_str("--\n");
         }
-        Block::CodeBlock(attr, code) => {
-            // A **listing** (`----`) when the block names a language and a
-            // **literal** block (`....`) when it does not. Pandoc's
-            // choice: `[source,py]` needs a listing to apply to, and a
-            // block with nothing to highlight is verbatim text.
-            let language = attr.classes.iter().find(|class| class.as_str() != "sourceCode");
-            let delimiter = if let Some(language) = language {
-                let _ = writeln!(out, "[source,{language}]");
-                '-'
-            } else {
-                '.'
-            };
-            let fence = fence_for(code, delimiter);
-            let _ = writeln!(out, "{fence}\n{}\n{fence}", code.trim_end());
-        }
+        Block::CodeBlock(attr, code) => code_block_to(attr, code, out),
         Block::BlockQuote(inner) => quote_to(inner, out, depth),
         Block::OrderedList(attrs, items) => {
             // The marker's *length* is the nesting depth, which is how
             // a nested list is spelled here.
             let marker = ".".repeat(depth.ordered + 1);
             let depth = Depth { ordered: depth.ordered + 1, ..depth };
-            // **One attribute line, always.** `arabic` is not a default
-            // that can be left out — pandoc names the style on every
-            // ordered list — and a start value goes in the same brackets.
+            // **A list that names no style gets no attribute line.**
+            // `arabic` is the default, and pandoc writes it only where
+            // the list actually asked for a numbering — `Example` and
+            // `DefaultStyle` ask for none. A start value always needs
+            // the brackets, so it brings the style back with it.
             let style = number_style(attrs.style);
-            if attrs.start == 1 {
-                let _ = writeln!(out, "[{style}]");
-            } else {
-                let _ = writeln!(out, "[{style}, start={}]", attrs.start);
+            match (style, attrs.start) {
+                (None, 1) => {}
+                (style, 1) => {
+                    let _ = writeln!(out, "[{}]", style.unwrap_or("arabic"));
+                }
+                (style, start) => {
+                    let _ = writeln!(out, "[{}, start={start}]", style.unwrap_or("arabic"));
+                }
             }
             for item in items {
                 item_to(item, &marker, out, depth);
@@ -266,7 +278,13 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
                 let mut text = String::new();
                 inlines(term, &mut text);
                 let _ = writeln!(out, "{}::", text.trim());
-                for definition in definitions {
+                // **A `+` joins one definition to the next.** Without
+                // it the second is a new paragraph outside the term, and
+                // two definitions read as one.
+                for (index, definition) in definitions.iter().enumerate() {
+                    if index > 0 {
+                        let _ = writeln!(out, "  +");
+                    }
                     let mut body = String::new();
                     blocks(definition, &mut body, depth);
                     for line in body.trim_end().lines() {
@@ -275,41 +293,8 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
                 }
             }
         }
-        Block::Header(level, attr, list) => {
-            let mut text = String::new();
-            inlines(list, &mut text);
-            // An explicit anchor only where the identifier says something
-            // the heading's own text does not. AsciiDoc derives one from
-            // the title, so writing `[[a-heading]]` above `=== A heading`
-            // is a name for a name it already had.
-            //
-            // The `-1`, `-2` tail is what pandoc's own uniquing adds to a
-            // repeated heading, and it is automatic in the same sense.
-            // Matching the shape rather than replaying the uniquing is an
-            // approximation, and the one document it gets wrong is a
-            // heading given `{#intro-1}` by hand whose text slugs to
-            // `intro` — it would lose an anchor for a name AsciiDoc
-            // derives anyway.
-            let stem = slug(&plain_text(list));
-            let automatic = attr.identifier == stem
-                || attr
-                    .identifier
-                    .strip_prefix(&stem)
-                    .and_then(|tail| tail.strip_prefix('-'))
-                    .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
-            if !attr.identifier.is_empty() && !automatic {
-                let _ = writeln!(out, "[[{}]]", attr.identifier);
-            }
-            // Levels start at `==`: `=` is the document title and may
-            // appear only once, so a document with two level-1 headings
-            // would be invalid.
-            let marks = "=".repeat(usize::try_from(*level).unwrap_or(1).clamp(1, 5) + 1);
-            // **A heading is never filled.** Pandoc keeps one on a single
-            // line however narrow the column; a heading broken in two
-            // reads as a heading and a paragraph.
-            let _ = writeln!(out, "{marks} {}", text.trim().replace([BREAK, SOFT], " "));
-        }
-        // Five quotes, which is what pandoc writes. Three is a valid
+        Block::Header(level, attr, list) => header_to(*level, attr, list, out),
+        // Five quotes        // Five quotes, which is what pandoc writes. Three is a valid
         // break too; the bytes are the test.
         Block::HorizontalRule => out.push_str("'''''\n"),
         Block::Table(table) => table_to(table, out),
@@ -319,9 +304,21 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
                 blocks(&caption.blocks, &mut text, depth);
                 let _ = writeln!(out, ".{}", text.trim().replace('\n', " "));
             }
+            // **A figure's picture is a block image**, `image::` with
+            // two colons; `image:` is the inline form and renders in a
+            // paragraph rather than as a figure.
+            let mut body = String::new();
+            blocks(inner, &mut body, depth);
+            out.push_str(&body.replacen("image:", "image::", 1));
+        }
+        // AsciiDoc has no grouping block, so a div is its content — but
+        // an identifier on it is an anchor, and pandoc keeps that.
+        Block::Div(attr, inner) => {
+            if !attr.identifier.is_empty() {
+                let _ = writeln!(out, "[[{}]]", attr.identifier);
+            }
             blocks(inner, out, depth);
         }
-        Block::Div(_, inner) => blocks(inner, out, depth),
         Block::RawBlock(format, text) => {
             if format.0 == "asciidoc" {
                 out.push_str(text);
@@ -415,14 +412,136 @@ fn fence_for(content: &str, ch: char) -> String {
 
 /// The list-style attribute a numbering calls for, or `None` for the
 /// arabic default.
-fn number_style(style: ListNumberStyle) -> &'static str {
+fn number_style(style: ListNumberStyle) -> Option<&'static str> {
     match style {
-        ListNumberStyle::LowerAlpha => "loweralpha",
-        ListNumberStyle::UpperAlpha => "upperalpha",
-        ListNumberStyle::LowerRoman => "lowerroman",
-        ListNumberStyle::UpperRoman => "upperroman",
-        _ => "arabic",
+        ListNumberStyle::LowerAlpha => Some("loweralpha"),
+        ListNumberStyle::UpperAlpha => Some("upperalpha"),
+        ListNumberStyle::LowerRoman => Some("lowerroman"),
+        ListNumberStyle::UpperRoman => Some("upperroman"),
+        ListNumberStyle::Decimal => Some("arabic"),
+        ListNumberStyle::Example | ListNumberStyle::DefaultStyle => None,
     }
+}
+
+/// Whether any inline in `list` is a footnote, however deeply nested.
+fn holds_a_note(list: &[Inline]) -> bool {
+    list.iter().any(|inline| match inline {
+        Inline::Note(_) => true,
+        Inline::Emph(inner)
+        | Inline::Strong(inner)
+        | Inline::Strikeout(inner)
+        | Inline::Superscript(inner)
+        | Inline::Subscript(inner)
+        | Inline::SmallCaps(inner)
+        | Inline::Underline(inner)
+        | Inline::Quoted(_, inner)
+        | Inline::Cite(_, inner)
+        | Inline::Span(_, inner)
+        | Inline::Link(_, inner, _)
+        | Inline::Image(_, inner, _) => holds_a_note(inner),
+        _ => false,
+    })
+}
+
+/// Whether a paragraph's first line would open a list where it stands.
+///
+/// `AsciiDoc` reads `1. x`, `1) x` and `2. x` as ordered items, so a
+/// paragraph that begins with one needs `{empty}` in front of it.
+fn opens_a_list(text: &str) -> bool {
+    let line = text.lines().next().unwrap_or_default();
+    let digits = line.chars().take_while(char::is_ascii_digit).count();
+    digits > 0
+        && line[digits..].starts_with(['.', ')'])
+        // **A break opportunity is still `BREAK` here** — it becomes a
+        // space only when the line is laid out — so the marker's space
+        // has two spellings and this must accept both. Asking for `' '`
+        // alone matched nothing at all.
+        && line[digits + 1..].starts_with([' ', BREAK])
+}
+
+/// A heading, with an explicit anchor only where the identifier says
+/// something the heading's own text does not.
+fn header_to(level: i64, attr: &ferrodoc_ast::Attr, list: &[Inline], out: &mut String) {
+    let level = &level;
+            let mut text = String::new();
+            inlines(list, &mut text);
+            // An explicit anchor only where the identifier says something
+            // the heading's own text does not. AsciiDoc derives one from
+            // the title, so writing `[[a-heading]]` above `=== A heading`
+            // is a name for a name it already had.
+            //
+            // The `-1`, `-2` tail is what pandoc's own uniquing adds to a
+            // repeated heading, and it is automatic in the same sense.
+            // Matching the shape rather than replaying the uniquing is an
+            // approximation, and the one document it gets wrong is a
+            // heading given `{#intro-1}` by hand whose text slugs to
+            // `intro` — it would lose an anchor for a name AsciiDoc
+            // derives anyway.
+            let stem = slug(&plain_text(list));
+            let automatic = attr.identifier == stem
+                || attr
+                    .identifier
+                    .strip_prefix(&stem)
+                    .and_then(|tail| tail.strip_prefix('-'))
+                    .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+            if !attr.identifier.is_empty() && !automatic {
+                let _ = writeln!(out, "[[{}]]", attr.identifier);
+            }
+            // Levels start at `==`: `=` is the document title and may
+            // appear only once, so a document with two level-1 headings
+            // would be invalid.
+            // A level-6 heading is `=======`, seven marks: pandoc does
+            // not stop at six, and clamping there merged levels 5 and 6.
+            let marks = "=".repeat(usize::try_from(*level).unwrap_or(1).clamp(1, 6) + 1);
+            // **A heading is never filled.** Pandoc keeps one on a single
+            // line however narrow the column; a heading broken in two
+            // reads as a heading and a paragraph.
+            let _ = writeln!(out, "{marks} {}", text.trim().replace([BREAK, SOFT], " "));
+}
+
+/// `[#id .class]#text#`, the attribute-carrying span.
+fn span_to(attr: &ferrodoc_ast::Attr, inner: &[Inline], out: &mut String) {
+            out.push('[');
+            if !attr.identifier.is_empty() {
+                let _ = write!(out, "#{}", attr.identifier);
+            }
+            for class in &attr.classes {
+                if !out.ends_with('[') {
+                    out.push(' ');
+                }
+                let _ = write!(out, ".{class}");
+            }
+            out.push_str("]#");
+            inlines(inner, out);
+            out.push('#');
+}
+
+/// A **listing** (`----`) when the block names a language and a
+/// **literal** block (`....`) when it does not.
+fn code_block_to(attr: &ferrodoc_ast::Attr, code: &str, out: &mut String) {
+            // A **listing** (`----`) when the block names a language and a
+            // **literal** block (`....`) when it does not. Pandoc's
+            // choice: `[source,py]` needs a listing to apply to, and a
+            // block with nothing to highlight is verbatim text.
+            // **Every class, in order, after `source`** — `sourceCode`
+            // included, which this dropped: pandoc writes
+            // `[source,sourceCode,bash]`, and a block classed only
+            // `sourceCode` is still a listing, not a literal block.
+            let delimiter = if attr.classes.is_empty() {
+                '.'
+            } else {
+                let _ = writeln!(out, "[source,{}]", attr.classes.join(","));
+                '-'
+            };
+            let fence = fence_for(code, delimiter);
+            // **Empty content writes no line at all**, where trimming and
+            // then writing left a blank one between the two fences.
+            let body = code.trim_end();
+            if body.is_empty() {
+                let _ = writeln!(out, "{fence}\n{fence}");
+            } else {
+                let _ = writeln!(out, "{fence}\n{body}\n{fence}");
+            }
 }
 
 fn table_to(table: &Table, out: &mut String) {
@@ -465,7 +584,16 @@ fn table_to(table: &Table, out: &mut String) {
         out.push_str("width=\"100%\",");
     }
     let _ = write!(out, "cols=\"{}\",", cols.join(","));
-    if !table.head.rows.is_empty() {
+    // **A header row of nothing but empty cells is not a header** — the
+    // same rule the HTML, RST and markdown writers follow. Kept, it
+    // claimed `options="header"` and wrote a row of bare pipes that
+    // AsciiDoc renders as an empty heading band.
+    let header = table
+        .head
+        .rows
+        .iter()
+        .any(|row| row.cells.iter().any(|cell| !cell.blocks.is_empty()));
+    if header {
         out.push_str("options=\"header\",");
     }
     out.push_str("]\n");
@@ -474,6 +602,7 @@ fn table_to(table: &Table, out: &mut String) {
         .head
         .rows
         .iter()
+        .filter(|_| header)
         .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
         .chain(table.foot.rows.iter())
     {
@@ -603,18 +732,26 @@ fn inline_to(inline: &Inline, out: &mut String) {
 
         Inline::Superscript(inner) => wrap("^", "^", inner, out),
         Inline::Subscript(inner) => wrap("~", "~", inner, out),
+        // **AsciiDoc has a curly-quote spelling**, and pandoc uses it:
+        // `'`x`'` and `"`x`"`. Writing the characters themselves was
+        // legible but not what a toolchain reads back as a quote.
         Inline::Quoted(kind, inner) => {
             let (open, close) = match kind {
-                QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
-                QuoteType::DoubleQuote => ('\u{201c}', '\u{201d}'),
+                QuoteType::SingleQuote => ("'`", "`'"),
+                QuoteType::DoubleQuote => ("\"`", "`\""),
             };
-            out.push(open);
+            out.push_str(open);
             inlines(inner, out);
-            out.push(close);
+            out.push_str(close);
         }
         // Pandoc has no small-caps spelling here and writes the content;
         // `[.smallcaps]` is a role `AsciiDoc` does not define. A citation
         // and a span are their content for the same reason.
+        // **A span carrying attributes is `[#id .class]#text#`.** One
+        // carrying none is its content, as a citation and small caps are.
+        Inline::Span(attr, inner) if !attr.identifier.is_empty() || !attr.classes.is_empty() => {
+            span_to(attr, inner, out);
+        }
         Inline::SmallCaps(inner) | Inline::Cite(_, inner) | Inline::Span(_, inner) => {
             inlines(inner, out);
         }
