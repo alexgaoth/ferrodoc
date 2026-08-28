@@ -197,7 +197,7 @@ if [ "$want_gates" = 1 ]; then
     # layer — see corpus/epub-spec/generate.sh. Retired as a published
     # figure for that reason; kept as a regression check, because a *drop*
     # here is real even though the level is not a claim.
-    gate "EPUB reader (spec chunks, not a claim)" \
+    gate "EPUB spec monitor (malformed XHTML recovery)" \
         $HARNESS diff-epub corpus/epub-spec --fail-under 50
     # Notebooks in the shape Jupyter and Colab write them — nbformat
     # 4.5 with cell ids, streams, execute_results, a base64 `image/png`
@@ -280,6 +280,12 @@ if [ "$want_gates" = 1 ]; then
     # byte-identical and is not any more, which is a regression rather
     # than a range. 1 s.
     gate "text writers vs pandoc's" ./scripts/writers.sh --floors
+    # **The corpus-free gate.** Every other differential score here is
+    # over documents somebody wrote, so it can only fail on constructs
+    # those documents contain; this one walks the AST, which is a finite
+    # set of variants and therefore has no blind spot. It found the
+    # `plain` writer at 104/137 while it scored 38/40 on documents.
+    gate "every AST construct vs pandoc" ./scripts/ast-sweep.sh --floors
     # And the binary writers, which have no bytes worth comparing: the
     # judge is what pandoc reads back out of them. `corpus/docx` and
     # friends are **pandoc's own output**, so no gate here could see a

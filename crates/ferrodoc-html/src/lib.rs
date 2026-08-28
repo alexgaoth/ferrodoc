@@ -877,7 +877,13 @@ fn write_block(out: &mut String, block: &Block, ctx: &Ctx) {
             if attrs.start != 1 {
                 let _ = write!(out, "{BREAK}start=\"{}\"", attrs.start);
             }
-            if let Some(t) = list_type(attrs.style) {
+            // **An example list says so**, and takes `type="1"` with it
+            // where a plain decimal list takes neither. The order is
+            // `start`, then the class, then the type — measured with a
+            // start of 5, which is the only way to see it.
+            if attrs.style == ListNumberStyle::Example {
+                let _ = write!(out, "{BREAK}class=\"example\"{BREAK}type=\"1\"");
+            } else if let Some(t) = list_type(attrs.style) {
                 let _ = write!(out, "{BREAK}type=\"{t}\"");
             }
             out.push_str(">\n");
@@ -996,7 +1002,13 @@ fn write_div(out: &mut String, attr: &Attr, blocks: &[Block], ctx: &Ctx) {
 /// knows, and otherwise exactly the `<pre class="…"><code>` this wrote
 /// before there was a highlighter at all.
 fn write_code_block(out: &mut String, attr: &Attr, text: &str, ctx: &Ctx) {
-    let number = ctx.next_block();
+    // **A block carrying its own identifier does not take a number.**
+    // Pandoc names the wrapper `<div>` after the block's own id and
+    // leaves the counter where it was, so every *later* block here was
+    // numbered one too high — output for the identified block itself is
+    // identical either way, which is why no gate saw it. Found by the
+    // AST sweep, where a `cb8` came back as `cb9`.
+    let number = if attr.identifier.is_empty() { ctx.next_block() } else { 0 };
     #[cfg(feature = "highlight")]
     if let Some(language) = attr
         .classes
@@ -1353,6 +1365,33 @@ fn write_inlines(out: &mut String, inlines: &[Inline]) {
     }
 }
 
+/// A code span, whose attributes are spelled unlike every other
+/// element's — see the comment inside.
+fn write_code_span(out: &mut String, attr: &Attr, text: &str) {
+            out.push_str("<code");
+            // **A code span carrying any class is `sourceCode` first**,
+            // and its class attribute is written *before* the id — the
+            // reverse of every other element here. With no class at all
+            // the ordinary order applies. Measured one attribute set at
+            // a time; `["c"]` is `class="sourceCode c"`.
+            if attr.classes.is_empty() {
+                write_attr(out, attr);
+            } else {
+                let mut classes = vec!["sourceCode".to_owned()];
+                classes.extend(attr.classes.iter().cloned());
+                let listed =
+                    Attr { classes, identifier: String::new(), attributes: Vec::new() };
+                write_classes(out, &listed);
+                write_id(out, attr);
+                for (key, value) in &attr.attributes {
+                    write_kv(out, key, value);
+                }
+            }
+            out.push('>');
+            escape_text(out, text);
+            out.push_str("</code>");
+}
+
 fn write_inline(out: &mut String, inline: &Inline) {
     match inline {
         Inline::Str(s) => escape_text(out, s),
@@ -1380,13 +1419,7 @@ fn write_inline(out: &mut String, inline: &Inline) {
             write_inlines(out, inner);
             out.push(close);
         }
-        Inline::Code(attr, text) => {
-            out.push_str("<code");
-            write_attr(out, attr);
-            out.push('>');
-            escape_text(out, text);
-            out.push_str("</code>");
-        }
+        Inline::Code(attr, text) => write_code_span(out, attr, text),
         Inline::Math(math_type, text) => {
             use ferrodoc_ast::MathType;
             let (class, open, close) = match math_type {
@@ -1450,7 +1483,19 @@ fn write_inline(out: &mut String, inline: &Inline) {
             write_inlines(out, inner);
             out.push_str("</span>");
         }
-        Inline::Cite(_, inner) => write_inlines(out, inner),
+        // A citation keeps the keys it stands for, space-separated, so a
+        // bibliography filter downstream can still find them. Pandoc
+        // writes them whether or not it resolved the citation.
+        Inline::Cite(citations, inner) => {
+            let keys = citations
+                .iter()
+                .map(|c| c.citation_id.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let _ = write!(out, "<span class=\"citation\"{BREAK}data-cites=\"{keys}\">");
+            write_inlines(out, inner);
+            out.push_str("</span>");
+        }
         Inline::Note(_) => {}
     }
 }
