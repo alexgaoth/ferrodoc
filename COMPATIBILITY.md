@@ -105,12 +105,39 @@ switches the bullet from `-` to `*`, which adds no block.
     # ['BulletList', 'RawBlock', 'BulletList'] — two blocks in, three out
 
 **2 and 3. A code block that opens a blockquote or a list item.** It
-comes back a paragraph.
+comes back a paragraph, and **both** of pandoc's markdown writers lose
+it — the dialect one as well as `commonmark`, so taking the name
+`markdown` did not change the answer.
 
     printf '> ```\n> code\n> ```\n' > /tmp/t.md
-    pandoc /tmp/t.md -f commonmark -t commonmark | pandoc -f commonmark -t json |
-      python3 -c 'import json,sys; print(json.load(sys.stdin)["blocks"][0]["c"][0]["t"])'
-    # Para — a CodeBlock went in
+    for w in commonmark markdown; do
+      pandoc /tmp/t.md -f commonmark -t $w | pandoc -f $w -t json |
+        python3 -c 'import json,sys; print(json.load(sys.stdin)["blocks"][0]["c"][0]["t"])'
+    done
+    # Para
+    # Para — a CodeBlock went in both times
+
+This writer indents such a block instead, which costs a byte comparison
+and keeps the document: `ferrodoc -t markdown` on the same input gives
+`>     code`, and **pandoc's own reader** reads that back as the
+`CodeBlock` that went in.
+
+**5. A code block whose content ends in a newline.** Pandoc writes the
+content `x\n` as plain `x` and reads it back as `x`, so the newline does
+not survive its own round trip. This writes the blank line that carries
+it, which is why the two differ on any document holding a fence left
+unclosed at EOF.
+
+    printf '{"pandoc-api-version":[1,23,1],"meta":{},"blocks":[{"t":"CodeBlock","c":[["",["text"],[]],"x\\n"]}]}' > /tmp/t.json
+    pandoc /tmp/t.json -f json -t markdown | pandoc -f markdown -t json |
+      python3 -c 'import json,sys; print(repr(json.load(sys.stdin)["blocks"][0]["c"][1]))'
+    # 'x' — 'x\n' went in
+
+The scale of it is on the gate's own first line: **pandoc round-trips
+593 of the 652 CommonMark spec documents, and this writer round-trips
+652.** `./target/release/ferrodoc-harness diff-md
+corpus/commonmark-spec-0.31.2.json` prints both numbers together, which
+is the only honest way to read either.
 
 **4. A pipe inside a table cell.** Pandoc writes `` `x|y` `` unescaped,
 and its own reader then splits the row at that pipe, taking the code span
@@ -1371,7 +1398,7 @@ directly without asking its reader to survive anything.
 | `asciidoc` | **38/40** | 38 |
 | `gfm` | 28/40 | 28 |
 | `commonmark` | 29/40 | 29 |
-| `markdown` | **23/40** | 23 |
+| `markdown` | **25/40** | 25 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill

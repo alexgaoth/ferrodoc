@@ -420,8 +420,22 @@ impl Writer {
             .find(|class| class.as_str() != "sourceCode")
             .map_or(String::new(), |class| format!(" {class}"));
         push_line(out, prefix, &format!("{fence}{info}"));
-        for line in text.split('\n') {
-            push_line(out, prefix, line);
+        // **Empty content writes no line at all** — `"".split('\n')` is
+        // one empty element, so this wrote a blank line where pandoc
+        // writes two adjacent fences, and read its own output back as
+        // `"\n"`.
+        //
+        // The trailing newline is **deliberately not stripped**, though
+        // pandoc strips it. `pandoc -f json -t markdown` writes the
+        // content `x\n` as plain `x`, and reads that back as `x`: the
+        // newline is gone. Matching those bytes costs a round trip that
+        // works today, so this keeps the blank line and takes the
+        // difference — COMPATIBILITY.md records it beside the other
+        // places pandoc's own output does not survive its own reader.
+        if !text.is_empty() {
+            for line in text.split('\n') {
+                push_line(out, prefix, line);
+            }
         }
         push_line(out, prefix, &fence);
             
@@ -1440,11 +1454,14 @@ fn escape_text_inner(
         let next = chars.peek().copied();
         let after_bang = std::mem::take(&mut escaped_bang);
         let at_line_start = out.is_empty() || out.ends_with('\n');
-        // **Four characters pandoc's dialect escapes and `CommonMark`
+        // **Five characters pandoc's dialect escapes and `CommonMark`
         // does not**, because its own reader would otherwise read them as
-        // a quote, a subscript or a table: `'`, `"`, `~` and `|`. The
-        // pipe escapes *everywhere*, not only in a table — `a | b` in an
-        // ordinary paragraph comes back `a \| b`. Probed one at a time.
+        // a quote, a subscript, a superscript or a table: `'`, `"`, `~`,
+        // `^` and `|`. The pipe escapes *everywhere*, not only in a
+        // table — `a | b` in an ordinary paragraph comes back `a \| b` —
+        // and so do the two script markers: `2^n` is `2\^n` in the
+        // middle of a word, with no closing `^` anywhere. Probed one at
+        // a time.
         // **The un-smartening writes its dashes unescaped**, and a
         // literal one is escaped — which is the whole reason these two
         // decisions have to be made in the same pass. Substituting first
@@ -1457,7 +1474,7 @@ fn escape_text_inner(
             });
             continue;
         }
-        if pandoc && matches!(ch, '\'' | '"' | '~' | '|') {
+        if pandoc && matches!(ch, '\'' | '"' | '~' | '^' | '|') {
             out.push('\\');
             out.push(ch);
             continue;
@@ -1813,6 +1830,54 @@ mod tests {
         assert_eq!(block("   ````"), "````` bash\n   ````\n`````\n");
         assert_eq!(block("```` "), "````` bash\n```` \n`````\n");
         assert_eq!(block("\t````"), "````` bash\n\t````\n`````\n");
+    }
+
+    /// **Empty content writes no line at all**, where `"".split('\n')`
+    /// gave one and the block read back as `"\n"`.
+    ///
+    /// The trailing newline stays, and this is the rare place the bytes
+    /// are knowingly not pandoc's: it writes `x\n` as plain `x` and reads
+    /// that back as `x`, losing the newline, so copying it would trade a
+    /// round trip that works for a byte comparison that does not matter.
+    #[test]
+    fn a_fence_keeps_its_trailing_newline_but_writes_nothing_for_empty() {
+        let block = |body: &str| {
+            let attr = ferrodoc_ast::Attr {
+                identifier: String::new(),
+                classes: vec!["text".to_owned()],
+                attributes: Vec::new(),
+            };
+            write_pandoc_markdown(&Pandoc::new(vec![Block::CodeBlock(attr, body.to_owned())]))
+        };
+        assert_eq!(block(""), "``` text\n```\n");
+        assert_eq!(block("x"), "``` text\nx\n```\n");
+        // Pandoc writes these two the same as `x`. Each blank line here
+        // is a newline that survives the trip back.
+        assert_eq!(block("x\n"), "``` text\nx\n\n```\n");
+        assert_eq!(block("x\n\n"), "``` text\nx\n\n\n```\n");
+    }
+
+    /// **The five characters pandoc's dialect escapes and `CommonMark`
+    /// does not**, each probed against `pandoc -f json -t markdown` on a
+    /// one-`Str` paragraph. Four were here from the start; `^` was not,
+    /// and the only thing in the corpus that could see it was a `2^n`
+    /// written into `docs/divergences.md` as prose — one reword away
+    /// from covering nothing.
+    #[test]
+    fn the_dialect_escapes_five_characters_commonmark_leaves_alone() {
+        let para = |text: &str| {
+            let doc = Pandoc::new(vec![Block::Para(vec![Inline::Str(text.to_owned())])]);
+            write_pandoc_markdown(&doc)
+        };
+        assert_eq!(para("a'b"), "a\\'b\n");
+        assert_eq!(para("a\"b"), "a\\\"b\n");
+        assert_eq!(para("a|b"), "a\\|b\n");
+        assert_eq!(para("a^b"), "a\\^b\n");
+        assert_eq!(para("a~b"), "a\\~b\n");
+        // And `CommonMark` leaves every one of them alone.
+        assert_eq!(write_markdown(&Pandoc::new(vec![Block::Para(vec![
+            Inline::Str("a'b\"c|d^e~f".to_owned())
+        ])])), "a'b\"c|d^e~f\n");
     }
 
     /// Read, write, read again: the second AST must equal the first.

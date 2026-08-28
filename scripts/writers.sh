@@ -88,7 +88,7 @@ floor_for() {
         # accepted spelling of the same `Format`, so it cannot diverge
         # from this row, and two identical numbers in a published table
         # read as two pieces of evidence.
-        markdown) echo 23 ;;
+        markdown) echo 25 ;;
         *)        echo 0 ;;
     esac
 }
