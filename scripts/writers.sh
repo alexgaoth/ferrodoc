@@ -88,8 +88,8 @@ floor_for() {
         # 2026-08-27, after `-f markdown` started reading pandoc's
         # markdown and left `-t markdown` writing `CommonMark` — an
         # asymmetry worth closing. The CommonMark writer scores 6 against this
-        # same pandoc writer; this one scores 15.
-        pandoc_markdown) echo 15 ;;
+        # same pandoc writer; this one scores 23.
+        pandoc_markdown) echo 23 ;;
         *)        echo 0 ;;
     esac
 }

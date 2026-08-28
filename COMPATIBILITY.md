@@ -1372,7 +1372,7 @@ directly without asking its reader to survive anything.
 | `gfm` | 28/40 | 28 |
 | `commonmark` | 29/40 | 29 |
 | `markdown` | 6/40 | 6 |
-| `pandoc_markdown` | **15/40** | 15 |
+| `pandoc_markdown` | **23/40** | 23 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill
@@ -1435,7 +1435,7 @@ a contract now that five of the seven are at the whole corpus or one
 document from it.
 
 **`pandoc_markdown` is a writer as of 2026-08-27**, and it scores
-**15/40** against `pandoc -t markdown` where the `CommonMark` writer
+**23/40** against `pandoc -t markdown` where the `CommonMark` writer
 scores 6. It exists because `-f markdown` began reading pandoc's dialect
 and `-t markdown` kept writing `CommonMark` — an asymmetry worth closing
 rather than explaining.
@@ -1449,6 +1449,14 @@ turned every one of them into `\-\--`, which is what the first attempt
 did and what took the score from 13 to 9 before the diff said why. A
 `LineBreak` is a trailing `\` rather than two spaces, and raw inline
 content is `` `<em>`{=html} ``, which `CommonMark` has no way to say.
+
+**It scored 15 until `--wrap=auto` was found not to reach it at all.**
+`Format::wrapping` still called the dialect `NotText`, left over from
+when it was read-only, so no column count was ever passed and the writer
+never filled. What made that hard to see is that the output *looked*
+filled: with no fill the source's own soft breaks come through, and every
+document in this corpus is already wrapped at 72. The tell was a line of
+**77 columns** in a 72-column run — a fill that overshoots is not a fill.
 
 **Four constructs it writes that no gate can reach.** A heading's
 attributes, a footnote, a definition list and a fenced div are what
@@ -1929,12 +1937,12 @@ Two divergences, both deliberate:
 
 ### `pandoc_markdown` — pandoc's dialect, and the shapes it still misses
 
-`-f pandoc_markdown` reads what `pandoc -f markdown` reads and
-`-f markdown` here does not: a **YAML metadata block**, **header
-attributes** (`# H {#id .cls k=v}`), **definition lists**, and
-**superscript/subscript** (`H~2~O`, `E=mc^2^`). It is a separate name
-rather than a change to `markdown`, so no document that converts today
-changes meaning; the section above says what `markdown` is.
+`-f pandoc_markdown` and `-f markdown` read pandoc's markdown dialect, as
+does inferred input for a `.md` file. `-f commonmark` selects CommonMark.
+The dialect includes a **YAML metadata block**, **header attributes**
+(`# H {#id .cls k=v}`), **definition lists**, and **superscript/subscript**
+(`H~2~O`, `E=mc^2^`). The explicit `pandoc_markdown` spelling remains useful
+where a command should state its dialect rather than rely on the alias.
 
 ```sh
 cargo run --release -p ferrodoc-harness -- diff-pandoc-md corpus/pandoc-markdown --fail-under 100
@@ -1948,10 +1956,11 @@ Every rule is mutation-tested — turning off any one of header attributes,
 definition lists, superscript, subscript or the metadata block takes the
 gate from 3/3 to 1/3.
 
-It is **read only**. `-t pandoc_markdown` is an error naming the reason:
-writing it would be a second markdown writer for constructs the
-`markdown` writer already round-trips, and a writer no gate scores is
-worth less than the error.
+It is also writable: `-t pandoc_markdown` is ferrodoc's spelling for
+`pandoc -t markdown`. `scripts/writers.sh` measures it at **23/40**
+byte-identical documents (both preserved and filled wrapping); the
+CommonMark writer is a different output dialect and scores 6/40 against
+that particular pandoc writer.
 
 **Four divergences, each probed and each left rather than guessed at.**
 They were found by sweeping 42 shapes against `pandoc -f markdown -t json`;
@@ -2171,9 +2180,9 @@ kept because the cost is what decided it.
 
 `ferrodoc -f markdown` and a `.md` file with no `-f` now read pandoc's
 own dialect, as they do in pandoc. `-f commonmark` names CommonMark.
-**`-t markdown` still writes CommonMark**, because there is no writer for
-the dialect yet — that asymmetry is real and is written here rather than
-hidden.
+**`-t markdown` still writes CommonMark**; the dialect writer is
+`-t pandoc_markdown`. Keeping those output names distinct preserves the
+original writer contract while making pandoc's spelling available.
 
 What decided it, measured over this repository's own documents against
 `pandoc -t html` with no `-f` on either side:
@@ -2247,16 +2256,11 @@ What is left is the honest remainder: twelve rows are gaps in this
 project's own reading of pandoc's dialect, which the old default kept out
 of sight behind a decision.
 
-**Six of those last seven are the same decision from an angle the
-experiment cannot model.** The counterfactual works by handing pandoc
-`-f commonmark`, and that cannot express what these rows need: two name
-the dialect as `markdown_github`, one is a `.pmd` document written in it,
-and three ask `-t markdown` to *write* it — pandoc's markdown writer
-spells an em dash `---`, a heading identifier `{#id}`, an anchor
-`[]{#id .anchor}` and a container `:::`, and CommonMark has none of
-those. The seventh is `--reference-doc`. So the honest reading is that
-**one decision stands between 10/48 and the high thirties**, and it is
-the same decision on both the reading and the writing side.
+**This was the pre-alias analysis.** The input decision is now implemented
+and the corpus is 22/48, not "one decision from the high thirties". The
+remaining rows are tracked as parser and command-surface work; the
+`pandoc_markdown` writer supplies the dialect output separately from the
+longstanding CommonMark `-t markdown` name.
 
 ### `--wrap` — pandoc's, since 2026-08-24
 

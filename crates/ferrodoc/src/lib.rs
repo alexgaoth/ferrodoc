@@ -131,9 +131,9 @@ impl Format {
     /// from pandoc's default output from **2,466 lines to 241**, and not
     /// one document is worse.
     ///
-    /// `commonmark` still names `CommonMark`, and **`-t markdown` still
-    /// writes `CommonMark`**, because there is no writer for the dialect
-    /// yet — see `Format::writable`.
+    /// `commonmark` still names `CommonMark`. On output, `-t markdown`
+    /// intentionally writes `CommonMark`; `-t pandoc_markdown` selects the
+    /// writer for pandoc's dialect.
     pub fn parse_input(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
             "markdown" | "md" => Some(Format::PandocMarkdown),
@@ -258,24 +258,22 @@ impl Format {
             // identical bytes here until 2026-08-26.
             | Format::Rst
             | Format::Asciidoc
+            // …and pandoc's own markdown, which stopped being read-only
+            // on 2026-08-27. Leaving it here said `--wrap=auto` did
+            // nothing, and the output looked filled anyway because the
+            // source's soft breaks came through and this repository's
+            // prose is already wrapped at 72.
+            | Format::PandocMarkdown
             | Format::Ipynb => Wrapping::Fills,
             // `pandoc --wrap=auto -t docx` is accepted and does nothing
             // there too, so ignoring it is the compatible answer.
-            // `pandoc_markdown` is read-only and never written at all.
-            Format::Docx
-            | Format::Odt
-            | Format::Epub
-            | Format::Json
-            | Format::PandocMarkdown => Wrapping::NotText,
+            Format::Docx | Format::Odt | Format::Epub | Format::Json => Wrapping::NotText,
         }
     }
 
     /// Whether documents can be written to this format.
     ///
-    /// All but one: `pandoc_markdown` is read only. Writing it would be a
-    /// second markdown writer for constructs [`Format::Markdown`] already
-    /// round-trips, and a writer nothing gates is worth less than the
-    /// error saying it does not exist.
+    /// Every known format is writable when its feature is compiled.
     pub fn writable(self) -> bool {
         true
     }
@@ -661,10 +659,10 @@ pub fn render(doc: &Pandoc, to: Format) -> Result<Vec<u8>, Error> {
 
 /// Render, filling text to `columns` where the writer can fill.
 ///
-/// This is pandoc's `--wrap=auto --columns N`. Only the markdown writers
-/// fill today; every other format renders exactly as [`render`] would, so
-/// the flag is accepted rather than refused for them and simply has no
-/// effect. Nothing here embeds media, because no format that fills does.
+/// This is pandoc's `--wrap=auto --columns N`. Writers whose
+/// [`Format::wrapping`] mode is [`Wrapping::Fills`] honour it; other formats
+/// accept the flag but render exactly as [`render`] would. Nothing here embeds
+/// media, because no format that fills does.
 ///
 /// # Errors
 ///
@@ -737,6 +735,14 @@ pub fn render_wrapped_with_media(
         #[cfg(feature = "markdown")]
         (Some(columns), Format::Gfm) => {
             Ok(ferrodoc_markdown::write_gfm_wrapped(doc, columns).into_bytes())
+        }
+        // Without this arm the writer fell through to the unwrapped one
+        // and `--wrap=auto` did nothing — which looked like filling,
+        // because the source's own soft breaks came through and this
+        // repository's prose is already wrapped at 72.
+        #[cfg(feature = "markdown")]
+        (Some(columns), Format::PandocMarkdown) => {
+            Ok(ferrodoc_markdown::write_pandoc_markdown_wrapped(doc, columns).into_bytes())
         }
         #[cfg(feature = "text")]
         (Some(columns), Format::Plain) if columns != usize::MAX => {
