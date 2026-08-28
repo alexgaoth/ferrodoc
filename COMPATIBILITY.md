@@ -1434,6 +1434,32 @@ this printed a number and gated nothing while the numbers were low; it is
 a contract now that five of the seven are at the whole corpus or one
 document from it.
 
+**`pandoc_markdown` is a writer as of 2026-08-27**, and it scores
+**15/40** against `pandoc -t markdown` where the `CommonMark` writer
+scores 6. It exists because `-f markdown` began reading pandoc's dialect
+and `-t markdown` kept writing `CommonMark` — an asymmetry worth closing
+rather than explaining.
+
+Its text rules, each probed by handing pandoc a JSON AST and reading the
+bytes back: `—` `–` `…` are written **unescaped** as `---` `--` `...`,
+while a literal `'`, `"`, `~` or `|` is escaped, and a `-` is escaped
+whenever another follows it. Those last two decisions have to be made in
+**one pass** — substituting the em-dash first and escaping afterwards
+turned every one of them into `\-\--`, which is what the first attempt
+did and what took the score from 13 to 9 before the diff said why. A
+`LineBreak` is a trailing `\` rather than two spaces, and raw inline
+content is `` `<em>`{=html} ``, which `CommonMark` has no way to say.
+
+**Four constructs it writes that no gate can reach.** A heading's
+attributes, a footnote, a definition list and a fenced div are what
+`CommonMark` cannot express — so `writers.sh`, which reads its corpus as
+`CommonMark`, gives this writer no `Note` to get wrong. That is the
+corpus blind spot in the one place it is structural rather than
+accidental, and the four are held by unit tests instead. The definition
+list carries the **loose/tight** distinction a bullet list does: a
+definition whose first block is a `Para` takes a blank line and a `Plain`
+does not.
+
 `commonmark` and `markdown` are **the same ferrodoc writer** measured
 against two different pandoc writers, and the pair is the honest way to
 report it. `-t markdown` is CommonMark here and pandoc's own dialect
