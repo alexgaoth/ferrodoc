@@ -1850,7 +1850,7 @@ impl Identifiers {
 /// a hyphen or a space, and turn spaces into hyphens. Any whitespace
 /// counts, not just the ASCII space — pandoc slugs a heading holding a
 /// non-breaking space as `a-b`, not `ab`.
-fn slug(text: &str, dialect: Dialect) -> String {
+pub(crate) fn slug(text: &str, dialect: Dialect) -> String {
     if dialect != Dialect::Pandoc {
         let mut out = String::with_capacity(text.len());
         for ch in text.chars() {

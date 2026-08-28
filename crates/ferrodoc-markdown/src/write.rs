@@ -439,8 +439,19 @@ impl Writer {
                 // **Pandoc's dialect writes a heading's attributes back**;
                 // `CommonMark` has nowhere to put them, so it drops them
                 // and the identifier is regenerated on the next read.
+                // **An identifier the reader would regenerate is not
+                // written.** Pandoc omits `{#my-heading}` on
+                // `# My Heading` and keeps `{#custom}`, because the first
+                // comes back on its own and the second does not. Probed
+                // three ways round.
+                let generated = attr.identifier == crate::slug(&plain_text(inlines), crate::Dialect::Pandoc);
+                let attr = if generated {
+                    ferrodoc_ast::Attr { identifier: String::new(), ..attr.clone() }
+                } else {
+                    attr.clone()
+                };
                 if self.pandoc()
-                    && let Some(written) = attributes(attr)
+                    && let Some(written) = attributes(&attr)
                 {
                     text.push(' ');
                     text.push_str(&written);
@@ -567,7 +578,9 @@ impl Writer {
         // A `☐`/`☒` opening an item is what a GFM task item reads as, so
         // write it back as one. Both spellings re-read to the same
         // document; the brackets are the one a reader recognizes.
-        let tasks: Vec<Option<bool>> = if self.gfm() {
+        // Pandoc's dialect writes `- [ ]` too; only `CommonMark` has to
+        // fall back to the `☐`/`☒` its reader gave us.
+        let tasks: Vec<Option<bool>> = if self.gfm() || self.pandoc() {
             items.iter().map(|item| task_state(item)).collect()
         } else {
             vec![None; items.len()]
@@ -1233,6 +1246,32 @@ fn fill(text: &str, width: usize) -> Vec<String> {
 /// **A heading is never filled**, whatever `--columns` says, because an
 /// ATX heading is one line by construction — pandoc leaves a 151-column
 /// heading at 151 columns, measured.
+/// The text of a run of inlines with its markup removed, which is what a
+/// heading's identifier is derived from.
+fn plain_text(inlines: &[Inline]) -> String {
+    let mut out = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Str(text) | Inline::Code(_, text) | Inline::Math(_, text) => out.push_str(text),
+            Inline::Space | Inline::SoftBreak | Inline::LineBreak => out.push(' '),
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => out.push_str(&plain_text(inner)),
+            Inline::RawInline(..) | Inline::Note(_) => {}
+        }
+    }
+    out
+}
+
 /// A `{#id .class key="value"}` for pandoc's dialect, or `None` when the
 /// attribute carries nothing worth writing.
 ///
@@ -1611,6 +1650,44 @@ mod dialect {
             write_pandoc_markdown(&doc),
             "# Heading {#custom-id}\n\nText[^1]\n\nTerm\n:   Tight\n\n[^1]: body\n"
         );
+    }
+
+    /// **An identifier the reader would regenerate is not written.**
+    /// Pandoc omits `{#my-heading}` on `# My Heading` and keeps
+    /// `{#custom}`, because the first comes back on its own and the
+    /// second does not — probed three ways round.
+    ///
+    /// No gate reaches this either: `writers.sh` reads its corpus as
+    /// `CommonMark`, whose reader generates no identifiers at all, so
+    /// every heading it produces has an empty one.
+    #[test]
+    fn a_regenerable_heading_identifier_is_not_written() {
+        let heading = |id: &str| {
+            Pandoc::new(vec![Block::Header(
+                1,
+                Attr { identifier: id.into(), ..Attr::default() },
+                vec![Inline::Str("My".into()), Inline::Space, Inline::Str("Heading".into())],
+            )])
+        };
+        assert_eq!(write_pandoc_markdown(&heading("my-heading")), "# My Heading\n");
+        assert_eq!(write_pandoc_markdown(&heading("custom")), "# My Heading {#custom}\n");
+        assert_eq!(
+            write_pandoc_markdown(&heading("my-heading-x")),
+            "# My Heading {#my-heading-x}\n"
+        );
+    }
+
+    /// A task item is `- [ ]` in pandoc's dialect as in GFM; only
+    /// `CommonMark` falls back to the `☐` its reader handed over.
+    #[test]
+    fn a_task_item_keeps_its_brackets() {
+        let list = Pandoc::new(vec![Block::BulletList(vec![vec![Block::Plain(vec![
+            Inline::Str("☐".into()),
+            Inline::Space,
+            Inline::Str("todo".into()),
+        ])]])]);
+        assert_eq!(write_pandoc_markdown(&list), "- [ ] todo\n");
+        assert_eq!(write_markdown(&list), "- ☐ todo\n");
     }
 
     /// The text rules, and the one that has to share a pass with another:
