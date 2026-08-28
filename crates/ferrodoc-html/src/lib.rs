@@ -917,7 +917,7 @@ fn write_block(out: &mut String, block: &Block, ctx: &Ctx) {
             write_attr(out, attr);
             out.push_str(">\n");
             write_blocks_joined(out, blocks, ctx);
-            write_figcaption(out, caption, ctx);
+            write_figcaption(out, caption, blocks, ctx);
             out.push_str("\n</figure>");
         }
         Block::Table(table) => write_table(out, table, ctx),
@@ -1175,11 +1175,42 @@ fn list_type(style: ListNumberStyle) -> Option<&'static str> {
     }
 }
 
-fn write_figcaption(out: &mut String, caption: &Caption, ctx: &Ctx) {
+/// Whether a caption says nothing the picture's own alt text does not.
+///
+/// Such a caption is hidden from assistive technology, which would
+/// otherwise announce the same words twice — the shape markdown's
+/// implicit figures produce, where the caption *is* the alt text.
+/// Measured on `pandoc -f json -t html5`:
+///
+/// * the body must be exactly `Plain [Image]`. A `Para` body is a
+///   paragraph that happens to hold a picture, and anything beside the
+///   image — even a trailing word — is a caption worth reading.
+/// * the two are compared **rendered**, not structurally, so an
+///   emphasized caption still matches a plain alt.
+/// * the caption's own block may be `Plain` or `Para`; that much does
+///   not matter.
+fn caption_repeats_alt(caption: &Caption, blocks: &[Block]) -> bool {
+    let [Block::Plain(inlines)] = blocks else {
+        return false;
+    };
+    let [Inline::Image(_, alt, _)] = inlines.as_slice() else {
+        return false;
+    };
+    let [Block::Plain(text) | Block::Para(text)] = caption.blocks.as_slice() else {
+        return false;
+    };
+    plain_text(alt) == plain_text(text)
+}
+
+fn write_figcaption(out: &mut String, caption: &Caption, blocks: &[Block], ctx: &Ctx) {
     if caption.blocks.is_empty() {
         return;
     }
-    out.push_str("\n<figcaption>");
+    out.push_str(if caption_repeats_alt(caption, blocks) {
+        "\n<figcaption aria-hidden=\"true\">"
+    } else {
+        "\n<figcaption>"
+    });
     write_blocks_joined(out, &caption.blocks, ctx);
     out.push_str("</figcaption>");
 }
@@ -1615,6 +1646,64 @@ mod tests {
         assert!(html.contains("id=\"fn1\""), "{html}");
         assert!(html.contains("id=\"fn2\""), "{html}");
         assert!(html.contains("inner"), "{html}");
+    }
+
+    /// **A caption that only repeats the alt text is hidden from screen
+    /// readers**, and no gate here can see it: `writers.sh` reads
+    /// `corpus/*.md` as `-f commonmark`, which has no implicit figures,
+    /// so the only figure in that corpus never reaches this writer as
+    /// one. Every answer below is off `pandoc -f json -t html5`.
+    #[test]
+    fn a_caption_repeating_the_alt_text_is_hidden_from_assistive_tech() {
+        let image = |alt: Vec<Inline>| {
+            Inline::Image(
+                Box::default(),
+                alt,
+                Box::new(ferrodoc_ast::Target { url: "x.png".into(), title: String::new() }),
+            )
+        };
+        let str_of = |s: &str| vec![Inline::Str(s.into())];
+        let figure = |caption: Vec<Block>, body: Vec<Block>| {
+            let doc = Pandoc::new(vec![Block::Figure(
+                Attr::default(),
+                Caption { short: None, blocks: caption },
+                body,
+            )]);
+            write_html(&doc)
+        };
+        let plain_image = |alt: &str| vec![Block::Plain(vec![image(str_of(alt))])];
+
+        // The shape `![alt](x.png)` produces: the caption says nothing
+        // the alt does not.
+        let html = figure(vec![Block::Plain(str_of("alt"))], plain_image("alt"));
+        assert!(html.contains("<figcaption aria-hidden=\"true\">"), "{html}");
+
+        // A caption with something of its own to say is announced.
+        let html = figure(vec![Block::Plain(str_of("cap"))], plain_image("alt"));
+        assert!(html.contains("<figcaption>"), "{html}");
+
+        // Compared **rendered**, not structurally — emphasis does not
+        // make a caption say anything new.
+        let html = figure(
+            vec![Block::Plain(vec![Inline::Emph(str_of("alt"))])],
+            plain_image("alt"),
+        );
+        assert!(html.contains("<figcaption aria-hidden=\"true\">"), "{html}");
+
+        // The body must be exactly `Plain [Image]`. A `Para` is a
+        // paragraph that happens to hold a picture...
+        let html = figure(
+            vec![Block::Plain(str_of("alt"))],
+            vec![Block::Para(vec![image(str_of("alt"))])],
+        );
+        assert!(html.contains("<figcaption>"), "{html}");
+
+        // ...and a trailing word makes the caption worth reading.
+        let html = figure(
+            vec![Block::Plain(str_of("alt"))],
+            vec![Block::Plain(vec![image(str_of("alt")), Inline::Str("tail".into())])],
+        );
+        assert!(html.contains("<figcaption>"), "{html}");
     }
 
     /// **One pass over the layout markers, and the same bytes.** `lay_out`
