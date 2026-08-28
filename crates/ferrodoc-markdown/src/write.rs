@@ -204,6 +204,13 @@ const BREAK: char = '\0';
 struct Position {
     after_container: bool,
     first_in_item: bool,
+    /// Nothing has been written into this container yet.
+    ///
+    /// A simple table needs a blank line in front of it, and when it
+    /// opens a blockquote or a list item there is none to reuse — so
+    /// pandoc writes one, prefix and all: `> ` before the header row.
+    /// At the top of a document it writes nothing.
+    first_in_container: bool,
 }
 
 impl Writer {
@@ -260,6 +267,7 @@ impl Writer {
                     Some(Block::BulletList(_) | Block::OrderedList(..) | Block::BlockQuote(_))
                 ),
                 first_in_item: self.at.item_start,
+                first_in_container: previous.is_none() && !prefix.is_empty(),
             };
             self.at.item_start = false;
             self.block(out, block, prefix, at);
@@ -577,10 +585,8 @@ impl Writer {
             }
             // A table with no columns has no pipe-table spelling at all —
             // not even an empty one — so it degrades like the rest.
-            Block::Table(table) if self.gfm() && !table.colspecs.is_empty() => {
-                self.pipe_table(out, table, prefix);
-            }
-            Block::Figure(..) | Block::Table(_) => Self::unrepresentable(out, block, prefix),
+            Block::Table(t) => self.table(out, block, t, prefix, at),
+            Block::Figure(..) => Self::unrepresentable(out, block, prefix),
         }
     }
 
@@ -644,9 +650,9 @@ impl Writer {
         // when the table has no head: an empty one still reads back as a
         // table of the right shape.
         let mut lines: Vec<Vec<String>> = Vec::new();
-        lines.push(header.map(|row| self.cells(row, columns)).unwrap_or_default());
+        lines.push(header.map(|row| self.cells(row, columns, true)).unwrap_or_default());
         for row in body {
-            lines.push(self.cells(row, columns));
+            lines.push(self.cells(row, columns, true));
         }
 
         // **Pandoc pads every column to its widest cell**, with a floor of
@@ -695,8 +701,143 @@ impl Writer {
         }
     }
 
+    /// The table spelling this flavour has, or raw HTML where it has
+    /// none.
+    ///
+    /// A table with no columns has no pipe-table spelling at all — not
+    /// even an empty one — so it degrades like the rest.
+    fn table(&mut self, out: &mut String, block: &Block, table: &Table, prefix: &str, at: Position) {
+        if self.gfm() && !table.colspecs.is_empty() {
+            self.pipe_table(out, table, prefix);
+        } else if self.pandoc() && simple_table_applies(table) {
+            self.simple_table(out, table, prefix, at);
+        } else {
+            Self::unrepresentable(out, block, prefix);
+        }
+    }
+
+    /// Pandoc's **simple table**: no pipes and no plus signs, columns
+    /// held apart by the space its own reader measures them with.
+    ///
+    /// Every rule here is `pandoc -f json -t markdown --columns=72` on a
+    /// table built one shape at a time:
+    ///
+    /// * the whole table is indented **two spaces**;
+    /// * a column is as wide as its widest cell **plus two**, with no
+    ///   floor — a column of empty cells is two dashes wide;
+    /// * cells are padded to that width by their column's alignment,
+    ///   `AlignCenter` putting the odd space on the **right**, and joined
+    ///   by a single space, with the trailing run trimmed;
+    /// * a table with a header writes header, rule, rows; one **without**
+    ///   writes rule, rows, rule, and a header row whose cells are all
+    ///   empty counts as without;
+    /// * a caption follows a blank line as `: text`.
+    ///
+    /// Width never forces a different shape — a column 70 characters wide
+    /// is still written this way at `--columns=72`, and so is one whose
+    /// text would wrap. What does force one is a cell holding more than a
+    /// single block (a grid table) or a column stating its own width (a
+    /// multiline table); [`simple_table_applies`] refuses both, and they
+    /// keep the raw-HTML fallback until those writers exist.
+    fn simple_table(&mut self, out: &mut String, table: &Table, prefix: &str, at: Position) {
+        if at.first_in_container {
+            // A simple table needs a blank line in front of it, and when
+            // it opens a container there is none to reuse. The prefix
+            // goes down **untrimmed** — `> `, not the `>` that separates
+            // two blocks — and `corpus/gfm/tables.gfm` is one byte
+            // different without that space.
+            out.push_str(prefix);
+            out.push('\n');
+        }
+        let columns = table.colspecs.len();
+        let header: Vec<String> = table
+            .head
+            .rows
+            .first()
+            .map(|row| self.cells(row, columns, false))
+            .unwrap_or_default();
+        // A header of nothing but empty cells is not a header: pandoc
+        // writes the same table it writes for a `head` with no rows.
+        let has_header = header.iter().any(|cell| !cell.is_empty());
+
+        let body: Vec<Vec<String>> = table
+            .head
+            .rows
+            .iter()
+            .skip(1)
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows)
+            .map(|row| self.cells(row, columns, false))
+            .collect();
+
+        let width = |index: usize| {
+            std::iter::once(&header)
+                .chain(&body)
+                .filter_map(|cells| cells.get(index))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+                + 2
+        };
+        let widths: Vec<usize> = (0..columns).map(width).collect();
+        let rule = widths
+            .iter()
+            .map(|width| "-".repeat(*width))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let row_line = |cells: &[String]| {
+            let mut line = String::new();
+            for (index, width) in widths.iter().enumerate() {
+                if index > 0 {
+                    line.push(' ');
+                }
+                let cell = cells.get(index).map_or("", String::as_str);
+                let pad = width.saturating_sub(cell.chars().count());
+                let left = match table.colspecs[index].alignment {
+                    Alignment::AlignRight => pad,
+                    Alignment::AlignCenter => pad / 2,
+                    Alignment::AlignLeft | Alignment::AlignDefault => 0,
+                };
+                line.push_str(&" ".repeat(left));
+                line.push_str(cell);
+                // **Only the last cell drops its right padding**, and the
+                // separator before it stays: a row whose final cell is
+                // empty ends in the previous column's padding plus that
+                // space, which is why `  1     2     ` has a trailing run
+                // and `  one   two   three` has none.
+                if index + 1 < widths.len() {
+                    line.push_str(&" ".repeat(pad - left));
+                }
+            }
+            format!("  {line}")
+        };
+
+        if has_header {
+            push_line(out, prefix, &row_line(&header));
+        }
+        push_line(out, prefix, &format!("  {rule}"));
+        for cells in &body {
+            push_line(out, prefix, &row_line(cells));
+        }
+        if !has_header {
+            push_line(out, prefix, &format!("  {rule}"));
+        }
+        if !table.caption.blocks.is_empty() {
+            push_line(out, prefix, "");
+            let mut caption = String::new();
+            self.blocks(&mut caption, &table.caption.blocks, "");
+            push_line(out, prefix, &format!("  : {}", caption.trim()));
+        }
+    }
+
     /// One row's cells, rendered to single-line text with spans expanded.
-    fn cells(&mut self, row: &Row, columns: usize) -> Vec<String> {
+    ///
+    /// `pipes` says whether a `|` has to be escaped, which is a property
+    /// of the **table shape** rather than of the text: a pipe table ends
+    /// a cell at one and a simple table does not, so pandoc writes
+    /// `` `x|y` `` bare in the second and `` `x\|y` `` in the first.
+    fn cells(&mut self, row: &Row, columns: usize, pipes: bool) -> Vec<String> {
         let mut out: Vec<String> = Vec::with_capacity(columns);
         for cell in &row.cells {
             let mut text = String::new();
@@ -709,7 +850,7 @@ impl Writer {
                 }
                 text.push_str(piece);
             }
-            out.push(cell_text(&text));
+            out.push(cell_text(&text, pipes));
             // A spanned cell occupies further columns that carry nothing.
             for _ in 1..cell.col_span.max(1) {
                 out.push(String::new());
@@ -810,6 +951,11 @@ impl Writer {
                             )
                         ),
                         first_in_item: self.at.item_start,
+                        // A tight item's blocks are written into `body`
+                        // with no prefix of their own; the marker and the
+                        // indent are added afterwards, so there is no
+                        // container here to open with a blank line.
+                        first_in_container: false,
                     };
                     self.at.item_start = false;
                     self.block(&mut body, block, inner, at);
@@ -1111,6 +1257,42 @@ fn without_task_marker(item: &[Block]) -> Vec<Block> {
 /// A pipe-table row, padded with empty cells or truncated to exactly
 /// `columns` of them — the delimiter row sets the width and a row that
 /// disagrees would not be part of the table.
+/// Whether a table has a **simple table** spelling in pandoc's dialect.
+///
+/// Pandoc picks among four table shapes, and the two this refuses are
+/// the two it would write differently — probed one shape at a time
+/// against `pandoc -f json -t markdown`:
+///
+/// * a cell holding **more than one block** gets a grid table, and this
+///   writer's [`Writer::cells`] would join those blocks with a space;
+/// * a column stating its **own width** (`ColWidth`, which is what
+///   reading a pandoc simple or multiline table produces) gets a
+///   multiline table, with a full-width rule above and below.
+///
+/// A spanned cell is refused for the same reason: a simple table has
+/// nowhere to put one. Everything refused here keeps the raw-HTML
+/// fallback, which loses nothing.
+fn simple_table_applies(table: &Table) -> bool {
+    if table.colspecs.is_empty() {
+        return false;
+    }
+    if table.colspecs.iter().any(|spec| spec.width != ferrodoc_ast::ColWidth::ColWidthDefault) {
+        return false;
+    }
+    let rows = table
+        .head
+        .rows
+        .iter()
+        .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+        .chain(&table.foot.rows);
+    rows.flat_map(|row| &row.cells).all(|cell| {
+        cell.col_span.max(1) == 1
+            && cell.row_span.max(1) == 1
+            && cell.blocks.len() <= 1
+            && cell.blocks.iter().all(|b| matches!(b, Block::Plain(_) | Block::Para(_)))
+    })
+}
+
 fn pipe_row(cells: &[String], widths: &[usize], alignments: &[Alignment]) -> String {
     let mut line = String::from("|");
     for (index, width) in widths.iter().enumerate() {
@@ -1130,7 +1312,7 @@ fn pipe_row(cells: &[String], widths: &[usize], alignments: &[Alignment]) -> Str
 /// end the cell and a newline would end the row. A reader unescapes `\|`
 /// before it parses the cell, so the escape survives even inside a code
 /// span.
-fn cell_text(text: &str) -> String {
+fn cell_text(text: &str, pipes: bool) -> String {
     let mut out = String::with_capacity(text.len());
     let mut backslashes = 0usize;
     for ch in text.chars() {
@@ -1139,7 +1321,7 @@ fn cell_text(text: &str) -> String {
             // leave a literal backslash and a live cell divider behind.
             // Only the pipes markup carries — inside a code span, a raw
             // inline, a URL — arrive here bare.
-            '|' if backslashes % 2 == 1 => out.push('|'),
+            '|' if !pipes || backslashes % 2 == 1 => out.push('|'),
             '|' => out.push_str("\\|"),
             // A row is one line, so a break opportunity in a cell is a
             // space and nothing else — pandoc does not fill inside a
@@ -1454,14 +1636,15 @@ fn escape_text_inner(
         let next = chars.peek().copied();
         let after_bang = std::mem::take(&mut escaped_bang);
         let at_line_start = out.is_empty() || out.ends_with('\n');
-        // **Five characters pandoc's dialect escapes and `CommonMark`
+        // **Six characters pandoc's dialect escapes and `CommonMark`
         // does not**, because its own reader would otherwise read them as
-        // a quote, a subscript, a superscript or a table: `'`, `"`, `~`,
-        // `^` and `|`. The pipe escapes *everywhere*, not only in a
-        // table — `a | b` in an ordinary paragraph comes back `a \| b` —
-        // and so do the two script markers: `2^n` is `2\^n` in the
-        // middle of a word, with no closing `^` anywhere. Probed one at
-        // a time.
+        // a quote, a subscript, a superscript, a table or an escape:
+        // `'`, `"`, `~`, `^`, `|` and `\`. The pipe escapes *everywhere*,
+        // not only in a table — `a | b` in an ordinary paragraph comes
+        // back `a \| b` — and so do the two script markers: `2^n` is
+        // `2\^n` in the middle of a word, with no closing `^` anywhere.
+        // A literal backslash is `\\`, which `CommonMark` and `gfm`
+        // both leave bare. Probed one at a time.
         // **The un-smartening writes its dashes unescaped**, and a
         // literal one is escaped — which is the whole reason these two
         // decisions have to be made in the same pass. Substituting first
@@ -1474,7 +1657,7 @@ fn escape_text_inner(
             });
             continue;
         }
-        if pandoc && matches!(ch, '\'' | '"' | '~' | '^' | '|') {
+        if pandoc && matches!(ch, '\'' | '"' | '~' | '^' | '|' | '\\') {
             out.push('\\');
             out.push(ch);
             continue;
@@ -2344,6 +2527,103 @@ mod tests {
         // CommonMark has no table syntax, so the same document degrades to
         // its cell contents there — that is the loss GFM mode exists for.
         assert!(!write_markdown(&doc).contains('|'));
+    }
+
+    /// **The simple table**, in the three shapes the corpus cannot show.
+    ///
+    /// `corpus/gfm/tables.gfm` is byte-identical to pandoc, but every
+    /// table in it came from a pipe table, so every one has a header and
+    /// none has a caption. Each answer below is
+    /// `pandoc -f json -t markdown --columns=72` on a table built one
+    /// shape at a time.
+    #[test]
+    fn a_simple_table_pads_to_its_widest_cell_plus_two() {
+        let plain = |t: &str| {
+            let mut c = cell(1, vec![Block::Plain(vec![Inline::Str(t.to_owned())])]);
+            if t.is_empty() {
+                c.blocks.clear();
+            }
+            c
+        };
+        let row = |ts: &[&str]| Row {
+            attr: ferrodoc_ast::Attr::default(),
+            cells: ts.iter().map(|t| plain(t)).collect(),
+        };
+        let table = |aligns: &[Alignment], head: Vec<Row>, body: Vec<Row>, caption: Vec<Block>| {
+            let doc = Pandoc::new(vec![Block::Table(Box::new(Table {
+                attr: ferrodoc_ast::Attr::default(),
+                caption: ferrodoc_ast::Caption { short: None, blocks: caption },
+                colspecs: aligns
+                    .iter()
+                    .map(|a| ferrodoc_ast::ColSpec {
+                        alignment: *a,
+                        width: ferrodoc_ast::ColWidth::ColWidthDefault,
+                    })
+                    .collect(),
+                head: ferrodoc_ast::TableHead {
+                    attr: ferrodoc_ast::Attr::default(),
+                    rows: head,
+                },
+                bodies: vec![ferrodoc_ast::TableBody {
+                    attr: ferrodoc_ast::Attr::default(),
+                    row_head_columns: 0,
+                    head: Vec::new(),
+                    body,
+                }],
+                foot: ferrodoc_ast::TableFoot::default(),
+            }))]);
+            write_pandoc_markdown(&doc)
+        };
+        let default2 = [Alignment::AlignDefault, Alignment::AlignDefault];
+
+        // Two spaces of indent, and each column its widest cell plus two.
+        assert_eq!(
+            table(&default2, vec![row(&["h1", "h2"])], vec![row(&["a", "b"])], vec![]),
+            "  h1   h2\n  ---- ----\n  a    b\n"
+        );
+        // **Only the last cell drops its right padding**, and the space
+        // that separates it from the one before does not go with it — so
+        // a row ending in an empty cell ends in a run of spaces.
+        assert_eq!(
+            table(
+                &[Alignment::AlignDefault; 3],
+                vec![row(&["one", "two", "three"])],
+                vec![row(&["1", "2", ""])],
+                vec![]
+            ),
+            "  one   two   three\n  ----- ----- -------\n  1     2     \n"
+        );
+        // A header of nothing but empty cells is not a header: the rule
+        // goes above *and* below, and the columns are two wide.
+        assert_eq!(
+            table(&default2, vec![row(&["", ""])], vec![row(&["", "b"])], vec![]),
+            "  -- ---\n     b\n  -- ---\n"
+        );
+        // `AlignCenter` puts the odd space on the right, `AlignRight`
+        // pads on the left.
+        assert_eq!(
+            table(
+                &[Alignment::AlignCenter, Alignment::AlignRight],
+                vec![row(&["hello", "x"])],
+                vec![row(&["a", "bbbb"])],
+                vec![]
+            ),
+            "   hello       x\n  ------- ------\n     a      bbbb\n"
+        );
+        // A caption follows a blank line as `: text`.
+        assert_eq!(
+            table(
+                &default2,
+                vec![row(&["h1", "h2"])],
+                vec![row(&["a", "b"])],
+                vec![Block::Plain(vec![
+                    Inline::Str("My".to_owned()),
+                    Inline::Space,
+                    Inline::Str("caption".to_owned()),
+                ])]
+            ),
+            "  h1   h2\n  ---- ----\n  a    b\n\n  : My caption\n"
+        );
     }
 
     fn cell(col_span: i64, blocks: Vec<Block>) -> ferrodoc_ast::Cell {

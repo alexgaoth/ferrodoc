@@ -1398,7 +1398,7 @@ directly without asking its reader to survive anything.
 | `asciidoc` | **38/40** | 38 |
 | `gfm` | 28/40 | 28 |
 | `commonmark` | 29/40 | 29 |
-| `markdown` | **25/40** | 25 |
+| `markdown` | **29/40** | 29 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill
