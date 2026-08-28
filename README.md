@@ -18,10 +18,15 @@ Any other language with an FFI links the C ABI in
 > **It is not a drop-in `pandoc`, and the number is in the repository.**
 > `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
 > from public Makefiles and CI files — through both binaries and compares
-> every byte: **26/48 identical**, with 0 refused for a missing flag. The
-> remaining 26 rows are classified by the gate: one is deliberate and 25
-> are implementation work. The bet here is the *library*, not a claim of
-> general command-line replacement.
+> every byte: **27/48 identical**, with 0 refused for a missing flag. The
+> remaining 21 rows are classified by the gate: **8 are deliberate and 13
+> are implementation work**. Seven of the eight are one thing — a
+> standalone page's highlighting stylesheet, which pandoc takes from
+> skylighting's style set and this cannot use — and the gate *computes*
+> that classification per run rather than reading a list of row numbers,
+> so a row that starts differing for a second reason is counted as work
+> again. The bet here is the *library*, not a claim of general
+> command-line replacement.
 
 ## Why you would switch
 
@@ -328,11 +333,21 @@ agree. Reading `markdown` as pandoc's dialect rather than CommonMark —
 on the way in, on the way out, and under the deprecated name
 `markdown_github` — accounted for 23 misses on its own until
 **2026-08-27, when the default became pandoc's dialect** and the number
-went 12/48 to 22/48, and the table of contents took it to 26/48. It now accounts for **4**, with **1** more together
-with syntax highlighting, which accounts for **8** by itself. One row is
-a difference this project has decided to keep.
+went 12/48 to 22/48; the table of contents took it to 26/48 and a
+figure caption to 27/48. The dialect now accounts for **4**, with **1**
+more together with syntax highlighting, which accounts for **1** by
+itself.
 
-**That leaves 8**, and they are the honest remainder: gaps in this
+**8 rows are deliberate**, and the gate decides that rather than being
+told: seven of them differ only inside a `<style>` element, which is the
+highlighting stylesheet this cannot take from skylighting, and the
+eighth is an ordered list's counter the LaTeX writer places where
+pandoc's own reader can still find it. Listing those seven by row number
+would have been wrong twice over — two *other* rows carry the same
+stylesheet difference **and** a real one underneath it, and a list would
+have retired them both.
+
+**That leaves 7**, and they are the honest remainder: gaps in this
 project's own reading of pandoc's dialect, which the old default hid
 behind a decision. The number stopped being one decision away and became
 work.

@@ -79,6 +79,41 @@ deliberate() {
     esac
 }
 
+# Whether two output trees differ *only* inside `<style>` elements.
+#
+# A standalone page whose code is highlighted carries a stylesheet, and
+# pandoc's comes from skylighting's style set — which its BSD carve-out
+# does not reach, so this ships its own colours instead. COMPATIBILITY.md
+# records the trade under "What `-s` still differs on". Seven rows in this
+# corpus are that stylesheet and nothing else.
+#
+# **Computed rather than listed by id**, because a hard-coded id keeps its
+# verdict after the row starts differing for a second reason, and nobody
+# reads a row already called deliberate. The open and close tags are kept
+# so a page that is missing the element entirely still differs.
+without_style() {
+    awk '
+        !inside && /<style/ {
+            print "[STYLE]"
+            inside = 1
+            if ($0 ~ /<\/style>/) { inside = 0; print "[/STYLE]" }
+            next
+        }
+        inside { if ($0 ~ /<\/style>/) { inside = 0; print "[/STYLE]" } ; next }
+        { print }
+    ' "$1"
+}
+
+css_only() {
+    local p_dir="$1" f_dir="$2" rel
+    while read -r rel; do
+        [ -f "$f_dir/$rel" ] || return 1
+        diff -q <(without_style "$p_dir/$rel") <(without_style "$f_dir/$rel") \
+            > /dev/null || return 1
+    done < <(cd "$p_dir" && find . -type f | sort)
+    return 0
+}
+
 # Retry one miss with pandoc's own features switched off, one
 # combination at a time, and name the smallest set that makes the two
 # agree. Switching them off on **pandoc's** side is the right way round:
@@ -267,6 +302,9 @@ while IFS=$'\t' read -r id source input args changed verbatim; do
         detail=$(head -c 90 "$f_out/stderr" | tr '\n' ' ')
     elif deliberate "$id"; then
         class="deliberate"
+    elif css_only "$p_out" "$f_out"; then
+        class="deliberate"
+        detail="the highlighting stylesheet and nothing else"
     else
         class="fixable"
     fi
