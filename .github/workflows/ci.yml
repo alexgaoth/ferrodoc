@@ -286,7 +286,13 @@ jobs:
             name=$(basename "$doc" .md)
             mkdir -p "$RUNNER_TEMP/rst/$name" && cd "$RUNNER_TEMP/rst/$name"
             printf 'project = "gate"\nmaster_doc = "%s"\nexclude_patterns = ["out"]\n' "$name" > conf.py
-            "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t rst -o "$name.rst"
+            # **`-f commonmark` on both sides.** This step judges the RST
+            # *writer*, so both tools must be handed the same document —
+            # and since 2026-08-27 the CLI default is pandoc's dialect,
+            # which this project's reader does not match on lazy
+            # blockquote continuation. Leaving it to the default made this
+            # a reader test wearing a writer's name.
+            "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -f commonmark -t rst -o "$name.rst"
             # Every picture the *source* names, so that `image.not_readable`
             # stays a check on the URL the writer emitted. Creating the
             # files sphinx asks for instead would make it vacuous — and it
@@ -324,7 +330,7 @@ jobs:
             # `-f commonmark` on this side alone did exactly that for
             # three commits: both documents stopped being byte-identical
             # and the tolerance below stopped applying.
-            pandoc "$doc" -t rst > pandoc.rst
+            pandoc "$doc" -f commonmark -t rst > pandoc.rst
             if diff -q "$name.rst" pandoc.rst >/dev/null; then
               echo "sphinx refused $name; pandoc writes the same bytes, so this is the format"
             else
@@ -340,7 +346,9 @@ jobs:
           fail=0
           for doc in "$GITHUB_WORKSPACE"/corpus/*.md; do
             name=$(basename "$doc" .md)
-            "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -t asciidoc -o "$name.adoc"
+            # `-f commonmark` on both sides, for the reason the sphinx
+            # step above gives.
+            "$GITHUB_WORKSPACE/target/release/ferrodoc" "$doc" -f commonmark -t asciidoc -o "$name.adoc"
             if asciidoctor --failure-level=WARN -o "$name.html" "$name.adoc"; then
               echo "asciidoctor accepted $name"
               continue
@@ -354,7 +362,7 @@ jobs:
             # Both at their defaults, and so the same dialect — see the
             # sphinx step above for what naming one on this side alone
             # did.
-            pandoc "$doc" -t asciidoc > pandoc.adoc
+            pandoc "$doc" -f commonmark -t asciidoc > pandoc.adoc
             if diff -q "$name.adoc" pandoc.adoc >/dev/null; then
               echo "asciidoctor refused $name; pandoc writes the same bytes, so this is the format"
             else
