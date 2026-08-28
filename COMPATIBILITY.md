@@ -1372,6 +1372,7 @@ directly without asking its reader to survive anything.
 | `gfm` | 28/40 | 28 |
 | `commonmark` | 29/40 | 29 |
 | `markdown` | 6/40 | 6 |
+| `pandoc_markdown` | **15/40** | 15 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill

@@ -80,9 +80,16 @@ floor_for() {
         commonmark) echo 29 ;;
         # And the row that keeps the other question honest: a real
         # `pandoc -t markdown` command line gets pandoc's dialect, and
-        # this is how far that is. It moves when `pandoc_markdown` does,
-        # not when the writer does — see ROADMAP card D4.4.
+        # this is how far the **CommonMark** writer is from it. It is
+        # kept because it is what a drop-in caller actually gets from
+        # `-t markdown` today.
         markdown) echo 6 ;;
+        # The dialect writer answering the same question properly. Built
+        # 2026-08-27, after `-f markdown` started reading pandoc's
+        # markdown and left `-t markdown` writing `CommonMark` — an
+        # asymmetry worth closing. The CommonMark writer scores 6 against this
+        # same pandoc writer; this one scores 15.
+        pandoc_markdown) echo 15 ;;
         *)        echo 0 ;;
     esac
 }
@@ -110,13 +117,17 @@ summary=""
 # 12/12 here, and every one of the five bugs behind that was real.
 # `commonmark` and `markdown` are the same ferrodoc writer measured
 # against two different pandoc writers — see `floor_for` above.
-for format in html commonmark markdown gfm latex rst asciidoc plain; do
+for format in html commonmark markdown pandoc_markdown gfm latex rst asciidoc plain; do
     case "$format" in
         html|plain) wrap=none ;;
         *) wrap=preserve ;;
     esac
     mine=$format
     [ "$format" != commonmark ] || mine=markdown
+    # `pandoc_markdown` is *this* writer's name for pandoc's dialect;
+    # pandoc spells the same thing `markdown`.
+    theirs=$format
+    [ "$format" != pandoc_markdown ] || theirs=markdown
     same=0 total=0
     # **Every document twice: as it falls, and filled.** The second mode
     # is pandoc's own default, and nothing measured it until 2026-08-26 —
@@ -131,7 +142,7 @@ for format in html commonmark markdown gfm latex rst asciidoc plain; do
             for doc in $pattern; do
                 total=$((total + 1))
                 ( ulimit -v 6000000
-                  pandoc "$doc" -f "$from" -t "$format" --wrap="$mode" --columns=72 \
+                  pandoc "$doc" -f "$from" -t "$theirs" --wrap="$mode" --columns=72 \
                       --syntax-highlighting=none ) > "$work/p" 2>/dev/null
                 "$FERRODOC" "$doc" -f "$from" -t "$mine" --wrap="$mode" --columns=72 \
                       --no-highlight > "$work/f" 2>/dev/null

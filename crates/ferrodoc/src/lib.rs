@@ -277,7 +277,7 @@ impl Format {
     /// round-trips, and a writer nothing gates is worth less than the
     /// error saying it does not exist.
     pub fn writable(self) -> bool {
-        self != Format::PandocMarkdown
+        true
     }
 
     /// The name used in messages.
@@ -798,7 +798,12 @@ pub fn render_with_media(
         Format::Gfm => Ok(ferrodoc_markdown::write_gfm(doc).into_bytes()),
         #[cfg(not(feature = "markdown"))]
         Format::Gfm => Err(Error::NotCompiled(to)),
-        Format::PandocMarkdown => Err(Error::NotWritable(to)),
+        #[cfg(feature = "markdown")]
+        Format::PandocMarkdown => {
+            Ok(ferrodoc_markdown::write_pandoc_markdown(doc).into_bytes())
+        }
+        #[cfg(not(feature = "markdown"))]
+        Format::PandocMarkdown => Err(Error::NotCompiled(to)),
         #[cfg(feature = "html")]
         Format::Html => Ok(ferrodoc_html::write_html(doc).into_bytes()),
         #[cfg(not(feature = "html"))]

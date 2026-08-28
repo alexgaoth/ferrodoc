@@ -39,16 +39,64 @@ use std::fmt::Write as _;
 /// What a footnote body's continuation lines carry, as pandoc writes them.
 const INDENT: &str = "    ";
 
+/// Which markdown this writer is writing.
+///
+/// `CommonMark` and `Gfm` differ in four constructs a document can carry;
+/// `Pandoc` differs from both in what it does to *text* — see
+/// [`write_pandoc_markdown`].
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Flavour {
+    /// `CommonMark`, which is what `-t markdown` writes.
+    #[default]
+    CommonMark,
+    /// `GitHub` Flavored Markdown.
+    Gfm,
+    /// Pandoc's own markdown.
+    Pandoc,
+}
+
+/// Render a document as **pandoc's own markdown**, the dialect
+/// `pandoc -t markdown` writes.
+///
+/// Every rule here was probed by handing pandoc a JSON AST and reading
+/// the bytes back:
+///
+/// | in the tree | written |
+/// |---|---|
+/// | `—` `–` `…` | `---` `--` `...` |
+/// | `'` `"` `~` | `\'` `\"` `\~` |
+/// | `LineBreak` | a `\` at the end of the line |
+/// | `RawInline("html", "<em>")` | `` `<em>`{=html} `` |
+/// | `Header` with an identifier | `# T {#myid}` |
+/// | `Note` | `[^1]`, and its body after the block |
+/// | `DefinitionList` | `Term`, blank line, `:   Def` |
+/// | `Div` with attributes | `::: {#d .warn}` … `:::` |
+///
+/// The un-smartening is the surprising half: pandoc reads `---` as an
+/// em-dash and writes an em-dash back out as `---`, so a document round
+/// trips through the dialect unchanged.
+#[must_use]
+pub fn write_pandoc_markdown(doc: &Pandoc) -> String {
+    render_with(doc, Flavour::Pandoc, None)
+}
+
+/// The same, filled to `columns`.
+#[must_use]
+pub fn write_pandoc_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
+    render_with(doc, Flavour::Pandoc, Some(columns))
+}
+
 /// Render a document as `CommonMark`.
+#[must_use]
 pub fn write_markdown(doc: &Pandoc) -> String {
-    render(doc, false)
+    render(doc, Flavour::CommonMark)
 }
 
 /// Render a document as `CommonMark`, filled to `columns`.
 ///
 /// See [`write_gfm_wrapped`] for what "breakable" means here.
 pub fn write_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
-    render_with(doc, false, Some(columns))
+    render_with(doc, Flavour::CommonMark, Some(columns))
 }
 
 /// Render a document as `GitHub Flavored Markdown`, filled to `columns`.
@@ -63,7 +111,7 @@ pub fn write_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
 /// breaking at one of those would change what the text means rather than
 /// how it looks.
 pub fn write_gfm_wrapped(doc: &Pandoc, columns: usize) -> String {
-    render_with(doc, true, Some(columns))
+    render_with(doc, Flavour::Gfm, Some(columns))
 }
 
 /// Render a document as `GitHub Flavored Markdown`.
@@ -76,16 +124,16 @@ pub fn write_gfm_wrapped(doc: &Pandoc, columns: usize) -> String {
 /// A table always keeps its grid. Everything a pipe table cannot express
 /// degrades in a stated way rather than silently: see the module docs.
 pub fn write_gfm(doc: &Pandoc) -> String {
-    render(doc, true)
+    render(doc, Flavour::Gfm)
 }
 
-fn render(doc: &Pandoc, gfm: bool) -> String {
-    render_with(doc, gfm, None)
+fn render(doc: &Pandoc, flavour: Flavour) -> String {
+    render_with(doc, flavour, None)
 }
 
-fn render_with(doc: &Pandoc, gfm: bool, columns: Option<usize>) -> String {
+fn render_with(doc: &Pandoc, flavour: Flavour, columns: Option<usize>) -> String {
     let mut out = String::new();
-    let mut writer = Writer { gfm, columns, bullet: '-', ..Writer::default() };
+    let mut writer = Writer { flavour, columns, bullet: '-', ..Writer::default() };
     writer.blocks(&mut out, &doc.blocks, "");
     writer.flush_notes(&mut out);
     // Exactly one trailing newline, like every other writer here.
@@ -129,7 +177,7 @@ struct Writer {
     /// `*`, because its parent is emphasis that wraps nothing else.
     alternate: bool,
     /// Whether the GFM extensions are available.
-    gfm: bool,
+    flavour: Flavour,
     /// Where in the document the writer stands, which is what decides
     /// whether an escape is needed at all.
     at: Standing,
@@ -156,6 +204,20 @@ const BREAK: char = '\0';
 struct Position {
     after_container: bool,
     first_in_item: bool,
+}
+
+impl Writer {
+    /// Whether the four GFM constructs are available: pipe tables, task
+    /// items, strikethrough, and the extra escaping a bare URL needs.
+    fn gfm(&self) -> bool {
+        self.flavour == Flavour::Gfm
+    }
+
+    /// Whether this is pandoc's own markdown, which differs from both of
+    /// the others in what it does to *text*.
+    fn pandoc(&self) -> bool {
+        self.flavour == Flavour::Pandoc
+    }
 }
 
 impl Writer {
@@ -218,9 +280,9 @@ impl Writer {
         let index = self.notes.len();
         self.notes.push(String::new());
         let mut body = String::new();
-        self.blocks(&mut body, blocks, if self.gfm { INDENT } else { "" });
+        self.blocks(&mut body, blocks, if self.gfm() { INDENT } else { "" });
         self.notes[index] = body;
-        let caret = if self.gfm { "^" } else { "" };
+        let caret = if self.gfm() { "^" } else { "" };
         let _ = write!(out, "[{caret}{}]", index + 1);
     }
 
@@ -238,7 +300,7 @@ impl Writer {
         for (index, body) in std::mem::take(&mut self.notes).iter().enumerate() {
             let body = body.trim_end();
             out.push('\n');
-            if self.gfm {
+            if self.gfm() {
                 // The body was rendered under `INDENT`; pandoc puts the
                 // first line on the label's line and leaves the rest
                 // indented.
@@ -434,7 +496,7 @@ impl Writer {
             }
             // A table with no columns has no pipe-table spelling at all —
             // not even an empty one — so it degrades like the rest.
-            Block::Table(table) if self.gfm && !table.colspecs.is_empty() => {
+            Block::Table(table) if self.gfm() && !table.colspecs.is_empty() => {
                 self.pipe_table(out, table, prefix);
             }
             Block::Figure(..) | Block::Table(_) => Self::unrepresentable(out, block, prefix),
@@ -449,7 +511,7 @@ impl Writer {
         // A `☐`/`☒` opening an item is what a GFM task item reads as, so
         // write it back as one. Both spellings re-read to the same
         // document; the brackets are the one a reader recognizes.
-        let tasks: Vec<Option<bool>> = if self.gfm {
+        let tasks: Vec<Option<bool>> = if self.gfm() {
             items.iter().map(|item| task_state(item)).collect()
         } else {
             vec![None; items.len()]
@@ -774,7 +836,7 @@ impl Writer {
 
     fn inline(&mut self, out: &mut String, inline: &Inline) {
         match inline {
-            Inline::Str(text) => escape_text(out, text, self.gfm, self.at.preceded),
+            Inline::Str(text) => escape_text(out, text, self.flavour, self.at.preceded),
             Inline::Space => out.push(if self.columns.is_some() { BREAK } else { ' ' }),
             // A soft break is a real line break in the source, and this
             // writer never re-wraps, so keeping it is both faithful and
@@ -787,7 +849,10 @@ impl Writer {
             // the line reads as a blank one and splits the paragraph in
             // two. A backslash is a hard break wherever it stands.
             Inline::LineBreak => {
-                if out.is_empty() || out.ends_with('\n') {
+                // Pandoc's dialect always writes the backslash; the two
+                // spaces are `CommonMark`'s spelling and are invisible in
+                // a diff, which is why pandoc does not use them.
+                if self.pandoc() || out.is_empty() || out.ends_with('\n') {
                     out.push_str("\\\n");
                 } else {
                     out.push_str("  \n");
@@ -806,7 +871,7 @@ impl Writer {
                 let text = self.nested(inner, false);
                 let _ = write!(out, "**{text}**");
             }
-            Inline::Strikeout(inner) if self.gfm => self.strikeout(out, inner),
+            Inline::Strikeout(inner) if self.gfm() => self.strikeout(out, inner),
             // No markdown syntax for any of these, so pandoc falls back to
             // raw HTML — which markdown allows inline and every renderer
             // shows. Dropping the tag instead loses meaning rather than
@@ -918,7 +983,16 @@ impl Writer {
                 out.push(')');
             }
             Inline::RawInline(format, text) => {
-                if format.0 == "html" {
+                // **Pandoc's dialect can say what raw text is**, and does:
+                // `` `<em>`{=html} ``. `CommonMark` has no way to mark it,
+                // so it goes out bare and is read back as markup.
+                if self.pandoc() {
+                    let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+                    let ticks = "`".repeat(longest + 1);
+                    let padded = text.starts_with('`') || text.ends_with('`');
+                    let space = if padded { " " } else { "" };
+                    let _ = write!(out, "{ticks}{space}{text}{space}{ticks}{{={}}}", format.0);
+                } else if format.0 == "html" {
                     out.push_str(text);
                 }
             }
@@ -1219,13 +1293,60 @@ fn opens_autolink(out: &str, ch: char) -> bool {
 ///   so `a&amp;b` reads back as `a&b`;
 /// - the GFM autolink triggers. Pandoc writes literal `http://x` bare and
 ///   its own reader turns the text into a link.
-fn escape_text(out: &mut String, text: &str, gfm: bool, preceded: bool) {
+fn escape_text(out: &mut String, text: &str, flavour: Flavour, preceded: bool) {
+    let gfm = flavour == Flavour::Gfm;
+    // **Pandoc's dialect un-smartens as it writes.** It reads `---` as an
+    // em-dash, so it writes an em-dash back out as `---` and the document
+    // round trips; and it escapes the three characters its own reader
+    // would otherwise turn into something else. Every one probed by
+    // handing pandoc a JSON AST and reading the bytes back.
+    escape_text_inner(out, text, gfm, preceded, flavour == Flavour::Pandoc);
+}
+
+fn escape_text_inner(
+    out: &mut String,
+    text: &str,
+    gfm: bool,
+    preceded: bool,
+    pandoc: bool,
+) {
     let mut chars = text.chars().peekable();
     let mut escaped_bang = false;
     while let Some(ch) = chars.next() {
         let next = chars.peek().copied();
         let after_bang = std::mem::take(&mut escaped_bang);
         let at_line_start = out.is_empty() || out.ends_with('\n');
+        // **Four characters pandoc's dialect escapes and `CommonMark`
+        // does not**, because its own reader would otherwise read them as
+        // a quote, a subscript or a table: `'`, `"`, `~` and `|`. The
+        // pipe escapes *everywhere*, not only in a table — `a | b` in an
+        // ordinary paragraph comes back `a \| b`. Probed one at a time.
+        // **The un-smartening writes its dashes unescaped**, and a
+        // literal one is escaped — which is the whole reason these two
+        // decisions have to be made in the same pass. Substituting first
+        // and escaping afterwards turned every em-dash into `\-\--`.
+        if pandoc && matches!(ch, '—' | '–' | '…') {
+            out.push_str(match ch {
+                '—' => "---",
+                '–' => "--",
+                _ => "...",
+            });
+            continue;
+        }
+        if pandoc && matches!(ch, '\'' | '"' | '~' | '|') {
+            out.push('\\');
+            out.push(ch);
+            continue;
+        }
+        // **A `-` followed by another is escaped**, wherever it stands —
+        // `a---b` comes back `a\-\--b` and `a - b` is untouched. Every
+        // dash of a run but the last, which is the same rule seen from
+        // the other end, and it is not the line-start rule `CommonMark`
+        // needs: this fires in the middle of a word.
+        if pandoc && ch == '-' && next == Some('-') {
+            out.push_str("\\-");
+            continue;
+        }
         // A heading's text cannot **open** a block: the `## ` in front of
         // it has already decided what the line is, so the escapes that
         // exist to stop a list or a setext rule are dead weight there.
