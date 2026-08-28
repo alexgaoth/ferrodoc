@@ -317,9 +317,14 @@ jobs:
             #   top level.
             # Anything else is a failure.
             # Both at their defaults: `--wrap=auto` at 72 on either side
-            # since 2026-08-24, so naming a mode here would compare
-            # ferrodoc's default with something nobody asks for.
-            pandoc "$doc" -f commonmark -t rst > pandoc.rst
+            # since 2026-08-24, and **the same dialect** since 2026-08-27,
+            # when `markdown` became pandoc's markdown on the way in.
+            # Naming a mode — or a dialect — here would compare ferrodoc's
+            # default with something nobody asks for, and spelling
+            # `-f commonmark` on this side alone did exactly that for
+            # three commits: both documents stopped being byte-identical
+            # and the tolerance below stopped applying.
+            pandoc "$doc" -t rst > pandoc.rst
             if diff -q "$name.rst" pandoc.rst >/dev/null; then
               echo "sphinx refused $name; pandoc writes the same bytes, so this is the format"
             else
@@ -346,7 +351,10 @@ jobs:
             # asciidoctor says "section title out of sequence". Pandoc's
             # AsciiDoc for it is byte-identical to this writer's, which
             # is what makes it the document's limit rather than ours.
-            pandoc "$doc" -f commonmark -t asciidoc > pandoc.adoc
+            # Both at their defaults, and so the same dialect — see the
+            # sphinx step above for what naming one on this side alone
+            # did.
+            pandoc "$doc" -t asciidoc > pandoc.adoc
             if diff -q "$name.adoc" pandoc.adoc >/dev/null; then
               echo "asciidoctor refused $name; pandoc writes the same bytes, so this is the format"
             else
