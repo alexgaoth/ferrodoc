@@ -18,9 +18,10 @@ Any other language with an FFI links the C ABI in
 > **It is not a drop-in `pandoc`, and the number is in the repository.**
 > `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
 > from public Makefiles and CI files — through both binaries and compares
-> every byte: **10/48 identical**, 0 refused for a missing flag. What
-> stands between that and the rest is one decision, named and measured
-> below. The bet here is the *library*, not the command line.
+> every byte: **26/48 identical**, with 0 refused for a missing flag. The
+> remaining 26 rows are classified by the gate: one is deliberate and 25
+> are implementation work. The bet here is the *library*, not a claim of
+> general command-line replacement.
 
 ## Why you would switch
 
@@ -142,7 +143,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
-| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **14/20** over every markdown document in `corpus/`, and **498/652** over the CommonMark spec — which is why `-f markdown` is still CommonMark here |
+| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **14/20** over every markdown document in `corpus/`, and **498/652** over the CommonMark spec; `-f markdown` uses this dialect, while `-f commonmark` selects CommonMark |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **37/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **646/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
@@ -180,31 +181,12 @@ and it belongs here beside the numbers rather than only in
 --syntax-highlighting=none --wrap=none`; `diff-epub-write` passes the first
 of those; the LaTeX and RST round trips pass `--wrap=preserve`. Wrapping is
 typesetting rather than content, so comparing against it would measure who
-guessed the same column. Highlighting is a rendering choice this project
-does not make — and unlike wrapping it is **visible**, so a reader who
-checks the `652/652` with plain `pandoc -t html` sees a difference on the
-first code block:
-
-```console
-$ printf '```rust\nfn main() {}\n```\n' | pandoc -f gfm -t html
-<div class="sourceCode" id="cb1"><pre
-class="sourceCode rust"><code class="sourceCode rust"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">fn</span> main() <span class="op">{}</span></span></code></pre></div>
-
-$ printf '```rust\nfn main() {}\n```\n' | ferrodoc -f gfm -t html
-<pre class="rust"><code>fn main() {}</code></pre>
-```
-
-Give pandoc the flag and the same block comes back byte for byte:
-
-```console
-$ printf '```rust\nfn main() {}\n```\n' | pandoc -f gfm -t html --syntax-highlighting=none --wrap=none
-<pre class="rust"><code>fn main() {}</code></pre>
-```
-
-So the difference is the highlighting and nothing else — structure,
-escaping and attributes match either way. Syntax highlighting is not
-implemented here, and `COMPATIBILITY.md` records it as a known loss rather
-than a footnote.
+guessed the same column. The muted HTML gate isolates structure, escaping and
+attributes from presentation. Highlighting has its own oracle:
+`scripts/highlight.sh` checks **26 real C, Python, and shell-family files**
+byte-for-byte against pandoc. Other languages are emitted as unhighlighted
+code, an explicit visible gap against pandoc's default rather than a hidden
+part of the `652/652` claim.
 
 `diff-write` and `diff-odt-write` are the office writers' oracle: both
 engines write the same AST to a `.docx` (or `.odt`), pandoc reads both back,
@@ -267,7 +249,7 @@ library to a project:
 
 ```toml
 [dependencies]
-ferrodoc = "0.2"
+ferrodoc = "0.7"
 ```
 
 ```sh
@@ -284,21 +266,20 @@ cat notes.md | ferrodoc -f markdown -t docx -o notes.docx
 ferrodoc --help                          # every option and format
 ```
 
-Inputs: `markdown` (`commonmark`, `md`), `gfm`, `html`, `docx`, `odt`, `epub`,
-`ipynb`, `json` (the pandoc AST). Outputs: those plus `latex`, `rst`,
-`asciidoc` and `plain`.
+CLI inputs: `markdown` (pandoc's dialect; `md`), `commonmark`, `gfm`, `html`,
+`docx`, `odt`, `epub`, `ipynb`, `json` (the pandoc AST). Outputs:
+`markdown` (CommonMark), `pandoc_markdown` (pandoc's dialect), and those
+formats plus `latex`, `rst`, `asciidoc` and `plain`.
 
-> **`markdown` here is CommonMark, which is not what `pandoc -f markdown`
-> means.** Pandoc's own dialect adds YAML metadata blocks, header
-> attributes (`# H {#id .class}`), definition lists and
-> superscript/subscript; none of those are read here, and they come through
-> as the literal text they are written with. `-f pandoc_markdown` reads
-> them — and **does not yet alias `markdown`**, because measured against
-> `pandoc -f markdown` over every markdown document in `corpus/` it agrees
-> on **6 of 20**. Aliasing a reader that disagrees with pandoc on two
-> thirds of a corpus would move the difference from a name you have to
-> type to every conversion you already run. The gap is `smart` quotes,
-> `implicit_figures`, and code spans inside table cells:
+> **CLI input `markdown` is pandoc's markdown dialect.** This matches
+> `pandoc -f markdown` and the default inferred for `.md` files; use
+> `-f commonmark` when that stricter dialect is intended. The explicit
+> `pandoc_markdown` name is available on both sides. `-t markdown` remains
+> the CommonMark writer for compatibility with ferrodoc's original output
+> name; use `-t pandoc_markdown` for pandoc's dialect. The reader is not
+> complete: it agrees on **14 of 20** markdown documents in `corpus/` and
+> **498 of 652** CommonMark-spec examples. Its remaining gaps include
+> parser-level emphasis and link rules, not merely extensions:
 >
 > ```sh
 > cargo run -p ferrodoc-harness -- diff-pandoc-md corpus --verbose
@@ -337,7 +318,7 @@ at a time is what let the default flip.
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
 real pandoc command lines — collected from public Makefiles, CI files and
 scripts — through both binaries and compares every byte either wrote,
-stdout, output files and stderr. **22/48 command lines identical**, with
+stdout, output files and stderr. **26/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of
@@ -347,11 +328,11 @@ agree. Reading `markdown` as pandoc's dialect rather than CommonMark —
 on the way in, on the way out, and under the deprecated name
 `markdown_github` — accounted for 23 misses on its own until
 **2026-08-27, when the default became pandoc's dialect** and the number
-went 12/48 to 22/48. It now accounts for **4**, with **1** more together
+went 12/48 to 22/48, and the table of contents took it to 26/48. It now accounts for **4**, with **1** more together
 with syntax highlighting, which accounts for **8** by itself. One row is
 a difference this project has decided to keep.
 
-**That leaves 12**, and they are the honest remainder: gaps in this
+**That leaves 8**, and they are the honest remainder: gaps in this
 project's own reading of pandoc's dialect, which the old default hid
 behind a decision. The number stopped being one decision away and became
 work.

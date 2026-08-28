@@ -479,8 +479,8 @@ pub fn toc_list_wrapped(doc: &Pandoc, depth: i64, id_prefix: &str, wrap: Wrap) -
         nav
     } else {
         nav.replace(
-            &format!("\" id=\"toc-{id_prefix}"),
-            &format!("\" id=\"{id_prefix}toc-"),
+            &format!("\"{BREAK}id=\"toc-{id_prefix}"),
+            &format!("\"{BREAK}id=\"{id_prefix}toc-"),
         )
     };
     let nav = nav
@@ -522,9 +522,14 @@ fn collect_toc(blocks: &[Block], depth: i64, out: &mut Vec<(i64, String)>) {
                 }
                 let mut html = String::new();
                 if !attr.identifier.is_empty() {
-                    html.push_str("<a href=\"#");
+                    // **The attribute gaps are break marks**, as they are
+                    // in a footnote reference: pandoc fills the contents
+                    // like any other text and breaks a long `<a>` between
+                    // its attributes. Writing a literal space here left
+                    // every `--toc` page with over-long lines.
+                    let _ = write!(html, "<a{BREAK}href=\"#");
                     escape_attribute(&mut html, &attr.identifier);
-                    html.push_str("\" id=\"toc-");
+                    let _ = write!(html, "\"{BREAK}id=\"toc-");
                     escape_attribute(&mut html, &attr.identifier);
                     html.push_str("\">");
                 }

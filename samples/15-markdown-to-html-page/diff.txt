@@ -1,5 +1,5 @@
---- samples/15-markdown-to-html-page/pandoc.html	2026-08-26 18:57:47.827868487 -0700
-+++ samples/15-markdown-to-html-page/ferrodoc.html	2026-08-26 18:57:47.768868478 -0700
+--- samples/15-markdown-to-html-page/pandoc.html	2026-08-27 21:17:02.349086323 -0700
++++ samples/15-markdown-to-html-page/ferrodoc.html	2026-08-27 21:17:02.249086500 -0700
 @@ -169,71 +169,66 @@
        vertical-align: middle;
      }
@@ -124,25 +124,3 @@
    </style>
  </head>
  <body>
-@@ -245,15 +240,15 @@
- exists</a></li>
- <li><a href="#rollout-schedule" id="toc-rollout-schedule">Rollout
- schedule</a></li>
--<li><a href="#what-each-team-has-to-do"
--id="toc-what-each-team-has-to-do">What each team has to do</a>
-+<li><a href="#what-each-team-has-to-do" id="toc-what-each-team-has-to-do">What
-+each team has to do</a>
- <ul>
- <li><a href="#checklist" id="toc-checklist">Checklist</a></li>
- </ul></li>
--<li><a href="#running-a-conversion"
--id="toc-running-a-conversion">Running a conversion</a></li>
--<li><a href="#awkward-cases-on-purpose"
--id="toc-awkward-cases-on-purpose">Awkward cases, on purpose</a></li>
-+<li><a href="#running-a-conversion" id="toc-running-a-conversion">Running
-+a conversion</a></li>
-+<li><a href="#awkward-cases-on-purpose" id="toc-awkward-cases-on-purpose">Awkward
-+cases, on purpose</a></li>
- <li><a href="#sign-off" id="toc-sign-off">Sign-off</a></li>
- </ul></li>
- </ul>

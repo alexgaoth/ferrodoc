@@ -2251,6 +2251,12 @@ that makes the two agree. On the 38 misses in 48 real command lines:
 | a difference this project keeps (`dropin-006`) | 1 |
 | neither | **12** |
 
+A **table of contents** took it from 22/48 to 26/48 on 2026-08-27: the
+`<a>` of every TOC entry was written with a literal space between its
+attributes where the rest of this writer marks a break opportunity, so
+pandoc filled those lines and this did not. Four `--toc` command lines
+were byte-identical the moment it did.
+
 Those first two rows read **17** and **10** before the default changed.
 What is left is the honest remainder: twelve rows are gaps in this
 project's own reading of pandoc's dialect, which the old default kept out

@@ -1,5 +1,5 @@
---- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-26 18:57:49.754868804 -0700
-+++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-26 18:57:49.671868790 -0700
+--- samples/13-markdown-to-epub/pandoc.readback.md	2026-08-27 21:17:03.709083927 -0700
++++ samples/13-markdown-to-epub/ferrodoc.readback.md	2026-08-27 21:17:03.641084047 -0700
 @@ -92,7 +92,7 @@
  
  A link with a title: [the spec](https://example.com/spec "Format spec"). A bare autolink: <https://example.com/status>. An email: <ops@example.com>.
