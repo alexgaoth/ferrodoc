@@ -332,18 +332,7 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
             }
             out.push_str("\\end{itemize}\n");
         }
-        Block::DefinitionList(entries) => {
-            out.push_str("\\begin{description}\n");
-            for (term, definitions) in entries {
-                out.push_str("\\item[");
-                inlines(term, out);
-                out.push_str("]\n");
-                for definition in definitions {
-                    blocks(definition, depth, out);
-                }
-            }
-            out.push_str("\\end{description}\n");
-        }
+        Block::DefinitionList(entries) => definition_list_to(entries, depth, out),
         Block::Header(level, attr, list) => {
             let index = usize::try_from(*level).unwrap_or(1).saturating_sub(1);
             let mut rendered = String::new();
@@ -422,7 +411,15 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
             out.push_str("\\end{figure}\n");
         }
         // A div carries no LaTeX of its own; its content is the content.
-        Block::Div(_, inner) => blocks(inner, depth, out),
+        // LaTeX has no grouping block, so a div is its content — but an
+        // identifier on it is an anchor, and pandoc keeps that.
+        Block::Div(attr, inner) => {
+            if !attr.identifier.is_empty() {
+                label_to(&attr.identifier, out);
+                out.push('\n');
+            }
+            blocks(inner, depth, out);
+        }
         // Raw content is another format's syntax — except LaTeX's own,
         // which is passed through as written. That is the whole point of
         // a raw block.
@@ -432,6 +429,42 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
                 out.push('\n');
             }
         }
+    }
+}
+
+/// A `description` environment, one `\item[term]` per entry.
+fn definition_list_to(
+    entries: &[(Vec<Inline>, Vec<Vec<Block>>)],
+    depth: usize,
+    out: &mut String,
+) {
+            out.push_str("\\begin{description}\n");
+            for (term, definitions) in entries {
+                out.push_str("\\item[");
+                inlines(term, out);
+                out.push_str("]\n");
+                // **A blank line between definitions.** Without it two
+                // definitions run into one paragraph.
+                for (index, definition) in definitions.iter().enumerate() {
+                    if index > 0 {
+                        out.push('\n');
+                    }
+                    blocks(definition, depth, out);
+                }
+            }
+            out.push_str("\\end{description}\n");
+}
+
+/// `\protect\phantomsection\label{id}`, the anchor pandoc writes for
+/// an identifier LaTeX has nowhere else to put.
+///
+/// `\phantomsection` is what makes `\label` point at the right place
+/// when there is no sectioning command to attach it to, and `\protect`
+/// keeps it safe inside a moving argument. Nothing at all for an empty
+/// identifier.
+fn label_to(identifier: &str, out: &mut String) {
+    if !identifier.is_empty() {
+        let _ = write!(out, "\\protect\\phantomsection\\label{{{identifier}}}");
     }
 }
 
@@ -509,11 +542,18 @@ fn ordered_list_to(
     if attrs.start != 1 {
         let _ = writeln!(out, "\\setcounter{{{counter}}}{{{}}}", attrs.start - 1);
     }
-    let _ = writeln!(
-        out,
-        "\\def\\label{counter}{{{}}}",
-        enumerate_style(attrs.style, attrs.delim, &counter)
-    );
+    // **A list that names neither a style nor a delimiter gets no
+    // `\def`** — `enumerate`'s own default is what it asked for, and
+    // pandoc leaves it alone.
+    if attrs.style != ListNumberStyle::DefaultStyle
+        || attrs.delim != ListNumberDelim::DefaultDelim
+    {
+        let _ = writeln!(
+            out,
+            "\\def\\label{counter}{{{}}}",
+            enumerate_style(attrs.style, attrs.delim, &counter)
+        );
+    }
     tightlist(items, out);
     for item in items {
         item_to(item, depth + 1, out);
@@ -624,13 +664,24 @@ fn table_to(table: &Table, out: &mut String) {
     // `\endlastfoot` at the bottom of the last, so the rules come first
     // and the body rows follow. Written the other way round the rules are
     // ordinary rows and the table has no repeating head at all.
-    out.push_str("\\toprule\\noalign{}\n");
+    let mut head = String::new();
+    head.push_str("\\toprule\\noalign{}\n");
     for row in &table.head.rows {
-        row_to(row, columns, out);
+        row_to(row, columns, &mut head);
     }
     if !table.head.rows.is_empty() {
-        out.push_str("\\midrule\\noalign{}\n");
+        head.push_str("\\midrule\\noalign{}\n");
     }
+    // **A captioned table declares its head twice.** The caption belongs
+    // to the first page only, so `\endfirsthead` closes a copy that
+    // carries it and `\endhead` closes the one every later page
+    // repeats. Written once, a table broken across pages loses its
+    // header on page two.
+    if captioned {
+        out.push_str(&head);
+        out.push_str("\\endfirsthead\n");
+    }
+    out.push_str(&head);
     out.push_str("\\endhead\n\\bottomrule\\noalign{}\n\\endlastfoot\n");
     for body in &table.bodies {
         for row in body.head.iter().chain(&body.body) {
@@ -718,7 +769,9 @@ fn inline_to(inline: &Inline, out: &mut String) {
         Inline::LineBreak => out.push_str("\\\\\n"),
         Inline::Emph(inner) => wrap("emph", inner, out),
         Inline::Strong(inner) => wrap("textbf", inner, out),
-        Inline::Underline(inner) => wrap("underline", inner, out),
+        // `\ul` is ulem's, which the template loads and pandoc uses;
+        // `\underline` does not break across lines.
+        Inline::Underline(inner) => wrap("ul", inner, out),
         // `ulem`'s name, but the preamble defines it: LaTeX has no
         // strikeout of its own and `ulem` is not in a base TeX.
         Inline::Strikeout(inner) => wrap("st", inner, out),
@@ -734,9 +787,19 @@ fn inline_to(inline: &Inline, out: &mut String) {
             inlines(inner, out);
             out.push_str(close);
         }
-        // A citation and a span are both their content here: LaTeX has
-        // no form for either that survives pandoc's reader.
-        Inline::Cite(_, inner) | Inline::Span(_, inner) => inlines(inner, out),
+        // **A span is braced, and an identifier on it is an anchor.**
+        // LaTeX has no form for the classes, but `\label` carries the
+        // name, and the braces are what pandoc writes even for a span
+        // that says nothing else.
+        Inline::Span(attr, inner) => {
+            label_to(&attr.identifier, out);
+            out.push('{');
+            inlines(inner, out);
+            out.push('}');
+        }
+        // A citation is its content: LaTeX has no form that survives
+        // pandoc's reader.
+        Inline::Cite(_, inner) => inlines(inner, out),
         Inline::Code(_, code) => out.push_str(&verbatim(code)),
         Inline::Math(kind, math) => {
             let (open, close) = match kind {
@@ -750,7 +813,8 @@ fn inline_to(inline: &Inline, out: &mut String) {
                 out.push_str(text);
             }
         }
-        Inline::Link(_, inner, target) => {
+        Inline::Link(attr, inner, target) => {
+            label_to(&attr.identifier, out);
             // A URL is not escaped the way text is — `\href`'s first
             // argument is verbatim-ish, and escaping `~` or `%` there
             // breaks the link rather than the typesetting.

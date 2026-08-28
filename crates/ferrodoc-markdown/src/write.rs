@@ -1897,10 +1897,12 @@ fn escape_text_inner(
             // `\!\[CDATA\[`, and an ODT holding a CDATA section is where
             // the difference showed up.
             '[' if after_bang => out.push(ch),
-            // `$` is **the dialect's** — it opens math there and is
-            // ordinary text in `CommonMark` and gfm, where pandoc leaves
-            // it bare and so does this.
-            '$' if !pandoc => out.push(ch),
+            // **`CommonMark` alone leaves `$` bare.** It opens math in
+            // the dialect and gfm escapes it too, so only the strict
+            // reader treats it as ordinary text — measured all three
+            // ways, after a first fix that turned it off for gfm as
+            // well and traded one wrong writer for another.
+            '$' if !gfm && !pandoc => out.push(ch),
             '*' | '[' | ']' | '<' | '>' | '`' | '$' => {
                 out.push('\\');
                 out.push(ch);
