@@ -31,8 +31,10 @@ int main(void) {
     {
         size_t len = ferrodoc_result_len(html);
         const uint8_t *data = ferrodoc_result_data(html);
+        /* "markdown" is pandoc's dialect, so the heading carries the
+         * identifier pandoc gives it. */
         check("the html is what it should be",
-              len > 0 && memcmp(data, "<h1>Title</h1>", 14) == 0, NULL);
+              len > 0 && memcmp(data, "<h1 id=\"title\">Title</h1>", 25) == 0, NULL);
     }
     ferrodoc_result_free(html);
 

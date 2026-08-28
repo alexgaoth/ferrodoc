@@ -96,11 +96,19 @@ impl Format {
     ];
 
     /// Parse a format name, accepting pandoc's spellings.
+    ///
+    /// **`markdown` is pandoc's dialect, in both directions**, which is
+    /// what pandoc means by the name. It named `CommonMark` here until
+    /// 2026-08-27 on the way in and 2026-08-28 on the way out — the
+    /// second half waited only for a writer to exist. `commonmark` is
+    /// how you still ask for `CommonMark`, as it is in pandoc.
     pub fn parse(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
-            "markdown" | "commonmark" | "md" => Some(Format::Markdown),
+            "markdown" | "md" | "pandoc_markdown" | "pandoc-markdown" => {
+                Some(Format::PandocMarkdown)
+            }
+            "commonmark" => Some(Format::Markdown),
             "gfm" | "markdown_github" => Some(Format::Gfm),
-            "pandoc_markdown" | "pandoc-markdown" => Some(Format::PandocMarkdown),
             // `html5` is pandoc's own spelling and produces identical
             // bytes there; a Makefile writing `-t html5` was refused for
             // a name. `html4` is *not* an alias — pandoc's html4 writer
@@ -120,8 +128,13 @@ impl Format {
         }
     }
 
-    /// Parse a format named on the **input** side, where `markdown` is
-    /// pandoc's own dialect rather than `CommonMark`.
+    /// Parse a format named on the **input** side.
+    ///
+    /// Identical to [`Format::parse`] since 2026-08-28, when `markdown`
+    /// began naming pandoc's dialect on the way *out* as well and the
+    /// direction split it existed for closed. Kept because it is public
+    /// API, and because a caller that means "read this as input" reads
+    /// better saying so.
     ///
     /// This is what pandoc means by the name, and matching it is most of
     /// what "drop-in" is: 28 of the 48 real command lines in `dropin/`
@@ -131,14 +144,10 @@ impl Format {
     /// from pandoc's default output from **2,466 lines to 241**, and not
     /// one document is worse.
     ///
-    /// `commonmark` still names `CommonMark`. On output, `-t markdown`
-    /// intentionally writes `CommonMark`; `-t pandoc_markdown` selects the
-    /// writer for pandoc's dialect.
+    /// `commonmark` still names `CommonMark`, and `pandoc_markdown` is
+    /// still an explicit spelling of the dialect.
     pub fn parse_input(name: &str) -> Option<Self> {
-        match name.to_ascii_lowercase().as_str() {
-            "markdown" | "md" => Some(Format::PandocMarkdown),
-            other => Format::parse(other),
-        }
+        Format::parse(name)
     }
 
     /// Guess a format from a file name's extension.

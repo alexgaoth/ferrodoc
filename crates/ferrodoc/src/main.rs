@@ -91,9 +91,9 @@ FORMATS:
 /// features every entry is compiled and the two lines below come out
 /// exactly as they always did.
 const HELP_READABLE: &[(Format, &str)] = &[
-    (Format::Markdown, "markdown (commonmark, md)"),
+    (Format::PandocMarkdown, "markdown (md, pandoc_markdown)"),
     (Format::Gfm, "gfm"),
-    (Format::PandocMarkdown, "pandoc_markdown"),
+    (Format::Markdown, "commonmark"),
     (Format::Html, "html"),
     (Format::Docx, "docx"),
     (Format::Odt, "odt"),
@@ -112,15 +112,16 @@ const HELP_WRITE_ONLY: &[(Format, &str)] = &[
 
 // The `\<newline>` continuation used above would strip this line's indent,
 // so the first line sits on the assignment.
-const USAGE_TAIL: &str = "    `markdown` here is **CommonMark**, which is not what `pandoc -f markdown`
-    means. Pandoc's own dialect adds YAML metadata blocks, header attributes
-    (`# H {#id .class}`), definition lists and superscript/subscript, and
-    none of those are read: they come through as the literal text they are
-    written with. Footnotes are read by `gfm` and not by `markdown`, which
-    is also how pandoc has it.
+const USAGE_TAIL: &str = "    `markdown` is **pandoc's own dialect**, both read and written, which
+    is what `pandoc -f markdown` and `pandoc -t markdown` mean: YAML
+    metadata blocks, header attributes (`# H {#id .class}`), definition
+    lists, superscript and subscript, and pipe tables.
+
+    `commonmark` is the strict CommonMark reader and writer, and it is
+    how you ask for the older meaning of `markdown` here.
 
     `gfm` is GitHub Flavored Markdown: tables, task lists, strikethrough
-    and bare-URL links. Prefer it over `markdown` for anything with a
+    and bare-URL links. Prefer it over `commonmark` for anything with a
     table — CommonMark has no table syntax, so a table is written there
     as the raw `<table>`, which keeps it but is not pretty.
 
@@ -131,7 +132,8 @@ EXAMPLES:
     ferrodoc manual.md -s --toc -N -o manual.html   # contents and numbering
     ferrodoc notes.md -M title='Q3 review' -o notes.docx
     ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out
-    ferrodoc report.docx -t markdown        # DOCX in, CommonMark out
+    ferrodoc report.docx -t markdown        # DOCX in, pandoc's markdown out
+    ferrodoc report.docx -t commonmark      # DOCX in, strict CommonMark out
     ferrodoc page.html -t markdown          # HTML in, markdown out
     ferrodoc report.docx -t plain
     ferrodoc report.docx -t gfm --extract-media out  # and keep the pictures
@@ -1514,9 +1516,11 @@ fn format(name: &str, input: bool) -> Result<Format, String> {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    // On the input side `markdown` is pandoc's dialect, as it is in
-    // pandoc; on the output side it is still CommonMark, because there is
-    // no writer for the dialect yet.
+    // `markdown` is pandoc's dialect in **both** directions, as it is in
+    // pandoc. The two resolvers agree since the writer landed; the
+    // parameter is kept because the distinction is the kind that comes
+    // back, and a call site that has to name its direction is one that
+    // cannot silently pick the wrong one.
     let resolve = if input { Format::parse_input } else { Format::parse };
     let format = resolve(name)
         .ok_or_else(|| format!("unknown format {name:?}; known formats: {}", known()))?;
@@ -1652,7 +1656,10 @@ mod tests {
         for accepted in [
             "gfm+footnotes",
             "gfm+pipe_tables+strikeout",
-            "markdown-footnotes",
+            // `markdown` is pandoc's dialect and **does** read footnotes,
+            // so asking for them asks for nothing. It was the other way
+            // round while the name meant CommonMark.
+            "markdown+footnotes",
             "pandoc_markdown+yaml_metadata_block",
         ] {
             let base = accepted.split(['+', '-']).next().expect("a base");
@@ -1663,8 +1670,12 @@ mod tests {
         // the extension, and where it does exist.
         let off = extensions("gfm-pipe_tables").expect_err("cannot disable");
         assert!(off.contains("pipe_tables") && off.contains("cannot turn it off"), "{off}");
-        let on = extensions("markdown+footnotes").expect_err("cannot enable");
+        let on = extensions("commonmark+footnotes").expect_err("cannot enable");
         assert!(on.contains("gfm"), "{on}");
+        // And the same request the other way: the dialect reads footnotes
+        // and this build cannot switch them off.
+        let dialect = extensions("markdown-footnotes").expect_err("cannot disable");
+        assert!(dialect.contains("footnotes"), "{dialect}");
 
         // A name pandoc does not have is a typo, and saying "this dialect
         // lacks it" would send someone looking for the wrong thing. It is

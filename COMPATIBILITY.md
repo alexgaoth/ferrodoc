@@ -1371,8 +1371,7 @@ directly without asking its reader to survive anything.
 | `asciidoc` | **38/40** | 38 |
 | `gfm` | 28/40 | 28 |
 | `commonmark` | 29/40 | 29 |
-| `markdown` | 6/40 | 6 |
-| `pandoc_markdown` | **23/40** | 23 |
+| `markdown` | **23/40** | 23 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill
@@ -1434,11 +1433,13 @@ this printed a number and gated nothing while the numbers were low; it is
 a contract now that five of the seven are at the whole corpus or one
 document from it.
 
-**`pandoc_markdown` is a writer as of 2026-08-27**, and it scores
-**23/40** against `pandoc -t markdown` where the `CommonMark` writer
-scores 6. It exists because `-f markdown` began reading pandoc's dialect
-and `-t markdown` kept writing `CommonMark` — an asymmetry worth closing
-rather than explaining.
+**The dialect writer landed 2026-08-27 and took the name `markdown` on
+2026-08-28**, scoring **23/40** against `pandoc -t markdown` where the
+`CommonMark` writer scored 6. It exists because `-f markdown` began
+reading pandoc's dialect and `-t markdown` kept writing `CommonMark` —
+an asymmetry worth closing rather than explaining, and it is closed in
+both directions now. `-t commonmark` is how you ask for the older
+meaning, and `-t pandoc_markdown` still spells the dialect explicitly.
 
 Its text rules, each probed by handing pandoc a JSON AST and reading the
 bytes back: `—` `–` `…` are written **unescaped** as `---` `--` `...`,
@@ -1956,11 +1957,12 @@ Every rule is mutation-tested — turning off any one of header attributes,
 definition lists, superscript, subscript or the metadata block takes the
 gate from 3/3 to 1/3.
 
-It is also writable: `-t pandoc_markdown` is ferrodoc's spelling for
-`pandoc -t markdown`. `scripts/writers.sh` measures it at **23/40**
-byte-identical documents (both preserved and filled wrapping); the
-CommonMark writer is a different output dialect and scores 6/40 against
-that particular pandoc writer.
+It is also writable, and since 2026-08-28 it is what `-t markdown`
+means — the same name pandoc gives it. `scripts/writers.sh` measures it
+at **23/40** byte-identical documents (both preserved and filled
+wrapping); the CommonMark writer, still reachable as `-t commonmark`, is
+a different output dialect and scored 6/40 against that particular
+pandoc writer while it held the name.
 
 **Four divergences, each probed and each left rather than guessed at.**
 They were found by sweeping 42 shapes against `pandoc -f markdown -t json`;

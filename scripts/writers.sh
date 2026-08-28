@@ -78,18 +78,17 @@ floor_for() {
         # trip as a paragraph, and its `<!-- -->` list separator comes
         # back as a `RawBlock` that was never in the document.
         commonmark) echo 29 ;;
-        # And the row that keeps the other question honest: a real
-        # `pandoc -t markdown` command line gets pandoc's dialect, and
-        # this is how far the **CommonMark** writer is from it. It is
-        # kept because it is what a drop-in caller actually gets from
-        # `-t markdown` today.
-        markdown) echo 6 ;;
-        # The dialect writer answering the same question properly. Built
-        # 2026-08-27, after `-f markdown` started reading pandoc's
-        # markdown and left `-t markdown` writing `CommonMark` — an
-        # asymmetry worth closing. The CommonMark writer scores 6 against this
-        # same pandoc writer; this one scores 23.
-        pandoc_markdown) echo 23 ;;
+        # `-t markdown` against `pandoc -t markdown`: the same question
+        # asked of both binaries, which is what it always should have
+        # been. The **CommonMark** writer scored 6 here while it was the
+        # one `-t markdown` reached; the dialect writer scores 23, and
+        # took the name on 2026-08-28.
+        #
+        # There is no `pandoc_markdown` row beside this one. It is an
+        # accepted spelling of the same `Format`, so it cannot diverge
+        # from this row, and two identical numbers in a published table
+        # read as two pieces of evidence.
+        markdown) echo 23 ;;
         *)        echo 0 ;;
     esac
 }
@@ -117,15 +116,17 @@ summary=""
 # 12/12 here, and every one of the five bugs behind that was real.
 # `commonmark` and `markdown` are the same ferrodoc writer measured
 # against two different pandoc writers — see `floor_for` above.
-for format in html commonmark markdown pandoc_markdown gfm latex rst asciidoc plain; do
+for format in html commonmark markdown gfm latex rst asciidoc plain; do
     case "$format" in
         html|plain) wrap=none ;;
         *) wrap=preserve ;;
     esac
     mine=$format
-    [ "$format" != commonmark ] || mine=markdown
-    # `pandoc_markdown` is *this* writer's name for pandoc's dialect;
-    # pandoc spells the same thing `markdown`.
+    # Both sides name their dialect. `-t markdown` means pandoc's dialect
+    # in both binaries since 2026-08-28, so nothing here may inherit a
+    # default: the row that compares the **CommonMark** writer has to say
+    # `commonmark` on this side too, and it said `markdown` until the day
+    # that stopped being true.
     theirs=$format
     [ "$format" != pandoc_markdown ] || theirs=markdown
     same=0 total=0

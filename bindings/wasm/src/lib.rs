@@ -178,7 +178,13 @@ mod tests {
         let to = handle_of(b"html");
         let out = ferrodoc_convert(input, from, to);
         assert_eq!(ferrodoc_ok(out), 1);
-        assert_eq!(text_of(out), "<h1>Title</h1>\n");
+        // `markdown` is pandoc's dialect here, as it is in pandoc and in
+        // the CLI, so the heading gets the identifier pandoc gives it.
+        // This binding read `CommonMark` under that name until
+        // 2026-08-28 — the input flip had reached the CLI three weeks
+        // earlier and never reached here, because both roles resolved
+        // through `Format::parse`.
+        assert_eq!(text_of(out), "<h1 id=\"title\">Title</h1>\n");
         for handle in [input, from, to, out] {
             ferrodoc_free(handle);
             assert_eq!(ferrodoc_length(handle), 0, "handle {handle} outlived its free");

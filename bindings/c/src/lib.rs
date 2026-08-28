@@ -222,7 +222,9 @@ mod tests {
     fn a_document_converts() {
         let (ok, bytes) = convert(b"# T\n", "markdown", "html");
         assert!(ok);
-        assert_eq!(String::from_utf8_lossy(&bytes), "<h1>T</h1>\n");
+        // Pandoc's dialect, so pandoc's heading identifier — see the
+        // same assertion in `bindings/wasm`.
+        assert_eq!(String::from_utf8_lossy(&bytes), "<h1 id=\"t\">T</h1>\n");
     }
 
     #[test]

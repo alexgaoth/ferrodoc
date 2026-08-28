@@ -7,7 +7,7 @@
   const check = (name, ok, detail) => results.push({ name, ok, detail });
   try {
     const html = await convert("# Hi\n\n**bold**\n", "markdown", "html");
-    check("markdown to html", html === "<h1>Hi</h1>\n<p><strong>bold</strong></p>\n", html);
+    check("markdown to html", html === "<h1 id=\"hi\">Hi</h1>\n<p><strong>bold</strong></p>\n", html);
 
     const docx = await convert("# Hi\n", "markdown", "docx");
     check("markdown to docx is bytes",
