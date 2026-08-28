@@ -32,7 +32,8 @@
 //!   which keeps the paragraph whole and loses the soft break.
 
 use ferrodoc_ast::{
-    Alignment, Block, Inline, ListNumberDelim, MathType, Pandoc, QuoteType, Row, Table, Target,
+    Alignment, Block, Inline, ListNumberDelim, ListNumberStyle, MathType, Pandoc, QuoteType, Row,
+    Table, Target,
 };
 use std::fmt::Write as _;
 
@@ -236,21 +237,41 @@ impl Writer {
             // A raw block in another format renders to nothing, and its
             // separator goes with it — otherwise a document ending in one
             // ends with a blank line pandoc does not write.
-            if matches!(block, Block::RawBlock(format, _) if format.0 != "html") {
+            if !self.pandoc()
+                && matches!(block, Block::RawBlock(format, _) if format.0 != "html")
+            {
                 continue;
             }
             if let Some(previous) = previous {
                 // The blank line between blocks still belongs to the
                 // container: a bare newline inside a quote ends the quote.
                 push_line(out, prefix, "");
-                // Two bullet lists in a row would merge into one on
-                // re-reading; switching the bullet character splits them
-                // and, unlike a separator comment, adds no block. Two
-                // ordered lists sharing a delimiter have no such escape,
-                // so they keep the comment and the round trip loses it.
+                // Two lists in a row would merge into one on re-reading,
+                // and **the two dialects need different separators**.
+                //
+                // `CommonMark` and gfm split on a change of bullet
+                // character, which adds no block where a separator
+                // comment adds a `RawBlock`. **Pandoc's dialect does
+                // not**: `- a` then `* b` reads back there as one list,
+                // so the trick that keeps the document whole in one
+                // dialect silently merges it in the other. Measured on
+                // the pinned binary, our own `-t markdown` output:
+                //
+                // ```text
+                // pandoc -f commonmark   [BulletList, BulletList]
+                // pandoc -f markdown     [BulletList]
+                // ```
+                //
+                // So the dialect takes the comment, as pandoc's own
+                // writer does — three blocks back for two is a worse
+                // answer than two, and one is worse than both.
                 match (previous, block) {
-                    (Block::BulletList(_), Block::BulletList(_)) => {
+                    (Block::BulletList(_), Block::BulletList(_)) if !self.pandoc() => {
                         self.bullet = if self.bullet == '-' { '*' } else { '-' };
+                    }
+                    (Block::BulletList(_), Block::BulletList(_)) => {
+                        push_line(out, prefix, "<!-- -->");
+                        push_line(out, prefix, "");
                     }
                     (Block::OrderedList(before, _), Block::OrderedList(after, _))
                         if before.delim == after.delim =>
@@ -473,6 +494,9 @@ impl Writer {
     }
 
     fn block(&mut self, out: &mut String, block: &Block, prefix: &str, at: Position) {
+        if self.pandoc() && self.dialect_block(out, block, prefix) {
+            return;
+        }
         match block {
             Block::Plain(inlines) | Block::Para(inlines) => {
                 let text = self.inlines(inlines);
@@ -514,27 +538,7 @@ impl Writer {
                 }
             }
             Block::BulletList(items) => self.bullet_list(out, items, prefix),
-            Block::OrderedList(attrs, items) => {
-                // CommonMark numbers every ordered list; the roman and
-                // alphabetic styles have no syntax and degrade to numbers.
-                let (start, delim) = (attrs.start, attrs.delim);
-                self.list(out, items, prefix, move |index| {
-                    let label = (start + i64::try_from(index).unwrap_or(0)).to_string();
-                    let close = match delim {
-                        ListNumberDelim::OneParen | ListNumberDelim::TwoParens => ')',
-                        _ => '.',
-                    };
-                    // Pandoc pads the marker to four columns, or to one
-                    // past its own length when that is wider: `1.  `,
-                    // `10. `, `100. `. The continuation indent follows
-                    // from it, because the indent is the marker's width.
-                    let marker = format!("{label}{close}");
-                    format!("{marker:<width$}", width = marker.len().max(3) + 1)
-                });
-            }
-            Block::DefinitionList(items) if self.pandoc() => {
-                self.definition_list(out, items, prefix);
-            }
+            Block::OrderedList(attrs, items) => self.ordered_list(out, attrs, items, prefix),
             Block::DefinitionList(items) => {
                 // No CommonMark syntax: term then definition as paragraphs.
                 let mut first = true;
@@ -574,7 +578,11 @@ impl Writer {
                 push_wrapped(out, prefix, &text, self.columns);
             }
             Block::RawBlock(format, text) => {
-                if format.0 == "html" {
+                // **The dialect keeps a raw block whatever its format**,
+                // because `raw_attribute` gives it somewhere to live;
+                // `CommonMark` and gfm can hold only the HTML one and
+                // drop the rest rather than write it as prose.
+                if format.0 == "html" || self.pandoc() {
                     for line in text.trim_end_matches('\n').split('\n') {
                         push_line(out, prefix, line);
                     }
@@ -598,7 +606,6 @@ impl Writer {
             {
                 self.blocks(out, blocks, prefix);
             }
-            Block::Div(a, b) if self.pandoc() => self.fenced_div(out, a, b, prefix),
             Block::Div(attr, blocks) => {
                 push_line(out, prefix, &format!("<div{}>", html_attributes(attr)));
                 push_line(out, prefix, "");
@@ -862,6 +869,41 @@ impl Writer {
         }
     }
 
+    /// The blocks **pandoc's dialect spells** and the other two
+    /// flavours have no syntax for, so only they fall back to raw HTML
+    /// or to prose. Returns whether it wrote one.
+    fn dialect_block(&mut self, out: &mut String, block: &Block, prefix: &str) -> bool {
+        match block {
+            // An empty line is `| ` — the marker with its space, which
+            // `push_line` would trim away.
+            Block::LineBlock(lines) => {
+                for line in lines {
+                    let text = self.inlines(line);
+                    if text.is_empty() {
+                        out.push_str(prefix);
+                        out.push_str("| \n");
+                    } else {
+                        push_line(out, prefix, &format!("| {text}"));
+                    }
+                }
+            }
+            // **Not the `sourceCode` wrapper**, which the main match
+            // unwraps: pandoc's HTML reader puts one round every
+            // highlighted code block, and writing it as a fenced div
+            // adds a `::: {#cb1 .sourceCode}` pandoc does not.
+            Block::Div(attr, blocks)
+                if attr.classes == ["sourceCode"]
+                    && matches!(blocks.as_slice(), [Block::CodeBlock(..)]) =>
+            {
+                return false;
+            }
+            Block::Div(attr, blocks) => self.fenced_div(out, attr, blocks, prefix),
+            Block::DefinitionList(items) => self.definition_list(out, items, prefix),
+            _ => return false,
+        }
+        true
+    }
+
     /// The six inlines **pandoc's dialect spells** and the other two
     /// flavours have no syntax for, so only they fall back to raw HTML.
     ///
@@ -894,6 +936,85 @@ impl Writer {
             _ => return false,
         }
         true
+    }
+
+    /// A code span, with the delimiter and padding its content needs.
+    fn code_span(&mut self, out: &mut String, attr: &ferrodoc_ast::Attr, text: &str) {
+                // The delimiter must be longer than any run inside, and a
+                // literal backtick at either end needs padding spaces.
+                let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+                let ticks = "`".repeat(longest + 1);
+                // A reader strips one space from each end of a code span
+                // that begins and ends with one, unless it is all spaces.
+                // Padding both ends makes that strip give the text back,
+                // and also keeps a leading or trailing backtick separate
+                // from the delimiter. All-space content is never stripped,
+                // so padding it would corrupt it instead.
+                let all_spaces = text.chars().all(|c| c == ' ');
+                // Pandoc pads **whenever the delimiter is longer than one
+                // backtick**, not only where a backtick sits at the edge:
+                // `` a`b `` rather than ``a`b``. Both read back the same;
+                // the bytes are the test.
+                //
+                // It does **not** pad for a space at one end only — it
+                // writes `` `#include ` `` where this wrote
+                // `` ` #include  ` ``, and nothing is stripped on the way
+                // back either way, so the shorter is the one to match.
+                // A space at **both** ends is different: there the reader
+                // strips one from each, so pandoc's bare form loses them
+                // and the padding is what returns the text. `ROADMAP.md`
+                // is where the one-sided case showed.
+                let spaced = text.starts_with(' ') && text.ends_with(' ');
+                let pad = if !all_spaces && (ticks.len() > 1 || spaced)
+                {
+                    " "
+                } else {
+                    ""
+                };
+                let _ = write!(out, "{ticks}{pad}{text}{pad}{ticks}");
+                // **The dialect writes a code span's attributes**, which
+                // `CommonMark` has nowhere to put and drops.
+                if self.pandoc() {
+                    if let Some(a) = attributes(attr) {
+                        out.push_str(&a);
+                    }
+                }
+    }
+
+    /// An ordered list, with the marker its style and delimiter ask for.
+    fn ordered_list(
+        &mut self,
+        out: &mut String,
+        attrs: &ferrodoc_ast::ListAttributes,
+        items: &[Vec<Block>],
+        prefix: &str,
+    ) {
+                // **`fancy_lists` is a dialect feature.** CommonMark
+                // numbers every ordered list and has no `(a)` at all, so
+                // the roman and alphabetic styles degrade to numbers
+                // there and only there.
+                let (start, delim) = (attrs.start, attrs.delim);
+                let dialect = self.pandoc();
+                let style = if dialect { attrs.style } else { ListNumberStyle::Decimal };
+                self.list(out, items, prefix, move |index| {
+                    let n = start + i64::try_from(index).unwrap_or(0);
+                    let label = list_label(n, style);
+                    let marker = match delim {
+                        // `(1)` is the dialect's; CommonMark has no such
+                        // marker at all, so both parenthesised delimiters
+                        // collapse to `1)` there.
+                        ListNumberDelim::TwoParens if dialect => format!("({label})"),
+                        ListNumberDelim::OneParen | ListNumberDelim::TwoParens => {
+                            format!("{label})")
+                        }
+                        _ => format!("{label}."),
+                    };
+                    // Pandoc pads the marker to four columns, or to one
+                    // past its own length when that is wider: `1.  `,
+                    // `10. `, `100. `. The continuation indent follows
+                    // from it, because the indent is the marker's width.
+                    format!("{marker:<width$}", width = marker.len().max(3) + 1)
+                });
     }
 
     /// A marker on both sides: `~~struck~~`, `~sub~`, `^sup^`.
@@ -1221,48 +1342,23 @@ impl Writer {
                 out.push_str(&text);
             }
             Inline::Quoted(quote, inner) => {
-                let (open, close) = match quote {
-                    QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
-                    QuoteType::DoubleQuote => ('\u{201C}', '\u{201D}'),
+                // **The dialect writes straight quotes**, because its own
+                // reader turns them back into `Quoted` — `"a 'b'"` reads
+                // as a double quote around a single one. `CommonMark` has
+                // no such reader, so a straight quote there would come
+                // back as a `Str` and the markup would be lost; it gets
+                // the curly characters the quotes actually stand for.
+                let (open, close) = match (quote, self.pandoc()) {
+                    (QuoteType::SingleQuote, true) => ('\'', '\''),
+                    (QuoteType::DoubleQuote, true) => ('"', '"'),
+                    (QuoteType::SingleQuote, false) => ('\u{2018}', '\u{2019}'),
+                    (QuoteType::DoubleQuote, false) => ('\u{201C}', '\u{201D}'),
                 };
                 out.push(open);
                 out.push_str(&self.inner(inner));
                 out.push(close);
             }
-            Inline::Code(_, text) => {
-                // The delimiter must be longer than any run inside, and a
-                // literal backtick at either end needs padding spaces.
-                let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
-                let ticks = "`".repeat(longest + 1);
-                // A reader strips one space from each end of a code span
-                // that begins and ends with one, unless it is all spaces.
-                // Padding both ends makes that strip give the text back,
-                // and also keeps a leading or trailing backtick separate
-                // from the delimiter. All-space content is never stripped,
-                // so padding it would corrupt it instead.
-                let all_spaces = text.chars().all(|c| c == ' ');
-                // Pandoc pads **whenever the delimiter is longer than one
-                // backtick**, not only where a backtick sits at the edge:
-                // `` a`b `` rather than ``a`b``. Both read back the same;
-                // the bytes are the test.
-                //
-                // It does **not** pad for a space at one end only — it
-                // writes `` `#include ` `` where this wrote
-                // `` ` #include  ` ``, and nothing is stripped on the way
-                // back either way, so the shorter is the one to match.
-                // A space at **both** ends is different: there the reader
-                // strips one from each, so pandoc's bare form loses them
-                // and the padding is what returns the text. `ROADMAP.md`
-                // is where the one-sided case showed.
-                let spaced = text.starts_with(' ') && text.ends_with(' ');
-                let pad = if !all_spaces && (ticks.len() > 1 || spaced)
-                {
-                    " "
-                } else {
-                    ""
-                };
-                let _ = write!(out, "{ticks}{pad}{text}{pad}{ticks}");
-            }
+            Inline::Code(attr, text) => self.code_span(out, attr, text),
             Inline::Math(kind, text) => {
                 // Verbatim: escaping corrupts the TeX, since `\\` is a
                 // MathJax line break and `\_` a literal underscore. Probed
@@ -1272,7 +1368,7 @@ impl Writer {
                 // the dollar form is the one both readers accept.
                 write_math(out, *kind, text);
             }
-            Inline::Link(_, inner, target) => {
+            Inline::Link(attr, inner, target) => {
                 // The autolink escapes are spent inside `[…]` too, where
                 // pandoc leaves them off. A link cannot nest, so this
                 // looks like waste — but **pandoc's own reader linkifies
@@ -1290,6 +1386,11 @@ impl Writer {
                     let _ = write!(out, " \"{}\"", target.title.replace('"', "\\\""));
                 }
                 out.push(')');
+                if self.pandoc() {
+                    if let Some(a) = attributes(attr) {
+                        out.push_str(&a);
+                    }
+                }
             }
             Inline::Image(_, alt, target) => {
                 let text = self.inner(alt);
@@ -1324,6 +1425,13 @@ fn task_state(item: &[Block]) -> Option<bool> {
     let (Block::Plain(inlines) | Block::Para(inlines)) = item.first()? else {
         return None;
     };
+    // **A marker with nothing after it stays a task item here, and does
+    // not in pandoc** — one of the few places these writers differ on
+    // purpose. Pandoc writes `- ☐` for a lone ballot character, and its
+    // own reader then splits the list at it: the three-item list in
+    // `corpus/gfm/task-list-runs.gfm` comes back as a list of one and a
+    // list of two. `- [ ] ` comes back whole, so this writes that and
+    // takes the byte difference. COMPATIBILITY.md records it.
     match inlines.first()? {
         Inline::Str(marker) if marker == "\u{2610}" => Some(false),
         Inline::Str(marker) if marker == "\u{2612}" => Some(true),
@@ -1373,6 +1481,62 @@ fn fence_attributes(attr: &ferrodoc_ast::Attr) -> String {
         [class] if attr.identifier.is_empty() && attr.attributes.is_empty() => class.clone(),
         _ => attributes(attr).unwrap_or_else(|| "{}".to_owned()),
     }
+}
+
+/// The roman numerals, largest first, with the four subtractive pairs.
+const ROMAN_UNITS: [(i64, &str); 13] = [
+    (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
+    (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+];
+
+/// An ordered list marker's label, in the style the list asks for.
+///
+/// `Example` and `DefaultStyle` are both decimal — pandoc writes `1.`
+/// for an `@` list here, the `(@)` spelling being a reader feature.
+fn list_label(n: i64, style: ListNumberStyle) -> String {
+    match style {
+        ListNumberStyle::LowerAlpha => alpha_label(n, false),
+        ListNumberStyle::UpperAlpha => alpha_label(n, true),
+        ListNumberStyle::LowerRoman => roman_label(n, false),
+        ListNumberStyle::UpperRoman => roman_label(n, true),
+        ListNumberStyle::Decimal | ListNumberStyle::Example | ListNumberStyle::DefaultStyle => {
+            n.to_string()
+        }
+    }
+}
+
+/// `1 -> a`, `26 -> z`, and then round again: `27 -> a`, `28 -> b`.
+///
+/// Measured on the pinned binary, which is also where the floor comes
+/// from: a list starting at 0 is `a.`, not the `z.` a plain modulo of
+/// `n - 1` would give.
+fn alpha_label(n: i64, upper: bool) -> String {
+    let index = if n < 1 { 0 } else { (n - 1).rem_euclid(26) };
+    let base = if upper { b'A' } else { b'a' };
+    char::from(base + u8::try_from(index).unwrap_or(0)).to_string()
+}
+
+/// `1 -> i`, `3999 -> mmmcmxcix`.
+///
+/// Pandoc's own answers outside that range, measured rather than
+/// invented: below 1 it writes **nothing at all** — the marker is a bare
+/// `.` — and above 3999 it writes `?`.
+fn roman_label(n: i64, upper: bool) -> String {
+    if n < 1 {
+        return String::new();
+    }
+    if n > 3999 {
+        return "?".to_owned();
+    }
+    let mut left = n;
+    let mut out = String::new();
+    for (value, sign) in ROMAN_UNITS {
+        while left >= value {
+            out.push_str(sign);
+            left -= value;
+        }
+    }
+    if upper { out.to_uppercase() } else { out }
 }
 
 fn simple_table_applies(table: &Table) -> bool {

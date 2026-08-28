@@ -133,6 +133,23 @@ unclosed at EOF.
       python3 -c 'import json,sys; print(repr(json.load(sys.stdin)["blocks"][0]["c"][1]))'
     # 'x' — 'x\n' went in
 
+**6. A task list item with nothing after the marker.** Pandoc writes a
+bare `- ☐`, and **its own reader ends the list there**: a three-item
+list comes back as a list of one and a list of two. This writes
+`- [ ] `, which comes back whole, and takes the byte difference.
+`corpus/gfm/task-list-runs.gfm` is where the two spellings meet, and
+`diff-gfm-md` falls off 100 the moment this writer copies pandoc's.
+
+    printf -- '- [ ] outer\n  - [x] inner\n- [ ] \n- [x] \n' > /tmp/a.gfm
+    printf -- '- [ ] outer\n  - [x] inner\n- \342\230\220\n- \342\230\222\n' > /tmp/b.gfm
+    for f in /tmp/a.gfm /tmp/b.gfm; do
+      printf '%s: ' "$f"
+      pandoc "$f" -f gfm -t json |
+        python3 -c 'import json,sys; b=json.load(sys.stdin)["blocks"]; print(len(b), "list(s),", [len(x["c"]) for x in b], "items")'
+    done
+    # /tmp/a.gfm: 1 list(s), [3] items      <- this writer's spelling
+    # /tmp/b.gfm: 2 list(s), [1, 2] items   <- pandoc's
+
 The scale of it is on the gate's own first line: **pandoc round-trips
 593 of the 652 CommonMark spec documents, and this writer round-trips
 652.** `./target/release/ferrodoc-harness diff-md
