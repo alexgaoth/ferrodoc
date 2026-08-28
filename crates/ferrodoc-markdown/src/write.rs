@@ -274,15 +274,59 @@ impl Writer {
     /// degrades one to a bracketed number, and so does this — writing
     /// GFM's spelling into `CommonMark` output made a file this reader
     /// would not read back as a footnote.
+    /// A definition list in pandoc's dialect: the term on its own line,
+    /// then `:` and three spaces, with continuation lines under four.
+    fn definition_list(
+        &mut self,
+        out: &mut String,
+        items: &[(Vec<Inline>, Vec<Vec<Block>>)],
+        prefix: &str,
+    ) {
+
+        let mut first = true;
+        for (term, definitions) in items {
+            if !first {
+                push_line(out, prefix, "");
+            }
+            first = false;
+            let text = self.inlines(term);
+            push_wrapped(out, prefix, &text, self.columns);
+            for definition in definitions {
+                // **Loose or tight, the same distinction a list
+                // makes.** A definition whose first block is a
+                // `Para` gets a blank line before it and one
+                // that is a `Plain` does not — which is how the
+                // document said it, and pandoc says it back.
+                if !matches!(definition.first(), Some(Block::Plain(_))) {
+                    push_line(out, prefix, "");
+                }
+                let mut body = String::new();
+                self.blocks(&mut body, definition, "");
+                // `:` then three spaces, and the continuation
+                // lines under four — pandoc's own shape, probed.
+                for (index, line) in body.trim_end().split('\n').enumerate() {
+                    let marker = if index == 0 { ":   " } else { INDENT };
+                    let text = if line.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{marker}{line}")
+                    };
+                    push_line(out, prefix, &text);
+                }
+            }
+        }
+    }
+
     fn note(&mut self, out: &mut String, blocks: &[Block]) {
         // Reserve the number before rendering: a note nested inside this
         // one would otherwise take this one's label.
         let index = self.notes.len();
         self.notes.push(String::new());
         let mut body = String::new();
-        self.blocks(&mut body, blocks, if self.gfm() { INDENT } else { "" });
+        let labelled = self.gfm() || self.pandoc();
+        self.blocks(&mut body, blocks, if labelled { INDENT } else { "" });
         self.notes[index] = body;
-        let caret = if self.gfm() { "^" } else { "" };
+        let caret = if labelled { "^" } else { "" };
         let _ = write!(out, "[{caret}{}]", index + 1);
     }
 
@@ -300,7 +344,7 @@ impl Writer {
         for (index, body) in std::mem::take(&mut self.notes).iter().enumerate() {
             let body = body.trim_end();
             out.push('\n');
-            if self.gfm() {
+            if self.gfm() || self.pandoc() {
                 // The body was rendered under `INDENT`; pandoc puts the
                 // first line on the label's line and leaves the rest
                 // indented.
@@ -390,8 +434,17 @@ impl Writer {
                 let text = self.inlines(inlines);
                 push_wrapped(out, prefix, &text, self.columns);
             }
-            Block::Header(level, _, inlines) => {
-                let text = self.inner(inlines);
+            Block::Header(level, attr, inlines) => {
+                let mut text = self.inner(inlines);
+                // **Pandoc's dialect writes a heading's attributes back**;
+                // `CommonMark` has nowhere to put them, so it drops them
+                // and the identifier is regenerated on the next read.
+                if self.pandoc()
+                    && let Some(written) = attributes(attr)
+                {
+                    text.push(' ');
+                    text.push_str(&written);
+                }
                 header(out, prefix, *level, &text);
             }
             Block::CodeBlock(attr, text) => Self::code_block(out, attr, text, prefix, at),
@@ -423,6 +476,9 @@ impl Writer {
                     let marker = format!("{label}{close}");
                     format!("{marker:<width$}", width = marker.len().max(3) + 1)
                 });
+            }
+            Block::DefinitionList(items) if self.pandoc() => {
+                self.definition_list(out, items, prefix);
             }
             Block::DefinitionList(items) => {
                 // No CommonMark syntax: term then definition as paragraphs.
@@ -1177,6 +1233,35 @@ fn fill(text: &str, width: usize) -> Vec<String> {
 /// **A heading is never filled**, whatever `--columns` says, because an
 /// ATX heading is one line by construction — pandoc leaves a 151-column
 /// heading at 151 columns, measured.
+/// A `{#id .class key="value"}` for pandoc's dialect, or `None` when the
+/// attribute carries nothing worth writing.
+///
+/// Probed: `# T {#myid}`. `CommonMark` has nowhere to put any of this, so
+/// it drops the lot and the identifier is regenerated on the next read.
+fn attributes(attr: &ferrodoc_ast::Attr) -> Option<String> {
+    if attr.identifier.is_empty() && attr.classes.is_empty() && attr.attributes.is_empty() {
+        return None;
+    }
+    let mut out = String::from("{");
+    if !attr.identifier.is_empty() {
+        let _ = write!(out, "#{}", attr.identifier);
+    }
+    for class in &attr.classes {
+        if !out.ends_with('{') {
+            out.push(' ');
+        }
+        let _ = write!(out, ".{class}");
+    }
+    for (key, value) in &attr.attributes {
+        if !out.ends_with('{') {
+            out.push(' ');
+        }
+        let _ = write!(out, "{key}=\"{value}\"");
+    }
+    out.push('}');
+    Some(out)
+}
+
 fn header(out: &mut String, prefix: &str, level: i64, text: &str) {
     let unbroken = text.replace(BREAK, " ");
     let text = unbroken.as_str();
@@ -1490,6 +1575,59 @@ fn html_attributes(attr: &ferrodoc_ast::Attr) -> String {
 
 fn escape_attribute(value: &str) -> String {
     value.replace('&', "&amp;").replace('"', "&quot;").replace('<', "&lt;")
+}
+
+#[cfg(test)]
+mod dialect {
+    use super::*;
+    use ferrodoc_ast::Attr;
+
+    /// **A pandoc-dialect document written back as itself.** Every
+    /// expectation here is `pandoc -t markdown` output, run and pasted.
+    ///
+    /// These four constructs are the ones `CommonMark` cannot say, so
+    /// `writers.sh` can never reach them: its corpus is read as
+    /// `CommonMark`, and a reader that cannot produce a `Note` gives the
+    /// writer no `Note` to get wrong. The gate is blind here by
+    /// construction, which is exactly when a test earns its place.
+    #[test]
+    fn the_constructs_commonmark_cannot_say() {
+        let doc = Pandoc::new(vec![
+            Block::Header(
+                1,
+                Attr { identifier: "custom-id".into(), ..Attr::default() },
+                vec![Inline::Str("Heading".into())],
+            ),
+            Block::Para(vec![
+                Inline::Str("Text".into()),
+                Inline::Note(vec![Block::Para(vec![Inline::Str("body".into())])]),
+            ]),
+            Block::DefinitionList(vec![(
+                vec![Inline::Str("Term".into())],
+                vec![vec![Block::Plain(vec![Inline::Str("Tight".into())])]],
+            )]),
+        ]);
+        assert_eq!(
+            write_pandoc_markdown(&doc),
+            "# Heading {#custom-id}\n\nText[^1]\n\nTerm\n:   Tight\n\n[^1]: body\n"
+        );
+    }
+
+    /// The text rules, and the one that has to share a pass with another:
+    /// an em-dash is written `---` **unescaped** while a literal `-`
+    /// before another `-` is escaped. Doing the substitution first and
+    /// the escaping second turned every em-dash into `\-\--`.
+    #[test]
+    fn the_text_rules_share_one_pass() {
+        let para = |text: &str| Pandoc::new(vec![Block::Para(vec![Inline::Str(text.into())])]);
+        assert_eq!(write_pandoc_markdown(&para("a—b")), "a---b\n");
+        assert_eq!(write_pandoc_markdown(&para("a---b")), "a\\-\\--b\n");
+        assert_eq!(write_pandoc_markdown(&para("it's")), "it\\'s\n");
+        assert_eq!(write_pandoc_markdown(&para("a | b")), "a \\| b\n");
+        assert_eq!(write_pandoc_markdown(&para("a - b")), "a - b\n");
+        // And `CommonMark` leaves every one of them alone.
+        assert_eq!(write_markdown(&para("a—b")), "a—b\n");
+    }
 }
 
 #[cfg(test)]
