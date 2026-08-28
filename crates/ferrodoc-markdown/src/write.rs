@@ -384,6 +384,7 @@ impl Writer {
     /// indented block cannot hold a blank first line or say whether its
     /// content ended with a newline.
     fn code_block(
+        &self,
         out: &mut String,
         attr: &ferrodoc_ast::Attr,
         text: &str,
@@ -418,15 +419,36 @@ impl Writer {
             .max()
             .unwrap_or(0);
         let fence = "`".repeat(longest.max(2) + 1);
-        // Pandoc's HTML writer tags every code block `sourceCode`,
-        // and its markdown writers drop that class and spell the
-        // first one left, after a space: `["sourceCode","bash"]`
-        // is ```` ``` bash ````, `["sourceCode"]` a bare fence.
-        let info = attr
-            .classes
-            .iter()
-            .find(|class| class.as_str() != "sourceCode")
-            .map_or(String::new(), |class| format!(" {class}"));
+        // **The two dialects spell the info string differently**, and
+        // pandoc's HTML writer tags every code block `sourceCode`, so
+        // the difference shows on anything that came from HTML.
+        //
+        // `gfm` and `commonmark` drop that class and spell the first one
+        // left, after a space: `["sourceCode","bash"]` is
+        // ```` ``` bash ```` and `["sourceCode"]` a bare fence. Pandoc's
+        // own dialect drops nothing — it writes a bare name only when
+        // there is exactly **one** class and no identifier and no
+        // attribute, and the whole attribute set otherwise:
+        //
+        // ```text
+        // ["sourceCode","bash"]   ``` {.sourceCode .bash}
+        // ["sourceCode"]          ``` sourceCode
+        // #i + ["bash"]           ``` {#i .bash}
+        // ["bash"] + k="v"        ``` {.bash k="v"}
+        // ```
+        let info = if self.pandoc() {
+            match attr.classes.as_slice() {
+                [class] if attr.identifier.is_empty() && attr.attributes.is_empty() => {
+                    format!(" {class}")
+                }
+                _ => attributes(attr).map_or(String::new(), |a| format!(" {a}")),
+            }
+        } else {
+            attr.classes
+                .iter()
+                .find(|class| class.as_str() != "sourceCode")
+                .map_or(String::new(), |class| format!(" {class}"))
+        };
         push_line(out, prefix, &format!("{fence}{info}"));
         // **Empty content writes no line at all** — `"".split('\n')` is
         // one empty element, so this wrote a blank line where pandoc
@@ -480,7 +502,7 @@ impl Writer {
                 }
                 header(out, prefix, *level, &text);
             }
-            Block::CodeBlock(attr, text) => Self::code_block(out, attr, text, prefix, at),
+            Block::CodeBlock(attr, text) => self.code_block(out, attr, text, prefix, at),
             Block::BlockQuote(blocks) => {
                 if blocks.is_empty() {
                     // A quote with no content is still a quote; writing
@@ -576,6 +598,7 @@ impl Writer {
             {
                 self.blocks(out, blocks, prefix);
             }
+            Block::Div(a, b) if self.pandoc() => self.fenced_div(out, a, b, prefix),
             Block::Div(attr, blocks) => {
                 push_line(out, prefix, &format!("<div{}>", html_attributes(attr)));
                 push_line(out, prefix, "");
@@ -699,6 +722,14 @@ impl Writer {
             push_line(out, prefix, "");
             self.blocks(out, &table.caption.blocks, prefix);
         }
+    }
+
+    /// **Pandoc's dialect has a fenced div**, which the other two
+    /// flavours do not — they fall through to a raw `<div>`.
+    fn fenced_div(&mut self, out: &mut String, attr: &ferrodoc_ast::Attr, blocks: &[Block], prefix: &str) {
+        push_line(out, prefix, &format!("::: {}", fence_attributes(attr)));
+        self.blocks(out, blocks, prefix);
+        push_line(out, prefix, ":::");
     }
 
     /// The table spelling this flavour has, or raw HTML where it has
@@ -829,6 +860,62 @@ impl Writer {
             self.blocks(&mut caption, &table.caption.blocks, "");
             push_line(out, prefix, &format!("  : {}", caption.trim()));
         }
+    }
+
+    /// The six inlines **pandoc's dialect spells** and the other two
+    /// flavours have no syntax for, so only they fall back to raw HTML.
+    ///
+    /// Returns whether it wrote one. Each answer is
+    /// `pandoc -f json -t markdown`, probed one construct at a time:
+    ///
+    /// ```text
+    /// Strikeout    ~~x~~              Underline  [x]{.underline}
+    /// Subscript    ~x~                SmallCaps  [x]{.smallcaps}
+    /// Superscript  ^x^                Span       [x]{#id .class}
+    /// ```
+    ///
+    /// A space inside the two script markers is `\ `; inside `~~` it is
+    /// a space.
+    fn dialect_inline(&mut self, out: &mut String, inline: &Inline) -> bool {
+        match inline {
+            Inline::Strikeout(inner) => self.marked(out, inner, "~~", false),
+            Inline::Subscript(inner) => self.marked(out, inner, "~", true),
+            Inline::Superscript(inner) => self.marked(out, inner, "^", true),
+            Inline::Underline(inner) => self.bracketed(out, inner, "{.underline}"),
+            Inline::SmallCaps(inner) => self.bracketed(out, inner, "{.smallcaps}"),
+            // A span carrying nothing is only a wrapper, in either dialect.
+            Inline::Span(attr, inner) => match attributes(attr) {
+                None => {
+                    let text = self.inner(inner);
+                    out.push_str(&text);
+                }
+                Some(attributes) => self.bracketed(out, inner, &attributes),
+            },
+            _ => return false,
+        }
+        true
+    }
+
+    /// A marker on both sides: `~~struck~~`, `~sub~`, `^sup^`.
+    ///
+    /// `tight` is what the two script markers need — they cannot hold a
+    /// bare space, so pandoc writes `^a\ b^` — and what `~~` does not.
+    fn marked(&mut self, out: &mut String, inner: &[Inline], marker: &str, tight: bool) {
+        let text = self.nested(inner, false);
+        // A break opportunity is still `BREAK` at this point — it becomes
+        // a space only when the line is laid out — so both spellings of
+        // the same space have to be caught, and **in one pass**: chaining
+        // two `replace` calls escapes the space the first one just wrote
+        // and gives `~a\\ b~`.
+        let text = if tight { text.replace([BREAK, ' '], "\\ ") } else { text };
+        let _ = write!(out, "{marker}{text}{marker}");
+    }
+
+    /// `[text]{#id .class}`, which is how the dialect carries an
+    /// attribute an inline would otherwise need a `<span>` for.
+    fn bracketed(&mut self, out: &mut String, inner: &[Inline], attributes: &str) {
+        let text = self.nested(inner, false);
+        let _ = write!(out, "[{text}]{attributes}");
     }
 
     /// One row's cells, rendered to single-line text with spans expanded.
@@ -1064,6 +1151,9 @@ impl Writer {
     }
 
     fn inline(&mut self, out: &mut String, inline: &Inline) {
+        if self.pandoc() && self.dialect_inline(out, inline) {
+            return;
+        }
         match inline {
             Inline::Str(text) => escape_text(out, text, self.flavour, self.at.preceded),
             Inline::Space => out.push(if self.columns.is_some() { BREAK } else { ' ' }),
@@ -1111,9 +1201,7 @@ impl Writer {
             Inline::Superscript(inner) => self.tagged(out, "sup", "", inner),
             Inline::Subscript(inner) => self.tagged(out, "sub", "", inner),
             Inline::Underline(inner) => self.tagged(out, "u", "", inner),
-            Inline::SmallCaps(inner) => {
-                self.tagged(out, "span", " class=\"smallcaps\"", inner);
-            }
+            Inline::SmallCaps(i) => self.tagged(out, "span", " class=\"smallcaps\"", i),
             Inline::Span(attr, inner) => {
                 let attributes = html_attributes(attr);
                 // A span carrying nothing is only a wrapper; pandoc writes
@@ -1272,6 +1360,21 @@ fn without_task_marker(item: &[Block]) -> Vec<Block> {
 /// A spanned cell is refused for the same reason: a simple table has
 /// nowhere to put one. Everything refused here keeps the raw-HTML
 /// fallback, which loses nothing.
+/// A fenced div's header, after the `::: `.
+///
+/// The same shape as a fenced code block's info string: a bare name when
+/// there is exactly **one** class and nothing else, and the whole
+/// attribute set otherwise — except that a div carrying *nothing* is
+/// `::: {}` rather than a bare `:::`, where a code block with no
+/// attributes has no info string at all. Probed one attribute set at a
+/// time against `pandoc -f json -t markdown`.
+fn fence_attributes(attr: &ferrodoc_ast::Attr) -> String {
+    match attr.classes.as_slice() {
+        [class] if attr.identifier.is_empty() && attr.attributes.is_empty() => class.clone(),
+        _ => attributes(attr).unwrap_or_else(|| "{}".to_owned()),
+    }
+}
+
 fn simple_table_applies(table: &Table) -> bool {
     if table.colspecs.is_empty() {
         return false;
@@ -2623,6 +2726,73 @@ mod tests {
                 ])]
             ),
             "  h1   h2\n  ---- ----\n  a    b\n\n  : My caption\n"
+        );
+    }
+
+    /// **The constructs pandoc's dialect spells and `CommonMark` does
+    /// not**, none of which the writer corpus can see: they reach a
+    /// document through HTML or a JSON AST, and `corpus/*.md` and
+    /// `corpus/gfm/*.gfm` are read as `CommonMark` and gfm. Every answer
+    /// is `pandoc -f json -t markdown --wrap=none`.
+    #[test]
+    fn the_dialect_spells_what_commonmark_writes_as_html() {
+        let x = || vec![Inline::Str("x".to_owned())];
+        let ab = || {
+            vec![Inline::Str("a".to_owned()), Inline::Space, Inline::Str("b".to_owned())]
+        };
+        let para = |inline: Inline| write_pandoc_markdown(&Pandoc::new(vec![Block::Para(vec![inline])]));
+
+        assert_eq!(para(Inline::Strikeout(x())), "~~x~~\n");
+        assert_eq!(para(Inline::Underline(x())), "[x]{.underline}\n");
+        assert_eq!(para(Inline::SmallCaps(x())), "[x]{.smallcaps}\n");
+        // A space cannot stand bare inside either script marker, and it
+        // must be escaped in **one pass** — chaining two replacements
+        // escapes the space the first one wrote and gives `~a\\ b~`.
+        assert_eq!(para(Inline::Subscript(ab())), "~a\\ b~\n");
+        assert_eq!(para(Inline::Superscript(ab())), "^a\\ b^\n");
+        // `~~` takes a bare space.
+        assert_eq!(para(Inline::Strikeout(ab())), "~~a b~~\n");
+
+        let attr = ferrodoc_ast::Attr {
+            identifier: "marked".to_owned(),
+            classes: vec!["note".to_owned()],
+            attributes: Vec::new(),
+        };
+        assert_eq!(para(Inline::Span(Box::new(attr), x())), "[x]{#marked .note}\n");
+        // A span carrying nothing is only a wrapper.
+        assert_eq!(para(Inline::Span(Box::default(), x())), "x\n");
+
+        // A fenced div takes a bare name for one class and nothing else,
+        // the attribute set otherwise — and `{}` when it carries nothing,
+        // where a code block would have no info string at all.
+        let div = |attr: ferrodoc_ast::Attr| {
+            let body = vec![Block::Para(vec![Inline::Str("body".to_owned())])];
+            write_pandoc_markdown(&Pandoc::new(vec![Block::Div(attr, body)]))
+        };
+        let of = |id: &str, classes: &[&str]| ferrodoc_ast::Attr {
+            identifier: id.to_owned(),
+            classes: classes.iter().map(|c| (*c).to_owned()).collect(),
+            attributes: Vec::new(),
+        };
+        assert_eq!(div(of("", &["callout"])), "::: callout\nbody\n:::\n");
+        assert_eq!(div(of("i", &["a", "b"])), "::: {#i .a .b}\nbody\n:::\n");
+        assert_eq!(div(of("", &[])), "::: {}\nbody\n:::\n");
+
+        // The same shape decides a fence's info string, except that the
+        // dialect drops **nothing** — `sourceCode` included, where gfm
+        // strips it and spells the first class left.
+        let fence = |classes: &[&str]| {
+            let block = Block::CodeBlock(of("", classes), "x".to_owned());
+            let doc = Pandoc::new(vec![block]);
+            (write_pandoc_markdown(&doc), write_gfm(&doc))
+        };
+        assert_eq!(
+            fence(&["sourceCode", "bash"]),
+            ("``` {.sourceCode .bash}\nx\n```\n".to_owned(), "``` bash\nx\n```\n".to_owned())
+        );
+        assert_eq!(
+            fence(&["sourceCode"]),
+            ("``` sourceCode\nx\n```\n".to_owned(), "```\nx\n```\n".to_owned())
         );
     }
 
