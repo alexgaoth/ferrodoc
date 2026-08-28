@@ -53,6 +53,14 @@ pub enum Error {
     Zip(String),
     /// An XML part failed to parse.
     Xml(String),
+    /// The archive declares more decompressed content than one its size
+    /// may hold — see `ferrodoc_docx::archive`.
+    TooLarge {
+        /// What the archive's own headers say it decompresses to.
+        declared: u64,
+        /// What an archive that size is allowed.
+        budget: u64,
+    },
     /// A required part is missing from the archive.
     MissingPart(&'static str),
 }
@@ -62,6 +70,11 @@ impl std::fmt::Display for Error {
         match self {
             Error::Zip(e) => write!(f, "not a readable epub (zip) archive: {e}"),
             Error::Xml(e) => write!(f, "malformed XML part: {e}"),
+            Error::TooLarge { declared, budget } => write!(
+                f,
+                "archive declares {declared} bytes of content, more than the \
+                 {budget} an archive this size may decompress to"
+            ),
             Error::MissingPart(p) => write!(f, "missing required part: {p}"),
         }
     }
@@ -74,6 +87,9 @@ impl From<ferrodoc_docx::Error> for Error {
         match e {
             ferrodoc_docx::Error::Zip(e) => Error::Zip(e),
             ferrodoc_docx::Error::Xml(e) => Error::Xml(e),
+            ferrodoc_docx::Error::TooLarge { declared, budget } => {
+                Error::TooLarge { declared, budget }
+            }
             ferrodoc_docx::Error::MissingPart(p) => Error::MissingPart(p),
         }
     }
@@ -108,6 +124,7 @@ pub fn read_epub_with_media(bytes: &[u8]) -> Result<(Pandoc, Media), Error> {
 fn read(bytes: &[u8], want_media: bool) -> Result<(Pandoc, Media), Error> {
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| Error::Zip(e.to_string()))?;
+    ferrodoc_docx::declared_within_budget(&mut archive, bytes.len())?;
     let mut text = |name: &str| -> Option<String> {
         let mut file = archive.by_name(name).ok()?;
         let mut s = String::new();

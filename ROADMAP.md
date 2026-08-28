@@ -1141,12 +1141,28 @@ sound end-to-end contract — "converting your 1 MB file costs at most
 80 MB" — and it is not a statement about a hostile archive. Its corpus is
 documents this repository generates, so it has never seen one.
 
-**The threshold is not a session's to choose.** A decompression budget is
-a user-visible refusal: set it low and a legitimate 200 MB manuscript
-stops converting, set it high and it defends nothing. Rule 3 of this file
-says a measured production limit outranks a speculative one, which is why
-0.8 sits after the embedders. The table above is what that decision now
-has to work from.
+**Decided 2026-08-27, and the measurement is what decided it.** Every
+real archive on hand — ten Project Gutenberg EPUBs, this repository's
+DOCX and ODT corpora — decompresses to at most **16×** its own size. The
+two bombs are **294×** and **342×**. An order of magnitude apart, which
+is what makes a limit possible without guessing.
+
+The rule: an archive may decompress to `max(64 MB, 100 × its own size)`,
+checked against the **zip's own headers before anything is decompressed**
+— rejection before allocation, which this section asks for. 100× is six
+times the largest real archive measured and a third of the smaller bomb;
+the 64 MB floor keeps a small archive that legitimately expands a great
+deal from being refused for no gain.
+
+    ratio.docx   1.28 GB, then aborts  ->  refused at 4.9 MB
+    ratio.epub   1.18 GB, then aborts  ->  refused at 4.9 MB
+    all ten real EPUBs, every corpus DOCX and ODT: unchanged
+
+`ferrodoc_docx::Error::TooLarge { declared, budget }`, mirrored in the
+EPUB and ODT crates, names the number it crossed. **What is left of this
+card is the rest of the contract**: the limit is not yet configurable, it
+is not carried into the Python, C and WASM surfaces as one typed error,
+and source bytes, entry count and output bytes are still unbounded.
 - A typed `ResourceLimit` naming the budget crossed, identical in Rust,
   CLI, Python, C and WASM.
 - Zip-bomb and giant-media fixtures in the corpus; rejection before

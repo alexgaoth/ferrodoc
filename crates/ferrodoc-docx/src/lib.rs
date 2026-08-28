@@ -98,6 +98,7 @@ mod write;
 // documentation rather than duplicated into a second crate, where the two
 // copies would drift and only one would get each fix.
 #[doc(hidden)]
+pub mod archive;
 pub mod media;
 #[doc(hidden)]
 pub mod xml;
@@ -125,6 +126,14 @@ pub enum Error {
     Zip(String),
     /// An XML part failed to parse.
     Xml(String),
+    /// The archive's own headers declare more decompressed content than
+    /// an archive its size is allowed — see [`archive`].
+    TooLarge {
+        /// What the archive's own headers say it decompresses to.
+        declared: u64,
+        /// What an archive that size is allowed.
+        budget: u64,
+    },
     /// A required part is missing from the archive.
     MissingPart(&'static str),
 }
@@ -134,6 +143,11 @@ impl std::fmt::Display for Error {
         match self {
             Error::Zip(e) => write!(f, "not a readable docx (zip) archive: {e}"),
             Error::Xml(e) => write!(f, "malformed XML part: {e}"),
+            Error::TooLarge { declared, budget } => write!(
+                f,
+                "archive declares {declared} bytes of content, more than the \
+                 {budget} an archive this size may decompress to"
+            ),
             Error::MissingPart(p) => write!(f, "missing required part: {p}"),
         }
     }
@@ -171,9 +185,66 @@ pub fn read_docx_with_media(bytes: &[u8]) -> Result<(Pandoc, Media), Error> {
     read(bytes, true)
 }
 
+#[cfg(test)]
+mod archive_budget {
+    /// **The two fixtures in `corpus/bombs/` and the ratios that decided
+    /// the number.** Real archives measured up to 16x; these are 294x and
+    /// 342x, and the budget sits between at 100x with a 64 MB floor.
+    #[test]
+    fn a_bomb_is_refused_and_a_real_archive_is_not() {
+        // ratio.docx: 468,954 bytes of archive, 138,000,232 declared.
+        assert!(super::archive::within_budget(138_000_232, 468_954).is_err());
+        // ratio.epub: 223,429 bytes of archive, 76,500,478 declared.
+        assert!(super::archive::within_budget(76_500_478, 223_429).is_err());
+        // 1342.epub, the largest real archive on hand: 24.8 MB in,
+        // 25.6 MB out. Nowhere near.
+        assert!(super::archive::within_budget(25_580_034, 24_835_612).is_ok());
+        // The floor is what keeps a small archive that expands a great
+        // deal from being refused for no gain.
+        assert!(super::archive::within_budget(60 * 1024 * 1024, 1).is_ok());
+        assert!(super::archive::within_budget(70 * 1024 * 1024, 1).is_err());
+    }
+
+    /// The ratio governs once the archive is big enough for it to exceed
+    /// the floor, and `saturating_mul` keeps a huge archive from wrapping
+    /// the budget to something small.
+    #[test]
+    fn the_ratio_governs_above_the_floor() {
+        let mb: u64 = 1024 * 1024;
+        assert!(super::archive::within_budget(99 * mb, 1024 * 1024).is_ok());
+        assert!(super::archive::within_budget(101 * mb, 1024 * 1024).is_err());
+        assert!(super::archive::within_budget(u64::MAX, usize::MAX).is_ok());
+    }
+}
+
+/// Refuse an archive whose **own headers** declare more content than it
+/// is allowed, before any of it is decompressed.
+///
+/// A zip states each entry's uncompressed size, so this costs a walk of
+/// the central directory and no allocation at all. See [`archive`] for
+/// where the number comes from.
+///
+/// # Errors
+///
+/// [`Error::TooLarge`] when the declared total exceeds the budget.
+pub fn declared_within_budget<R: std::io::Read + std::io::Seek>(
+    zip: &mut zip::ZipArchive<R>,
+    archive_bytes: usize,
+) -> Result<(), Error> {
+    let mut declared: u64 = 0;
+    for index in 0..zip.len() {
+        if let Ok(entry) = zip.by_index_raw(index) {
+            declared = declared.saturating_add(entry.size());
+        }
+    }
+    archive::within_budget(declared, archive_bytes)
+        .map_err(|budget| Error::TooLarge { declared, budget })
+}
+
 fn read(bytes: &[u8], want_media: bool) -> Result<(Pandoc, Media), Error> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| Error::Zip(e.to_string()))?;
+    declared_within_budget(&mut archive, bytes.len())?;
     let mut part = |name: &str| -> Option<String> {
         let mut file = archive.by_name(name).ok()?;
         let mut s = String::new();
