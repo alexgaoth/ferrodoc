@@ -90,6 +90,65 @@ pub enum ListNumberStyle {
     UpperAlpha,
 }
 
+/// The roman numerals, largest first, with the four subtractive pairs.
+const ROMAN_UNITS: [(i64, &str); 13] = [
+    (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
+    (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
+];
+
+impl ListNumberStyle {
+    /// The label an ordered list item carries at position `n`.
+    ///
+    /// Five writers ask this question — markdown, plain, RST, LaTeX and
+    /// `AsciiDoc` — so it is answered once here rather than five times,
+    /// wrongly, beside each of them. Every answer is
+    /// `pandoc -f json -t markdown` on a list built one style at a time.
+    ///
+    /// `Example` and `DefaultStyle` are decimal: the `(@)` spelling is a
+    /// reader feature, and pandoc writes `1.` for such a list.
+    ///
+    /// The degenerate ranges are pandoc's, measured rather than
+    /// invented. Letters round every 26 — `26` is `z` and `27` is `a`
+    /// again — with a floor of `a` below 1. A roman numeral below 1 is
+    /// **empty**, leaving a bare delimiter, and above 3999 it is `?`.
+    #[must_use]
+    pub fn label(self, n: i64) -> String {
+        match self {
+            ListNumberStyle::LowerAlpha => Self::alpha(n, false),
+            ListNumberStyle::UpperAlpha => Self::alpha(n, true),
+            ListNumberStyle::LowerRoman => Self::roman(n, false),
+            ListNumberStyle::UpperRoman => Self::roman(n, true),
+            ListNumberStyle::Decimal | ListNumberStyle::Example | ListNumberStyle::DefaultStyle => {
+                n.to_string()
+            }
+        }
+    }
+
+    fn alpha(n: i64, upper: bool) -> String {
+        let index = if n < 1 { 0 } else { (n - 1).rem_euclid(26) };
+        let base = if upper { b'A' } else { b'a' };
+        char::from(base + u8::try_from(index).unwrap_or(0)).to_string()
+    }
+
+    fn roman(n: i64, upper: bool) -> String {
+        if n < 1 {
+            return String::new();
+        }
+        if n > 3999 {
+            return "?".to_owned();
+        }
+        let mut left = n;
+        let mut out = String::new();
+        for (value, sign) in ROMAN_UNITS {
+            while left >= value {
+                out.push_str(sign);
+                left -= value;
+            }
+        }
+        if upper { out.to_uppercase() } else { out }
+    }
+}
+
 /// The delimiter after an ordered-list number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c")]

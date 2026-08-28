@@ -1248,7 +1248,15 @@ fn write_table(out: &mut String, table: &Table, ctx: &Ctx) {
         }
         out.push_str("\n</colgroup>");
     }
-    if !table.head.rows.is_empty() {
+    // **A header row of nothing but empty cells is not a header.** A
+    // GFM table always has one, and a table converted from a format with
+    // no header concept arrives with a row of blanks; pandoc writes
+    // straight to `<tbody>` for it, and a `<thead>` full of empty `<th>`
+    // is a row a browser draws. One non-empty cell is enough to keep it.
+    let header = table.head.rows.iter().any(|row| {
+        row.cells.iter().any(|cell| !cell.blocks.is_empty())
+    });
+    if header {
         out.push_str("\n<thead>");
         for row in &table.head.rows {
             write_table_row(out, row, "th", &table.colspecs, ctx);

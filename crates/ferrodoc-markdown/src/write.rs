@@ -998,7 +998,7 @@ impl Writer {
                 let style = if dialect { attrs.style } else { ListNumberStyle::Decimal };
                 self.list(out, items, prefix, move |index| {
                     let n = start + i64::try_from(index).unwrap_or(0);
-                    let label = list_label(n, style);
+                    let label = style.label(n);
                     let marker = match delim {
                         // `(1)` is the dialect's; CommonMark has no such
                         // marker at all, so both parenthesised delimiters
@@ -1483,62 +1483,6 @@ fn fence_attributes(attr: &ferrodoc_ast::Attr) -> String {
     }
 }
 
-/// The roman numerals, largest first, with the four subtractive pairs.
-const ROMAN_UNITS: [(i64, &str); 13] = [
-    (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"),
-    (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"),
-];
-
-/// An ordered list marker's label, in the style the list asks for.
-///
-/// `Example` and `DefaultStyle` are both decimal — pandoc writes `1.`
-/// for an `@` list here, the `(@)` spelling being a reader feature.
-fn list_label(n: i64, style: ListNumberStyle) -> String {
-    match style {
-        ListNumberStyle::LowerAlpha => alpha_label(n, false),
-        ListNumberStyle::UpperAlpha => alpha_label(n, true),
-        ListNumberStyle::LowerRoman => roman_label(n, false),
-        ListNumberStyle::UpperRoman => roman_label(n, true),
-        ListNumberStyle::Decimal | ListNumberStyle::Example | ListNumberStyle::DefaultStyle => {
-            n.to_string()
-        }
-    }
-}
-
-/// `1 -> a`, `26 -> z`, and then round again: `27 -> a`, `28 -> b`.
-///
-/// Measured on the pinned binary, which is also where the floor comes
-/// from: a list starting at 0 is `a.`, not the `z.` a plain modulo of
-/// `n - 1` would give.
-fn alpha_label(n: i64, upper: bool) -> String {
-    let index = if n < 1 { 0 } else { (n - 1).rem_euclid(26) };
-    let base = if upper { b'A' } else { b'a' };
-    char::from(base + u8::try_from(index).unwrap_or(0)).to_string()
-}
-
-/// `1 -> i`, `3999 -> mmmcmxcix`.
-///
-/// Pandoc's own answers outside that range, measured rather than
-/// invented: below 1 it writes **nothing at all** — the marker is a bare
-/// `.` — and above 3999 it writes `?`.
-fn roman_label(n: i64, upper: bool) -> String {
-    if n < 1 {
-        return String::new();
-    }
-    if n > 3999 {
-        return "?".to_owned();
-    }
-    let mut left = n;
-    let mut out = String::new();
-    for (value, sign) in ROMAN_UNITS {
-        while left >= value {
-            out.push_str(sign);
-            left -= value;
-        }
-    }
-    if upper { out.to_uppercase() } else { out }
-}
-
 fn simple_table_applies(table: &Table) -> bool {
     if table.colspecs.is_empty() {
         return false;
@@ -1953,6 +1897,10 @@ fn escape_text_inner(
             // `\!\[CDATA\[`, and an ODT holding a CDATA section is where
             // the difference showed up.
             '[' if after_bang => out.push(ch),
+            // `$` is **the dialect's** — it opens math there and is
+            // ordinary text in `CommonMark` and gfm, where pandoc leaves
+            // it bare and so does this.
+            '$' if !pandoc => out.push(ch),
             '*' | '[' | ']' | '<' | '>' | '`' | '$' => {
                 out.push('\\');
                 out.push(ch);
@@ -2016,7 +1964,12 @@ fn escape_text_inner(
                 out.push('\\');
                 out.push(ch);
             }
-            '=' if opens_here && next == Some('=') => {
+            // A setext underline needs a paragraph line **above** it, so
+            // a run of `=` is only dangerous on a continuation line —
+            // `out.is_empty()` is the block's first line, where pandoc
+            // does not escape and neither should this. It escaped `===
+            // x` there, which cannot be an underline at all.
+            '=' if opens_here && !out.is_empty() && next == Some('=') => {
                 out.push('\\');
                 out.push(ch);
             }

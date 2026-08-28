@@ -177,16 +177,20 @@ impl Writer {
             }
             Block::BulletList(items) => self.list(items, out, prefix, |_| "- ".to_owned()),
             Block::OrderedList(attrs, items) => {
-                let start = attrs.start;
-                // The delimiter the list was written with. A list that
-                // said `3)` came out saying `3.`, which is the one thing
-                // a plain-text rendering of a list can still get wrong.
-                let close = match attrs.delim {
-                    ListNumberDelim::OneParen | ListNumberDelim::TwoParens => ')',
-                    _ => '.',
-                };
+                // **The style and the delimiter the list was written
+                // with.** A list that said `3)` came out saying `3.`, and
+                // every roman or alphabetic list came out in digits —
+                // which a plain-text rendering can still get wrong, and
+                // did for 19 of the 137 constructs the AST sweep asks
+                // about. `(1)` is a marker in its own right, not `1)`.
+                let (start, style, delim) = (attrs.start, attrs.style, attrs.delim);
                 self.list(items, out, prefix, move |i| {
-                    format!("{}{close}", start + i64::try_from(i).unwrap_or(0))
+                    let label = style.label(start + i64::try_from(i).unwrap_or(0));
+                    match delim {
+                        ListNumberDelim::TwoParens => format!("({label})"),
+                        ListNumberDelim::OneParen => format!("{label})"),
+                        _ => format!("{label}."),
+                    }
                 });
             }
             Block::DefinitionList(entries) => {
@@ -423,13 +427,39 @@ impl Writer {
                     self.collect(out, alt);
                     out.push(']');
                 }
+                // **Four inlines that survive into plain text.** Pandoc
+                // does not drop these to their content the way it drops
+                // emphasis: a superscript keeps a marker a reader can
+                // see, small caps are *rendered* by upper-casing, and a
+                // quote keeps the curly characters it stands for. Each
+                // probed against `pandoc -f json -t plain`.
+                Inline::Superscript(i) => {
+                    out.push_str("^(");
+                    self.collect(out, i);
+                    out.push(')');
+                }
+                Inline::Subscript(i) => {
+                    out.push_str("_(");
+                    self.collect(out, i);
+                    out.push(')');
+                }
+                Inline::SmallCaps(i) => {
+                    let mut inner = String::new();
+                    self.collect(&mut inner, i);
+                    out.push_str(&inner.to_uppercase());
+                }
+                Inline::Quoted(quote, i) => {
+                    let (open, close) = match quote {
+                        ferrodoc_ast::QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
+                        ferrodoc_ast::QuoteType::DoubleQuote => ('\u{201C}', '\u{201D}'),
+                    };
+                    out.push(open);
+                    self.collect(out, i);
+                    out.push(close);
+                }
                 Inline::Emph(i)
                 | Inline::Strong(i)
-                | Inline::Superscript(i)
-                | Inline::Subscript(i)
-                | Inline::SmallCaps(i)
                 | Inline::Underline(i)
-                | Inline::Quoted(_, i)
                 | Inline::Cite(_, i)
                 | Inline::Span(_, i)
                 | Inline::Link(_, i, _) => self.collect(out, i),
