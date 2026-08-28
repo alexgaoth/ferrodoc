@@ -195,7 +195,7 @@ jobs:
           cat > run.mjs <<'JS'
           import { convert } from "ferrodoc";
           const html = await convert("# Hi\n", "markdown", "html");
-          if (html !== "<h1>Hi</h1>\n") { console.error("got", html); process.exit(1); }
+          if (html !== '<h1 id="hi">Hi</h1>\n') { console.error("got", html); process.exit(1); }
           const docx = await convert("# Hi\n", "markdown", "docx");
           if (!(docx instanceof Uint8Array) || docx[0] !== 0x50) { process.exit(1); }
           console.log("installed package converts");
