@@ -1073,9 +1073,35 @@ not reach it alone.
 
 **P3 is therefore closed as a recorded rejection, which is one of the two
 outcomes the card allows.** What it rejects is its own premise: the
-buffers are not where the memory is. What it leaves open is a question
-about `Inline`, and the honest thing is that it stays open until somebody
-decides what the public AST is allowed to cost.
+buffers are not where the memory is.
+
+#### The `Inline` decision: not before 1.0
+
+**Decided 2026-08-27: do not break the public AST for this.** Three
+reasons, in the order they matter.
+
+**It does not reach the target.** War and Peace is 87 MB against a
+≤ 55 MiB goal — a 32 MB gap. The widest of the three options is 18.2 MB,
+and it is the one that boxes six variants and breaks the most matches. A
+break that buys most of the way to a target is a different proposition
+from one that reaches it, and this is the former.
+
+**0.7.0 is on three registries.** It went out on 2026-08-26. Breaking
+`Inline::Link(attr, inner, target)` in the next minor version, against
+the handful of people who have just started depending on it, costs more
+trust than 9.1 MB is worth.
+
+**There is nowhere else to take it.** This was checked rather than
+assumed: the 48 bytes are `Link` and `Image` at 40, every other variant
+already fits in 32, and `Inline::Str(String)`'s 566,718 allocations are
+what pandoc-JSON token boundaries require. No non-breaking lever exists,
+so "not now" is the whole of the choice.
+
+**What would change it.** 0.9 is where this file makes its scope
+decision and 1.0 is where a break belongs; the measurement is recorded
+above and needs no repeating then. If an embedder reports the memory as
+the reason they cannot ship, that outranks all of this — rule 3 — and
+the decision is remade on their number, not this one.
 
 **Corpus, by URL and checksum** (SHA-256, first 16), as the section above
 requires before any of this becomes a gate:
