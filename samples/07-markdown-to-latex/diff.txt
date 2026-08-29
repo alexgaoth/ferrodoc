@@ -1,5 +1,5 @@
---- samples/07-markdown-to-latex/pandoc.tex	2026-08-29 10:35:59.167005770 -0700
-+++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-29 10:35:59.085005800 -0700
+--- samples/07-markdown-to-latex/pandoc.tex	2026-08-29 12:03:53.624846886 -0700
++++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-29 12:03:53.533846930 -0700
 @@ -1,138 +1,37 @@
 -% Options for packages loaded elsewhere
 -\PassOptionsToPackage{unicode}{hyperref}

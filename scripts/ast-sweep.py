@@ -81,10 +81,26 @@ case("inline/Image+title", {"t": "Para", "c": [S("a"), SP, {"t": "Image", "c": [
 case("inline/Span+attr", {"t": "Para", "c": [{"t": "Span", "c": [attr("i", ["c"]), inls("x")]}]})
 case("inline/Span.bare", {"t": "Para", "c": [{"t": "Span", "c": [A, inls("x")]}]})
 case("inline/Note", {"t": "Para", "c": [S("a"), {"t": "Note", "c": [para("body")]}]})
-case("inline/Cite", {"t": "Para", "c": [{"t": "Cite", "c": [
-    [{"citationId": "k", "citationPrefix": [], "citationSuffix": [],
-      "citationMode": {"t": "NormalCitation"}, "citationNoteNum": 1, "citationHash": 0}],
-    inls("[@k]")]}]})
+def _citation(key, mode="NormalCitation", prefix=(), suffix=()):
+    return {"citationId": key, "citationPrefix": list(prefix),
+            "citationSuffix": list(suffix), "citationMode": {"t": mode},
+            "citationNoteNum": 1, "citationHash": 0}
+
+
+# **Pandoc writes a citation from its data and ignores the rendered
+# inlines**, so the mode and the affixes are the whole construct — one
+# case with one key could not see any of it.
+case("inline/Cite", {"t": "Para", "c": [
+    {"t": "Cite", "c": [[_citation("k")], inls("[@k]")]}]})
+case("inline/Cite.author-in-text", {"t": "Para", "c": [
+    {"t": "Cite", "c": [[_citation("k", "AuthorInText")], inls("@k")]}]})
+case("inline/Cite.suppress-author", {"t": "Para", "c": [
+    {"t": "Cite", "c": [[_citation("k", "SuppressAuthor")], inls("[-@k]")]}]})
+case("inline/Cite.two-keys", {"t": "Para", "c": [
+    {"t": "Cite", "c": [[_citation("k"), _citation("k2")], inls("[@k; @k2]")]}]})
+case("inline/Cite.affixes", {"t": "Para", "c": [
+    {"t": "Cite", "c": [[_citation("k", prefix=inls("see"), suffix=inls("p. 3"))],
+                        inls("[see @k p. 3]")]}]})
 # text that needs escaping
 for ch in ["*", "_", "`", "#", "[", "]", "<", ">", "|", "~", "^", "\\", "'", '"',
            "$", "@", "%", "{", "}", "-", "+", "!", "&"]:
@@ -237,6 +253,12 @@ DELIBERATE = {
     ("gfm", "block/CodeBlock.newline"),
     # Pandoc writes `a@b.com` bare and its own reader linkifies it.
     ("gfm", "escape/@"),
+    # The same rule reached from another construct: `[-@k]` is a
+    # `SuppressAuthor` citation rendered as text, and the `@` after the
+    # `-` is escaped here for the same reason. Narrowing the escape to
+    # require a domain would close both, and would also give up the
+    # address pandoc loses.
+    ("gfm", "inline/Cite.suppress-author"),
     # `\setcounter` before `\def`: pandoc's reader takes the start value
     # from the first directive it meets, so pandoc's order loses it.
     ("latex", "block/OrderedList.start3"),
@@ -246,8 +268,8 @@ DELIBERATE = {
     ("rst", "block/Header6"),
 }
 
-FLOORS = {"markdown": 145, "commonmark": 144, "gfm": 146, "html": 144,
-          "latex": 134, "rst": 143, "asciidoc": 146, "plain": 140}
+FLOORS = {"markdown": 150, "commonmark": 148, "gfm": 150, "html": 148,
+          "latex": 138, "rst": 147, "asciidoc": 150, "plain": 148}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]

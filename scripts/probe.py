@@ -108,10 +108,13 @@ def note(blocks):
     return {"t": "Note", "c": _blocks(blocks)}
 
 
-def cite(keys, inner):
+def cite(keys, inner, mode="NormalCitation", prefix=None, suffix=None):
+    """`mode` is `NormalCitation`, `AuthorInText` or `SuppressAuthor`."""
     citations = [
-        {"citationId": k, "citationPrefix": [], "citationSuffix": [],
-         "citationMode": {"t": "NormalCitation"}, "citationNoteNum": 1,
+        {"citationId": k,
+         "citationPrefix": _inlines(prefix) if prefix else [],
+         "citationSuffix": _inlines(suffix) if suffix else [],
+         "citationMode": {"t": mode}, "citationNoteNum": 1,
          "citationHash": 0}
         for k in ([keys] if isinstance(keys, str) else keys)
     ]

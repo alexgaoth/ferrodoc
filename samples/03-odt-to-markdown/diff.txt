@@ -1,5 +1,5 @@
---- samples/03-odt-to-markdown/pandoc.md	2026-08-29 10:35:58.690005947 -0700
-+++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-29 10:35:58.661005957 -0700
+--- samples/03-odt-to-markdown/pandoc.md	2026-08-29 12:03:53.160847112 -0700
++++ samples/03-odt-to-markdown/ferrodoc.md	2026-08-29 12:03:53.132847126 -0700
 @@ -13,7 +13,7 @@
  
  ## Definitions

@@ -206,9 +206,24 @@ impl Writer {
             Block::DefinitionList(entries) => {
                 for (term, definitions) in entries {
                     let text = self.inlines(term);
-                    out.push(indent(&self.lay_out(&text, prefix.chars().count()), prefix));
+                    let term = indent(&self.lay_out(&text, prefix.chars().count()), prefix);
+                    // **A tight definition follows its term directly.**
+                    // Paragraphs here are joined by a blank line, so
+                    // pushing the two separately always separated them —
+                    // right for a `Para` definition, and a blank line
+                    // pandoc does not write for a `Plain` one.
+                    let tight = definitions
+                        .iter()
+                        .all(|d| matches!(d.first(), Some(Block::Plain(_))));
+                    let mut bodies = Vec::new();
                     for definition in definitions {
-                        self.blocks(definition, out, &format!("{prefix}    "));
+                        self.blocks(definition, &mut bodies, &format!("{prefix}    "));
+                    }
+                    if tight {
+                        out.push(std::iter::once(term).chain(bodies).collect::<Vec<_>>().join("\n"));
+                    } else {
+                        out.push(term);
+                        out.extend(bodies);
                     }
                 }
             }

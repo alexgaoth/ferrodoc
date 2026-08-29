@@ -1180,6 +1180,12 @@ impl Writer {
             Inline::Superscript(inner) => self.marked(out, inner, "^", true),
             Inline::Underline(inner) => self.bracketed(out, inner, "{.underline}"),
             Inline::SmallCaps(inner) => self.bracketed(out, inner, "{.smallcaps}"),
+            // **A citation is written from its data, not its text.**
+            // Pandoc regenerates the syntax and ignores the rendered
+            // inlines entirely — `Cite [k] [Str "see", Emph "[@k]"]` is
+            // `[@k]` — which is why writing the inner text escaped it
+            // into `\[@k\]` and lost the citation.
+            Inline::Cite(citations, _) => self.citation(out, citations),
             // A span carrying nothing is only a wrapper, in either dialect.
             Inline::Span(attr, inner) => match attributes(attr) {
                 None => {
@@ -1319,6 +1325,61 @@ impl Writer {
                     // from it, because the indent is the marker's width.
                     format!("{marker:<width$}", width = marker.len().max(3) + 1)
                 });
+    }
+
+    /// Pandoc's citation syntax, built from the citations themselves.
+    ///
+    /// Measured one shape at a time against `pandoc -f json -t markdown`:
+    ///
+    /// ```text
+    /// NormalCitation           [@k]
+    /// AuthorInText             @k
+    /// SuppressAuthor           [-@k]
+    /// prefix and suffix        [see @k p. 3]
+    /// two keys                 [@k; @k2]
+    /// AuthorInText + suffix    @k [p. 3]
+    /// AuthorInText then one    @k [@k2]
+    /// ```
+    ///
+    /// So an `AuthorInText` **first** citation is written bare and
+    /// everything after it goes in one bracket; anything else brackets
+    /// the lot.
+    fn citation(&mut self, out: &mut String, citations: &[ferrodoc_ast::Citation]) {
+        let one = |writer: &mut Self, c: &ferrodoc_ast::Citation| {
+            let mut text = String::new();
+            if !c.citation_prefix.is_empty() {
+                text.push_str(&writer.inner(&c.citation_prefix));
+                text.push(' ');
+            }
+            if c.citation_mode == ferrodoc_ast::CitationMode::SuppressAuthor {
+                text.push('-');
+            }
+            let _ = write!(text, "@{}", c.citation_id);
+            if !c.citation_suffix.is_empty() {
+                text.push(' ');
+                text.push_str(&writer.inner(&c.citation_suffix));
+            }
+            text
+        };
+        let Some((first, rest)) = citations.split_first() else {
+            return;
+        };
+        if first.citation_mode == ferrodoc_ast::CitationMode::AuthorInText {
+            let _ = write!(out, "@{}", first.citation_id);
+            let mut tail: Vec<String> = Vec::new();
+            if !first.citation_suffix.is_empty() {
+                tail.push(self.inner(&first.citation_suffix));
+            }
+            for c in rest {
+                tail.push(one(self, c));
+            }
+            if !tail.is_empty() {
+                let _ = write!(out, " [{}]", tail.join("; "));
+            }
+            return;
+        }
+        let all: Vec<String> = citations.iter().map(|c| one(self, c)).collect();
+        let _ = write!(out, "[{}]", all.join("; "));
     }
 
     /// A marker on both sides: `~~struck~~`, `~sub~`, `^sup^`.
