@@ -636,7 +636,7 @@ fn cell_text(cell: &Cell) -> String {
     // — `{vbar}` is the attribute that can, and it is what pandoc writes.
     // A code span's `|` arrives here bare and needs the same treatment; a
     // URL's does not, and pandoc leaves `link:u|v[t]` as it stands.
-    let text = out.replace('\n', " ").replace("++|++", "{vbar}");
+    let text = vbar_in_cells(&out.replace('\n', " "));
     let mut result = String::with_capacity(text.len());
     let mut in_code = false;
     for ch in text.chars() {
@@ -947,14 +947,70 @@ fn slug(text: &str) -> String {
     if joined.is_empty() { "section".to_owned() } else { joined }
 }
 
+/// Replace every `|` in a cell with `{vbar}`, **splitting the
+/// passthrough it sits in**.
+///
+/// A `|` would end the cell and the `++…++` passthrough cannot save it;
+/// `{vbar}` is the attribute that can, and it is an attribute rather than
+/// literal text, so it has to sit *outside* the passthrough. Pandoc
+/// writes `p++\++{vbar}q` for `p\|q`, closing the run at the pipe and
+/// reopening after it.
+///
+/// This was a `replace("++|++", "{vbar}")` over the escaped text, which
+/// worked only while every escapable character got a passthrough of its
+/// own — the moment runs were grouped, `++\|++` stopped matching and a
+/// pipe went into a cell as a pipe.
+fn vbar_in_cells(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find("++") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("++") else {
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        for (index, piece) in after[..end].split('|').enumerate() {
+            if index > 0 {
+                out.push_str("{vbar}");
+            }
+            if !piece.is_empty() {
+                let _ = write!(out, "++{piece}++");
+            }
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Whether `ch` needs a passthrough around it.
+fn passes_through(ch: char, in_cell: bool) -> bool {
+    matches!(ch, '<' | '>' | '`' | '*' | '_' | '[' | ']' | '{' | '\\')
+        || (ch == '|' && !in_cell)
+}
+
 fn escape_in(text: &str, in_cell: bool) -> String {
     let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
         match ch {
             '+' => out.push_str("{plus}"),
             '|' if in_cell => out.push_str("{vbar}"),
-            '<' | '>' | '|' | '`' | '*' | '_' | '[' | ']' | '{' | '\\' => {
-                let _ = write!(out, "++{ch}++");
+            // **A whole run in one passthrough**, and the run is any
+            // consecutive escapable characters rather than a repeat of
+            // one: pandoc writes ``a++`*++b``, not ``a++`++++*++b``.
+            // Escaped one at a time, three backticks became
+            // ``++`++++`++++`++`` — six passthroughs where pandoc opens
+            // one, which a paragraph in this repository's own
+            // COMPATIBILITY.md is what caught.
+            ch if passes_through(ch, in_cell) => {
+                out.push_str("++");
+                out.push(ch);
+                while chars.peek().is_some_and(|next| passes_through(*next, in_cell)) {
+                    out.push(chars.next().unwrap_or_default());
+                }
+                out.push_str("++");
             }
             ch => out.push(ch),
         }
