@@ -1897,6 +1897,22 @@ differential gate exists:
 One thing is **not** matched, stated rather than hidden: pandoc renders
 `Math` as Unicode — `$x^2$` becomes `x²` — where this writes the TeX.
 
+**A picture that is not there is warned about, in pandoc's words.**
+The DOCX, ODT and EPUB writers embed their media, so a missing file
+changes the output, and saying nothing left a converted document with
+the alt text in it and no hint anything had gone. Pandoc warns **once
+per occurrence**, not once per URL, and its tail differs by format -
+the DOCX writer says what it did instead, the other two name the
+error. Both spellings are matched byte for byte.
+
+**One difference remains, and it is a refusal.** Pandoc's `ipynb`
+writer *fails* on a missing picture rather than warning, because a
+notebook embeds its images base64 and there is nothing to embed:
+`File nope.png not found in resource path`, exit 99. This writes the
+notebook without it. Refusing is arguably the better answer, by this
+project's own rule that a nearly-right document is worse than an
+error, and changing it is a behaviour change that has not been made.
+
 **A fence whose info string is two bare words is not a fence to
 pandoc's dialect, and is one here.** The dialect takes a single word
 or a `{.class}` attribute block; ```rust ignore` is neither, so

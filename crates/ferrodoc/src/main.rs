@@ -761,7 +761,7 @@ a heading in the body",
             &doc,
             to,
             reference,
-            &resolve(&embedded, &base, &resource_path),
+            &resolve(&embedded, &base, &resource_path, to),
         )
         // The library says "invalid odt input", because to it the
         // reference *is* an input. Here the input is the document, and
@@ -770,7 +770,7 @@ a heading in the body",
     } else if wants_page(standalone, to, &doc)? {
         render_page(&doc, to, &page)?
     } else {
-        render_fragment(&doc, to, wrap, &page, &resolve(&embedded, &base, &resource_path))?
+        render_fragment(&doc, to, wrap, &page, &resolve(&embedded, &base, &resource_path, to))?
     };
 
     write_output(output.as_deref(), &reshaped(converted, &shaping, to)?)
@@ -1484,6 +1484,7 @@ fn resolve<'a>(
     embedded: &'a ferrodoc::Media,
     base: &'a std::path::Path,
     search: &'a [PathBuf],
+    to: Format,
 ) -> impl Fn(&str) -> Option<Vec<u8>> + 'a {
     move |url| {
         if let Some(bytes) = embedded.get(url) {
@@ -1492,9 +1493,25 @@ fn resolve<'a>(
         // The document's own directory first, then `--resource-path` in
         // the order it was given — pandoc's order, and the reason the
         // flag exists is a build that keeps its pictures somewhere else.
-        std::iter::once(base)
+        let found = std::iter::once(base)
             .chain(search.iter().map(PathBuf::as_path))
-            .find_map(|dir| std::fs::read(dir.join(url)).ok())
+            .find_map(|dir| std::fs::read(dir.join(url)).ok());
+        if found.is_none() {
+            // **A picture that is not there is worth saying so**, and
+            // this said nothing: a document converted with a missing
+            // image produced a file with the alt text in it and no hint
+            // that anything had gone. Pandoc warns **once per
+            // occurrence**, not once per URL, and its tail differs by
+            // format — the DOCX writer says what it did instead, the
+            // other two name the error.
+            let tail = if to == Format::Docx {
+                "replacing image with description".to_owned()
+            } else {
+                format!("PandocResourceNotFound {url:?}")
+            };
+            warn(&format!("[WARNING] Could not fetch resource {url}: {tail}"));
+        }
+        found
     }
 }
 
@@ -1779,15 +1796,15 @@ mod tests {
         embedded.insert("pic.png".to_owned(), b"from the package".to_vec());
         let none: &[PathBuf] = &[];
         assert_eq!(
-            resolve(&embedded, &dir, none)("pic.png").as_deref(),
+            resolve(&embedded, &dir, none, Format::Docx)("pic.png").as_deref(),
             Some(&b"from the package"[..])
         );
 
         // ...and the disk is still the fallback for what the package
         // never held, which is how `![](x.png)` in markdown resolves.
         let empty = ferrodoc::Media::new();
-        assert_eq!(resolve(&empty, &dir, none)("pic.png").as_deref(), Some(&b"from disk"[..]));
-        assert!(resolve(&empty, &dir, none)("absent.png").is_none());
+        assert_eq!(resolve(&empty, &dir, none, Format::Docx)("pic.png").as_deref(), Some(&b"from disk"[..]));
+        assert!(resolve(&empty, &dir, none, Format::Docx)("absent.png").is_none());
 
         // `--resource-path` is searched **after** the document's own
         // directory, so a picture beside the document still wins.
@@ -1797,11 +1814,11 @@ mod tests {
         std::fs::write(elsewhere.join("only.png"), b"only here").expect("writable");
         let search = vec![elsewhere.clone()];
         assert_eq!(
-            resolve(&empty, &dir, &search)("pic.png").as_deref(),
+            resolve(&empty, &dir, &search, Format::Docx)("pic.png").as_deref(),
             Some(&b"from disk"[..])
         );
         assert_eq!(
-            resolve(&empty, &dir, &search)("only.png").as_deref(),
+            resolve(&empty, &dir, &search, Format::Docx)("only.png").as_deref(),
             Some(&b"only here"[..])
         );
         let _ = std::fs::remove_dir_all(&dir);
