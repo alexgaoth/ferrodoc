@@ -215,7 +215,7 @@ DELIBERATE = {
     ("latex", "block/OrderedList.start3"),
 }
 
-FLOORS = {"markdown": 134, "commonmark": 132, "gfm": 132, "html": 135,
+FLOORS = {"markdown": 135, "commonmark": 135, "gfm": 135, "html": 135,
           "latex": 127, "rst": 131, "asciidoc": 136, "plain": 131}
 
 FERRODOC = "./target/release/ferrodoc"

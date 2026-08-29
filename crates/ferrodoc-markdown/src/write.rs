@@ -540,16 +540,27 @@ impl Writer {
             Block::BulletList(items) => self.bullet_list(out, items, prefix),
             Block::OrderedList(attrs, items) => self.ordered_list(out, attrs, items, prefix),
             Block::DefinitionList(items) => {
-                // No CommonMark syntax: term then definition as paragraphs.
+                // No CommonMark syntax for one, so pandoc writes the term
+                // and its **first** definition as a single paragraph
+                // joined by a hard break — `term  \ndef` — and only a
+                // *second* definition starts a new one. Written as two
+                // paragraphs the term and its definition came back as
+                // separate blocks.
                 let mut first = true;
                 for (term, definitions) in items {
                     if !first {
                         push_line(out, prefix, "");
                     }
                     first = false;
-                    let text = self.inlines(term);
+                    let mut text = self.inlines(term);
+                    if let Some(definition) = definitions.first() {
+                        let mut body = String::new();
+                        self.blocks(&mut body, definition, "");
+                        text.push_str("  \n");
+                        text.push_str(body.trim_end_matches('\n'));
+                    }
                     push_wrapped(out, prefix, &text, self.columns);
-                    for definition in definitions {
+                    for definition in definitions.iter().skip(1) {
                         push_line(out, prefix, "");
                         self.blocks(out, definition, prefix);
                     }
@@ -899,6 +910,33 @@ impl Writer {
             }
             Block::Div(attr, blocks) => self.fenced_div(out, attr, blocks, prefix),
             Block::DefinitionList(items) => self.definition_list(out, items, prefix),
+            // **A figure whose body is one image is written as one.**
+            // `![caption](url)` with the figure's own attributes, and
+            // `alt="…"` only where the image's alt text says something
+            // the caption does not — equal texts, or an empty alt, write
+            // no attribute at all. Anything else in the body (a second
+            // block, or no image) keeps the raw-HTML fallback, which is
+            // what pandoc writes for it too.
+            Block::Figure(attr, caption, blocks) => {
+                let [Block::Plain(inlines)] = blocks.as_slice() else {
+                    return false;
+                };
+                let [Inline::Image(_, alt, target)] = inlines.as_slice() else {
+                    return false;
+                };
+                let caption_text = self.inner(&caption_inlines(caption));
+                let alt_text = self.inner(alt);
+                let mut attr = attr.clone();
+                if !alt_text.is_empty() && alt_text != caption_text {
+                    attr.attributes.push(("alt".to_owned(), alt_text));
+                }
+                let suffix = attributes(&attr).unwrap_or_default();
+                let line = format!(
+                    "![{caption_text}]({}){suffix}",
+                    link_destination(&target.url)
+                );
+                push_line(out, prefix, &line);
+            }
             _ => return false,
         }
         true
@@ -936,6 +974,55 @@ impl Writer {
             _ => return false,
         }
         true
+    }
+
+    /// A link, in whichever of the three spellings it has here.
+    fn link(
+        &mut self,
+        out: &mut String,
+        attr: &ferrodoc_ast::Attr,
+        inner: &[Inline],
+        target: &Target,
+    ) {
+                // The autolink escapes are spent inside `[…]` too, where
+                // pandoc leaves them off. A link cannot nest, so this
+                // looks like waste — but **pandoc's own reader linkifies
+                // inside link text**: it reads its own
+                // `[www.example.com](http://www.example.com)` back as a
+                // `Link` wrapped around a `Link`. `corpus/gfm/
+                // extensions.gfm` is the document, and the escape is what
+                // keeps `diff-gfm-md` at 100.
+                let text = self.inner(inner);
+                if write_autolink(out, inner, target) {
+                    return;
+                }
+                // **A link carrying attributes has no CommonMark
+                // spelling**, so pandoc writes the raw `<a>` — attributes
+                // and all — rather than dropping them. The dialect has
+                // `{#i .c}` and falls through.
+                //
+                // Asked **after** the autolink, which carries a `uri`
+                // class of its own: checked first, every `<https://…>`
+                // came out as an `<a>` element.
+                if !self.pandoc() && attributes(attr).is_some() {
+                    let mut html = format!(" href=\"{}\"", target.url);
+                    if !target.title.is_empty() {
+                        let _ = write!(html, " title=\"{}\"", target.title);
+                    }
+                    html.push_str(&html_attributes(attr));
+                    self.tagged(out, "a", &html, inner);
+                    return;
+                }
+                let _ = write!(out, "[{text}]({}", link_destination(&target.url));
+                if !target.title.is_empty() {
+                    let _ = write!(out, " \"{}\"", target.title.replace('"', "\\\""));
+                }
+                out.push(')');
+                if self.pandoc() {
+                    if let Some(a) = attributes(attr) {
+                        out.push_str(&a);
+                    }
+                }
     }
 
     /// A code span, with the delimiter and padding its content needs.
@@ -1368,30 +1455,7 @@ impl Writer {
                 // the dollar form is the one both readers accept.
                 write_math(out, *kind, text);
             }
-            Inline::Link(attr, inner, target) => {
-                // The autolink escapes are spent inside `[…]` too, where
-                // pandoc leaves them off. A link cannot nest, so this
-                // looks like waste — but **pandoc's own reader linkifies
-                // inside link text**: it reads its own
-                // `[www.example.com](http://www.example.com)` back as a
-                // `Link` wrapped around a `Link`. `corpus/gfm/
-                // extensions.gfm` is the document, and the escape is what
-                // keeps `diff-gfm-md` at 100.
-                let text = self.inner(inner);
-                if write_autolink(out, inner, target) {
-                    return;
-                }
-                let _ = write!(out, "[{text}]({}", link_destination(&target.url));
-                if !target.title.is_empty() {
-                    let _ = write!(out, " \"{}\"", target.title.replace('"', "\\\""));
-                }
-                out.push(')');
-                if self.pandoc() {
-                    if let Some(a) = attributes(attr) {
-                        out.push_str(&a);
-                    }
-                }
-            }
+            Inline::Link(attr, inner, target) => self.link(out, attr, inner, target),
             Inline::Image(_, alt, target) => {
                 let text = self.inner(alt);
                 let _ = write!(out, "![{text}]({}", link_destination(&target.url));
@@ -1453,6 +1517,14 @@ fn without_task_marker(item: &[Block]) -> Vec<Block> {
 /// A pipe-table row, padded with empty cells or truncated to exactly
 /// `columns` of them — the delimiter row sets the width and a row that
 /// disagrees would not be part of the table.
+/// A caption's inlines, when it is the single paragraph a figure's is.
+fn caption_inlines(caption: &ferrodoc_ast::Caption) -> Vec<Inline> {
+    match caption.blocks.as_slice() {
+        [Block::Plain(inlines) | Block::Para(inlines)] => inlines.clone(),
+        _ => Vec::new(),
+    }
+}
+
 /// Whether a table has a **simple table** spelling in pandoc's dialect.
 ///
 /// Pandoc picks among four table shapes, and the two this refuses are
