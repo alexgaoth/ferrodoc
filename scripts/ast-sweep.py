@@ -235,15 +235,10 @@ DELIBERATE = {
     # a line of **spaces**, which is not an underline: its own reader
     # gives the heading back as a paragraph. Five quotes survive.
     ("rst", "block/Header6"),
-    # A backtick inside `:literal:` ends the role in pandoc's output,
-    # and its reader gives back three inlines where the document had
-    # one. Escaping keeps a single `Code`, with a backslash in the
-    # content - closer, and still not exact.
-    ("rst", "inline/Code+backtick"),
 }
 
-FLOORS = {"markdown": 137, "commonmark": 137, "gfm": 139, "html": 137,
-          "latex": 129, "rst": 138, "asciidoc": 139, "plain": 136}
+FLOORS = {"markdown": 142, "commonmark": 142, "gfm": 144, "html": 142,
+          "latex": 134, "rst": 143, "asciidoc": 144, "plain": 140}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]

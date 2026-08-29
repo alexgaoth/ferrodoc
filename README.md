@@ -350,10 +350,18 @@ would have been wrong twice over — two *other* rows carry the same
 stylesheet difference **and** a real one underneath it, and a list would
 have retired them both.
 
-**That leaves 4**, and they are the honest remainder: gaps in this
-project's own reading of pandoc's dialect, which the old default hid
-behind a decision. The number stopped being one decision away and became
-work.
+**That leaves 4, and none of them is plain implementation work any
+more.** Three are dialect **reader** rules: pandoc's markdown does not
+open a code block for `` ```rust ignore `` (two rows), and does not let a
+nested `>` interrupt a paragraph. Neither can be reconstructed after the
+parse — the marker is gone from the tree by the time this sees it — so
+both are recorded rather than emulated halfway. The fourth is the only
+row writing a **binary** format, where two independent writers do not
+produce identical zip bytes and comparing them is arguably the wrong
+question to ask. Every one is in `COMPATIBILITY.md` with a repro that
+runs as printed, as are the two `markdown_github` rows above: that name
+is pandoc's *old* markdown reader rather than a spelling of `gfm`, and
+`gfm` is the closest of the three readers here at 3/8 documents.
 
 `--extract-media DIR` writes the input's embedded images under `DIR` and
 repoints the output at them, matching `pandoc --extract-media` file for

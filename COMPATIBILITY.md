@@ -1409,7 +1409,7 @@ directly without asking its reader to survive anything.
 | writer | byte-identical to pandoc | floor |
 |---|---|---|
 | `html` | **38/40** | 38 |
-| `rst` | 34/40 | 34 |
+| `rst` | 36/40 | 36 |
 | `plain` | **38/40** | 38 |
 | `latex` | 36/40 | 36 |
 | `asciidoc` | **38/40** | 38 |
@@ -1913,6 +1913,30 @@ notebook without it. Refusing is arguably the better answer, by this
 project's own rule that a nearly-right document is worse than an
 error, and changing it is a behaviour change that has not been made.
 
+**A nested `>` cannot interrupt a paragraph in pandoc's dialect.**
+`> outer` followed by `> > inner` is one quoted paragraph there, with
+a literal `>` in its text; a blank line is what opens the inner quote.
+This reads it the CommonMark way and nests. Like the fence rule below
+it is a **reader** difference that cannot be reconstructed after the
+fact - the `>` marker is gone from the tree by the time this writer
+sees it - so it is recorded rather than emulated.
+
+    printf '> outer\n> > inner\n' > /tmp/t.md
+    pandoc /tmp/t.md -t json |
+      python3 -c 'import json,sys; print([b["t"] for b in json.load(sys.stdin)["blocks"][0]["c"]])'
+    # ['Para'] - one paragraph, not a nested quote
+
+**`markdown_github` is a different dialect, not a spelling of `gfm`.**
+It is pandoc's *old* markdown reader with GitHub extensions, and it
+differs from the CommonMark-based `gfm` on real constructs: a plain
+`1.` list carries `DefaultStyle`/`DefaultDelim` rather than
+`Decimal`/`Period`, and a `|` inside a code span does **not** split a
+table row, where `gfm` splits it and this splits it too. Measured
+over `corpus/*.md`, `gfm` is the closest of the three readers here at
+3/8 documents, `commonmark` 1/8 and the dialect 0/8 - so
+`markdown_github` maps to `gfm`, and pandoc's own deprecation warning
+is repeated. Two drop-in rows differ on it.
+
 **A fence whose info string is two bare words is not a fence to
 pandoc's dialect, and is one here.** The dialect takes a single word
 or a `{.class}` attribute block; ```rust ignore` is neither, so
@@ -1936,10 +1960,13 @@ blank line, would be the least defensible of the three.
 **Two RST spellings this writer keeps and pandoc loses.** A level-6
 heading exhausts pandoc's underline characters and it writes a line of
 **spaces**, which is not an underline at all - its own reader gives the
-heading back as a paragraph, where `'''''` gives back a heading. And a
-backtick inside `:literal:` ends the role in pandoc's output, so a code
-span comes back as three inlines; escaping it keeps one `Code`, with a
-backslash in the content, which is closer and still not exact.
+heading back as a paragraph, where `'''''` gives back a heading. 
+A second RST difference recorded here was **wrong, and is fixed**: a
+backtick inside `:literal:` looked like pandoc losing the span, on the
+strength of one probe that happened to use an *interior* backtick.
+Pandoc has a scheme - it escapes a backtick only where it is the first
+or last character of the content, because only there is it ambiguous
+with the role's own delimiter - and this follows it now.
 
     printf '{"pandoc-api-version":[1,23,1],"meta":{},"blocks":[{"t":"Header","c":[6,["",[],[]],[{"t":"Str","c":"T"}]]}]}' > /tmp/t.json
     pandoc /tmp/t.json -f json -t rst | pandoc -f rst -t json |

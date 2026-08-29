@@ -442,6 +442,50 @@ fn hard_broken_para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
 /// `.. raw:: html` is RST's way to carry another format's syntax through,
 /// and a toolchain that emits that format uses it. Dropping the block
 /// deleted every table and comment a converted page had.
+/// Escape the backticks a `:literal:` role cannot hold bare.
+///
+/// **Only the ones that could open or close RST inline markup**, which
+/// is pandoc's rule and much narrower than escaping them all. RST starts
+/// markup at a delimiter with whitespace *before* it and non-whitespace
+/// *after*, and ends it at one with non-whitespace before and whitespace
+/// after; a backtick in neither position cannot be mistaken for either,
+/// so pandoc leaves it. Measured one shape at a time:
+///
+/// ```text
+/// a`b        a`b          neither: bare
+/// a `b       a \`b         could open
+/// a` b       a\` b         could close
+/// a  `  b    a  `  b      space on both sides is neither
+/// x `y` z    x \`y\` z     a pair that would read as markup
+/// ```        \``\`         ends escaped, middle bare
+/// ```
+///
+/// Escaping every backtick was recorded here as a *deliberate*
+/// divergence on the strength of one probe using an interior backtick,
+/// which pandoc leaves bare — that looked like pandoc losing the span.
+/// It has a scheme, and the scheme is RST's own boundary rule.
+fn literal_backticks(code: &str) -> String {
+    let chars: Vec<char> = code.chars().collect();
+    let mut out = String::with_capacity(code.len());
+    for (index, ch) in chars.iter().enumerate() {
+        if *ch == '`' {
+            let before = index.checked_sub(1).map(|i| chars[i]);
+            let after = chars.get(index + 1).copied();
+            let opens = before.is_none_or(char::is_whitespace)
+                && after.is_some_and(|c| !c.is_whitespace());
+            let closes = before.is_some_and(|c| !c.is_whitespace())
+                && after.is_none_or(char::is_whitespace);
+            // A backtick that is the whole content has neither
+            // neighbour, so neither test fires; pandoc escapes it.
+            if opens || closes || (before.is_none() && after.is_none()) {
+                out.push('\\');
+            }
+        }
+        out.push(*ch);
+    }
+    out
+}
+
 /// A paragraph, in whichever of the three shapes RST needs for it.
 fn para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
             // **A hard break has no paragraph spelling in RST**, so a
@@ -932,7 +976,7 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             // read it. `ROADMAP.md` has `` `#include ` ``.
             let code = code.trim();
             if code.contains('`') {
-                let _ = write!(out, ":literal:`{}`", code.replace('`', "\\`"));
+                let _ = write!(out, ":literal:`{}`", literal_backticks(code));
             } else {
                 let _ = write!(out, "``{code}``");
             }
