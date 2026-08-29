@@ -98,13 +98,13 @@ impl Flavour {
 /// trips through the dialect unchanged.
 #[must_use]
 pub fn write_pandoc_markdown(doc: &Pandoc) -> String {
-    render_with(doc, Flavour::Pandoc, None)
+    render_with(doc, Flavour::Pandoc, None, 72)
 }
 
 /// The same, filled to `columns`.
 #[must_use]
 pub fn write_pandoc_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
-    render_with(doc, Flavour::Pandoc, Some(columns))
+    render_with(doc, Flavour::Pandoc, Some(columns), columns)
 }
 
 /// Render a document as `CommonMark`.
@@ -117,7 +117,7 @@ pub fn write_markdown(doc: &Pandoc) -> String {
 ///
 /// See [`write_gfm_wrapped`] for what "breakable" means here.
 pub fn write_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
-    render_with(doc, Flavour::CommonMark, Some(columns))
+    render_with(doc, Flavour::CommonMark, Some(columns), columns)
 }
 
 /// Render a document as `GitHub Flavored Markdown`, filled to `columns`.
@@ -132,7 +132,7 @@ pub fn write_markdown_wrapped(doc: &Pandoc, columns: usize) -> String {
 /// breaking at one of those would change what the text means rather than
 /// how it looks.
 pub fn write_gfm_wrapped(doc: &Pandoc, columns: usize) -> String {
-    render_with(doc, Flavour::Gfm, Some(columns))
+    render_with(doc, Flavour::Gfm, Some(columns), columns)
 }
 
 /// Render a document as `GitHub Flavored Markdown`.
@@ -158,16 +158,22 @@ pub fn write_notebook(doc: &Pandoc) -> String {
 /// The same, filled to `columns`.
 #[must_use]
 pub fn write_notebook_wrapped(doc: &Pandoc, columns: usize) -> String {
-    render_with(doc, Flavour::Ipynb, Some(columns))
+    render_with(doc, Flavour::Ipynb, Some(columns), columns)
 }
 
 fn render(doc: &Pandoc, flavour: Flavour) -> String {
-    render_with(doc, flavour, None)
+    render_with(doc, flavour, None, 72)
 }
 
-fn render_with(doc: &Pandoc, flavour: Flavour, columns: Option<usize>) -> String {
+fn render_with(doc: &Pandoc, flavour: Flavour, columns: Option<usize>, layout: usize) -> String {
+    // **`Wrap::None` arrives as `Some(usize::MAX)`** — a sentinel for
+    // "do not fill", not a width anyone meant. A table still needs one,
+    // and pandoc lays a multiline table out at `--columns` in every wrap
+    // mode, so the sentinel falls back to pandoc's default. Multiplied
+    // by a column's fraction it asked for an 8-exabyte string instead.
+    let layout = if layout == usize::MAX { 72 } else { layout };
     let mut out = String::new();
-    let mut writer = Writer { flavour, columns, bullet: '-', ..Writer::default() };
+    let mut writer = Writer { flavour, columns, layout, bullet: '-', ..Writer::default() };
     writer.blocks(&mut out, &doc.blocks, "");
     writer.flush_notes(&mut out);
     // Exactly one trailing newline, like every other writer here.
@@ -217,6 +223,11 @@ struct Writer {
     at: Standing,
     /// The column to fill to, or `None` to leave every line as it falls.
     columns: Option<usize>,
+    /// The width a **table** is laid out to, which is `--columns`
+    /// whatever `--wrap` says: pandoc sizes a multiline table's columns
+    /// from it even with `--wrap=preserve`, where `columns` above is
+    /// `None` because nothing is filled.
+    layout: usize,
     /// How many **list items** deep the block being written is. A
     /// blockquote does not count: its `> ` prefix makes four more spaces
     /// unambiguous, where a list item's own indentation does not.
@@ -724,9 +735,9 @@ impl Writer {
         // when the table has no head: an empty one still reads back as a
         // table of the right shape.
         let mut lines: Vec<Vec<String>> = Vec::new();
-        lines.push(header.map(|row| self.cells(row, columns, true)).unwrap_or_default());
+        lines.push(header.map(|row| self.cells(row, columns, true, false)).unwrap_or_default());
         for row in body {
-            lines.push(self.cells(row, columns, true));
+            lines.push(self.cells(row, columns, true, false));
         }
 
         // **Pandoc pads every column to its widest cell**, with a floor of
@@ -793,8 +804,181 @@ impl Writer {
             self.pipe_table(out, table, prefix);
         } else if self.pandoc() && simple_table_applies(table) {
             self.simple_table(out, table, prefix, at);
+        } else if self.pandoc() && multiline_table_applies(table) {
+            self.multiline_table(out, table, prefix);
         } else {
             Self::unrepresentable(out, block, prefix);
+        }
+    }
+
+    /// One row laid out: each cell filled to its column, the row as tall
+    /// as the tallest cell, and every column padded but the last.
+    fn multiline_row(cells: &[String], widths: &[usize]) -> Vec<String> {
+            let filled: Vec<Vec<String>> = widths
+                .iter()
+                .enumerate()
+                .map(|(index, width)| fill(cells.get(index).map_or("", String::as_str), *width))
+                .collect();
+            let height = filled.iter().map(Vec::len).max().unwrap_or(0).max(1);
+            (0..height)
+                .map(|line| {
+                    let mut text = String::new();
+                    for (index, width) in widths.iter().enumerate() {
+                        if index > 0 {
+                            text.push(' ');
+                        }
+                        let piece = filled[index].get(line).map_or("", String::as_str);
+                        text.push_str(piece);
+                        if index + 1 < widths.len() {
+                            text.push_str(&" ".repeat(width.saturating_sub(piece.chars().count())));
+                        }
+                    }
+                    format!("  {text}")
+                })
+                .collect()
+    }
+
+    /// One row's cells for a multiline table: the inline text **before**
+    /// it is laid out, so the break opportunities survive for `fill` to
+    /// break at. `cells` lays each cell out at the writer's own column
+    /// first, which leaves nothing to wrap.
+    fn multiline_cells(&mut self, row: &Row, columns: usize) -> Vec<String> {
+        let mut out: Vec<String> = Vec::with_capacity(columns);
+        for cell in &row.cells {
+            let text = match cell.blocks.as_slice() {
+                [Block::Plain(inlines) | Block::Para(inlines)] => self.inlines(inlines),
+                _ => String::new(),
+            };
+            out.push(text);
+            for _ in 1..cell.col_span.max(1) {
+                out.push(String::new());
+            }
+        }
+        out
+    }
+
+    /// Pandoc's **multiline table**, which is what a column stating its
+    /// own width gets — the shape every table converted from DOCX, ODT or
+    /// HTML arrives in, and one that fell back to raw HTML here.
+    ///
+    /// Measured against `pandoc -f json -t markdown` one shape at a time:
+    ///
+    /// * a column is `floor(fraction x available)` wide, where available
+    ///   is `--columns` less the one space between each pair — 0.5 and
+    ///   0.5 at 72 columns are 35 and 35, not 36 and 36;
+    /// * the width comes from `--columns` **whatever `--wrap` says**,
+    ///   which is why this writer carries a layout width beside the fill
+    ///   one;
+    /// * a cell too wide for its column is filled and the row becomes
+    ///   several lines, the other columns padded out beside it;
+    /// * body rows are separated by a blank line, and a body of exactly
+    ///   **one** row is followed by one as well;
+    /// * with a header the table opens and closes on a full-width rule;
+    ///   without one it opens and closes on the per-column rules.
+    fn multiline_table(&mut self, out: &mut String, table: &Table, prefix: &str) {
+        let count = table.colspecs.len();
+        let available = self.layout.saturating_sub(count.saturating_sub(1));
+        let base: Vec<usize> = table
+            .colspecs
+            .iter()
+            .map(|spec| match spec.width {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss,
+                    reason = "a column width is small, never negative, and \
+                              well inside f64's mantissa"
+                )]
+                ferrodoc_ast::ColWidth::ColWidth(fraction) => {
+                    (fraction * available as f64).floor() as usize
+                }
+                ferrodoc_ast::ColWidth::ColWidthDefault => 0,
+            })
+            .collect();
+
+        let header: Vec<String> = table
+            .head
+            .rows
+            .iter()
+            .filter(|row| row.cells.iter().any(|cell| !cell.blocks.is_empty()))
+            .flat_map(|row| self.multiline_cells(row, count))
+            .collect();
+        let body: Vec<Vec<String>> = table
+            .head
+            .rows
+            .iter()
+            .skip(usize::from(!header.is_empty()))
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows)
+            .map(|row| self.multiline_cells(row, count))
+            .collect();
+
+        // **Without filling, a column widens to hold its widest cell.**
+        // `--wrap=preserve` may not re-flow, so pandoc gives the column
+        // `widest + 2` where that is more than the fraction asks for —
+        // the simple table's rule, reappearing. With `--wrap=auto` the
+        // fraction wins and the cell is filled to it.
+        // **`Wrap::None` cannot fill either**, and it arrives as
+        // `Some(usize::MAX)` rather than `None` — so asking
+        // `columns.is_some()` called it a filling mode and left a cell
+        // overflowing its column instead of widening it.
+        let fills = self.columns.is_some_and(|columns| columns != usize::MAX);
+        let widths: Vec<usize> = if fills {
+            base
+        } else {
+            (0..count)
+                .map(|index| {
+                    let widest = std::iter::once(&header)
+                        .chain(&body)
+                        .filter_map(|cells| cells.get(index))
+                        .map(|cell| cell.chars().count())
+                        .max()
+                        .unwrap_or(0);
+                    base[index].max(widest + 2)
+                })
+                .collect()
+        };
+
+        let rule = |fill: char| {
+            widths
+                .iter()
+                .map(|width| fill.to_string().repeat(*width))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let full = "-".repeat(widths.iter().sum::<usize>() + count.saturating_sub(1));
+        let lay = |cells: &[String]| Self::multiline_row(cells, &widths);
+
+        if header.is_empty() {
+            push_line(out, prefix, &format!("  {}", rule('-')));
+        } else {
+            push_line(out, prefix, &format!("  {full}"));
+            for line in lay(&header) {
+                push_line(out, prefix, &line);
+            }
+            push_line(out, prefix, &format!("  {}", rule('-')));
+        }
+        for (index, cells) in body.iter().enumerate() {
+            if index > 0 {
+                push_line(out, prefix, "");
+            }
+            for line in lay(cells) {
+                push_line(out, prefix, &line);
+            }
+        }
+        if body.len() == 1 {
+            push_line(out, prefix, "");
+        }
+        if header.is_empty() {
+            push_line(out, prefix, &format!("  {}", rule('-')));
+        } else {
+            push_line(out, prefix, &format!("  {full}"));
+        }
+        if !table.caption.blocks.is_empty() {
+            push_line(out, prefix, "");
+            let mut caption = String::new();
+            self.blocks(&mut caption, &table.caption.blocks, "");
+            push_line(out, prefix, &format!("  : {}", caption.trim()));
         }
     }
 
@@ -836,7 +1020,7 @@ impl Writer {
             .head
             .rows
             .first()
-            .map(|row| self.cells(row, columns, false))
+            .map(|row| self.cells(row, columns, false, false))
             .unwrap_or_default();
         // A header of nothing but empty cells is not a header: pandoc
         // writes the same table it writes for a `head` with no rows.
@@ -849,7 +1033,7 @@ impl Writer {
             .skip(1)
             .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
             .chain(&table.foot.rows)
-            .map(|row| self.cells(row, columns, false))
+            .map(|row| self.cells(row, columns, false, false))
             .collect();
 
         let width = |index: usize| {
@@ -1165,7 +1349,7 @@ impl Writer {
     /// of the **table shape** rather than of the text: a pipe table ends
     /// a cell at one and a simple table does not, so pandoc writes
     /// `` `x|y` `` bare in the second and `` `x\|y` `` in the first.
-    fn cells(&mut self, row: &Row, columns: usize, pipes: bool) -> Vec<String> {
+    fn cells(&mut self, row: &Row, columns: usize, pipes: bool, breaks: bool) -> Vec<String> {
         let mut out: Vec<String> = Vec::with_capacity(columns);
         for cell in &row.cells {
             let mut text = String::new();
@@ -1178,7 +1362,7 @@ impl Writer {
                 }
                 text.push_str(piece);
             }
-            out.push(cell_text(&text, pipes));
+            out.push(cell_text(&text, pipes, breaks));
             // A spanned cell occupies further columns that carry nothing.
             for _ in 1..cell.col_span.max(1) {
                 out.push(String::new());
@@ -1558,6 +1742,17 @@ fn caption_inlines(caption: &ferrodoc_ast::Caption) -> Vec<Inline> {
     }
 }
 
+/// Whether a table has a **multiline table** spelling: the same cells a
+/// simple table needs, and at least one column stating its own width.
+fn multiline_table_applies(table: &Table) -> bool {
+    !table.colspecs.is_empty()
+        && table
+            .colspecs
+            .iter()
+            .any(|spec| spec.width != ferrodoc_ast::ColWidth::ColWidthDefault)
+        && cells_are_single_blocks(table)
+}
+
 /// Whether a table has a **simple table** spelling in pandoc's dialect.
 ///
 /// Pandoc picks among four table shapes, and the two this refuses are
@@ -1595,6 +1790,13 @@ fn simple_table_applies(table: &Table) -> bool {
     if table.colspecs.iter().any(|spec| spec.width != ferrodoc_ast::ColWidth::ColWidthDefault) {
         return false;
     }
+    cells_are_single_blocks(table)
+}
+
+/// Whether every cell holds at most one `Plain` or `Para` and spans one
+/// row and one column — what both the simple and the multiline table
+/// need, and what sends anything else to a grid table.
+fn cells_are_single_blocks(table: &Table) -> bool {
     let rows = table
         .head
         .rows
@@ -1628,7 +1830,7 @@ fn pipe_row(cells: &[String], widths: &[usize], alignments: &[Alignment]) -> Str
 /// end the cell and a newline would end the row. A reader unescapes `\|`
 /// before it parses the cell, so the escape survives even inside a code
 /// span.
-fn cell_text(text: &str, pipes: bool) -> String {
+fn cell_text(text: &str, pipes: bool, breaks: bool) -> String {
     let mut out = String::with_capacity(text.len());
     let mut backslashes = 0usize;
     for ch in text.chars() {
@@ -1642,7 +1844,12 @@ fn cell_text(text: &str, pipes: bool) -> String {
             // A row is one line, so a break opportunity in a cell is a
             // space and nothing else — pandoc does not fill inside a
             // pipe table either.
-            '\n' | BREAK => out.push(' '),
+            // A **pipe table** row is one line, so a break opportunity in
+            // a cell is a space. A **multiline** table fills its cells to
+            // a column, so the opportunity has to survive to be filled at.
+            '\n' | BREAK if !breaks => out.push(' '),
+            BREAK => out.push(BREAK),
+            '\n' => out.push(' '),
             ch => out.push(ch),
         }
         backslashes = if ch == '\\' { backslashes + 1 } else { 0 };

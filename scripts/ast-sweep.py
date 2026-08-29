@@ -150,6 +150,15 @@ case("block/Table.aligned", table(["AlignLeft", "AlignCenter", "AlignRight"],
 case("block/Table.no-header", table(["AlignDefault"] * 2, [["", ""]], [["a", "b"]]))
 case("block/Table.caption", table(["AlignDefault"] * 2, [["h1", "h2"]], [["a", "b"]], caption="Cap"))
 case("block/Table.widths", table(["AlignDefault"] * 2, [["h1", "h2"]], [["a", "b"]], widths=[0.5, 0.5]))
+# A cell too wide for its column: the row becomes several lines under
+# `--wrap=auto`, and the column widens instead under `--wrap=preserve`.
+case("block/Table.widths.wrapping",
+     table(["AlignDefault"] * 2, [["h1", "h2"]],
+           [["one two three four five six seven eight nine ten", "b"]],
+           widths=[0.5, 0.5]))
+case("block/Table.widths.uneven",
+     table(["AlignDefault"] * 3, [["h1", "h2", "h3"]], [["a", "b", "c"]],
+           widths=[0.25, 0.25, 0.5]))
 case("block/Table.empty-cells", table(["AlignDefault"] * 2, [["a", "b"]], [["", ""]]))
 
 # **Letters and digits only.** `@@%d@@` looked unambiguous and was not:
@@ -237,8 +246,8 @@ DELIBERATE = {
     ("rst", "block/Header6"),
 }
 
-FLOORS = {"markdown": 142, "commonmark": 142, "gfm": 144, "html": 142,
-          "latex": 134, "rst": 143, "asciidoc": 144, "plain": 140}
+FLOORS = {"markdown": 145, "commonmark": 144, "gfm": 146, "html": 144,
+          "latex": 134, "rst": 143, "asciidoc": 146, "plain": 140}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]
