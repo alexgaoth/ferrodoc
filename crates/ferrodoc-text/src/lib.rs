@@ -347,17 +347,11 @@ impl Writer {
         if columns == 0 {
             return String::new();
         }
-        let widths: Vec<usize> = (0..columns)
-            .map(|c| {
-                head.iter()
-                    .chain(&body)
-                    .filter_map(|row| row.get(c))
-                    .map(|cell| cell.chars().count())
-                    .max()
-                    .unwrap_or(0)
-                    + 2
-            })
-            .collect();
+        let sized = table
+            .colspecs
+            .iter()
+            .any(|spec| spec.width != ferrodoc_ast::ColWidth::ColWidthDefault);
+        let widths = self.column_widths(table, &head, &body, columns, sized);
         let align = |c: usize| {
             table.colspecs.get(c).map_or(Alignment::AlignDefault, |s| s.alignment)
         };
@@ -387,6 +381,34 @@ impl Writer {
         };
         let rule: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
         let rule = format!("  {}", rule.join(" "));
+        if sized {
+            // A multiline table separates its rows with a blank line and
+            // closes on a full-width rule, a body of exactly one row
+            // being followed by a blank as well.
+            let full = format!(
+                "  {}",
+                "-".repeat(widths.iter().sum::<usize>() + columns.saturating_sub(1))
+            );
+            let mut out: Vec<String> = Vec::new();
+            if head.is_empty() {
+                out.push(rule.clone());
+            } else {
+                out.push(full.clone());
+                out.extend(head.iter().map(line));
+                out.push(rule.clone());
+            }
+            for (index, cells) in body.iter().enumerate() {
+                if index > 0 {
+                    out.push(String::new());
+                }
+                out.push(line(cells));
+            }
+            if body.len() == 1 {
+                out.push(String::new());
+            }
+            out.push(if head.is_empty() { rule } else { full });
+            return out.join("\n");
+        }
         let mut lines: Vec<String> = head.iter().map(line).collect();
         lines.push(rule.clone());
         lines.extend(body.iter().map(line));
@@ -396,6 +418,56 @@ impl Writer {
             lines.push(rule);
         }
         lines.join("\n")
+    }
+
+    /// How wide each column is.
+    ///
+    /// **A column stating its own width gets pandoc's multiline table**,
+    /// which is what a table converted from DOCX, ODT or HTML asks for;
+    /// the widest-cell rule is for the simple one. The arithmetic is the
+    /// markdown writer's, measured the same way: `floor(fraction x
+    /// available)` where available is `--columns` less the space between
+    /// each pair — and, where nothing may be re-flowed, at least the
+    /// widest cell plus two, because the column has to hold it.
+    fn column_widths(
+        &self,
+        table: &ferrodoc_ast::Table,
+        head: &[Vec<String>],
+        body: &[Vec<String>],
+        columns: usize,
+        sized: bool,
+    ) -> Vec<usize> {
+        let widest = |c: usize| {
+            head.iter()
+                .chain(body)
+                .filter_map(|row| row.get(c))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+        };
+        let available =
+            self.columns.unwrap_or(COLUMNS).saturating_sub(columns.saturating_sub(1));
+        (0..columns)
+            .map(|c| {
+                if !sized {
+                    return widest(c) + 2;
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss,
+                    reason = "a column width is small, never negative, and \
+                              well inside f64's mantissa"
+                )]
+                let base = match table.colspecs.get(c).map(|spec| spec.width) {
+                    Some(ferrodoc_ast::ColWidth::ColWidth(fraction)) => {
+                        (fraction * available as f64).floor() as usize
+                    }
+                    _ => 0,
+                };
+                if self.columns.is_some() { base } else { base.max(widest(c) + 2) }
+            })
+            .collect()
     }
 
     fn rows(&mut self, rows: &[ferrodoc_ast::Row]) -> Vec<Vec<String>> {

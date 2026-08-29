@@ -252,7 +252,8 @@ FLOORS = {"markdown": 145, "commonmark": 144, "gfm": 146, "html": 144,
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]
 FLOORS_ONLY = "--floors" in ARGS
-ARGS = [a for a in ARGS if a != "--floors"]
+BLESS = "--bless" in ARGS
+ARGS = [a for a in ARGS if a not in ("--floors", "--bless")]
 if ARGS and "/" in ARGS[0]:
     FERRODOC = ARGS.pop(0)
 
@@ -263,6 +264,7 @@ if ARGS:
 
 total, below = 0, 0
 summary = []
+scores = {}
 for writer, ours, theirs in WRITERS:
     found = sweep(writer, ours, theirs)
     kept = [f for f in found if (writer, f[0]) in DELIBERATE]
@@ -270,6 +272,7 @@ for writer, ours, theirs in WRITERS:
     score = len(CASES) - len(bad)
     total += len(bad)
     summary.append(f"{writer} {score}/{len(CASES)}")
+    scores[writer] = score
     floor = FLOORS.get(writer, 0)
     if score < floor:
         below += 1
@@ -284,6 +287,32 @@ for writer, ours, theirs in WRITERS:
         print(f"      ours:   {f!r}")
     for name, _, _ in kept:
         print(f"  {name} — deliberate, see COMPATIBILITY.md")
+
+# **`--bless` rewrites the floors from this run**, which is the one edit
+# here that is pure transcription — eight of them by hand in a day, and a
+# floor typed one too low is a gate that cannot fail. It only ever raises
+# one: a floor that would fall is a regression, and the answer to that is
+# never to write the smaller number down.
+if BLESS:
+    source = open(__file__, encoding="utf-8").read()
+    raised = []
+    for writer, score in scores.items():
+        floor = FLOORS.get(writer, 0)
+        if score > floor:
+            raised.append(f"{writer} {floor} -> {score}")
+            FLOORS[writer] = score
+    if raised:
+        table = ",\n          ".join(
+            ", ".join(f'"{w}": {FLOORS[w]}' for w in group)
+            for group in (list(FLOORS)[:4], list(FLOORS)[4:])
+        )
+        start = source.index("FLOORS = {")
+        end = source.index("}", start) + 1
+        source = source[:start] + "FLOORS = {" + table + "}" + source[end:]
+        open(__file__, "w", encoding="utf-8").write(source)
+        print("raised: " + ", ".join(raised))
+    else:
+        print("no floor moved")
 
 # One line last, because `verify.sh` reports a gate by its final line.
 print(f"identical to pandoc on {len(CASES)} AST constructs: " + ", ".join(summary))
