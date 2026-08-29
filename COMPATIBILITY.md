@@ -1897,6 +1897,19 @@ differential gate exists:
 One thing is **not** matched, stated rather than hidden: pandoc renders
 `Math` as Unicode — `$x^2$` becomes `x²` — where this writes the TeX.
 
+**Two RST spellings this writer keeps and pandoc loses.** A level-6
+heading exhausts pandoc's underline characters and it writes a line of
+**spaces**, which is not an underline at all - its own reader gives the
+heading back as a paragraph, where `'''''` gives back a heading. And a
+backtick inside `:literal:` ends the role in pandoc's output, so a code
+span comes back as three inlines; escaping it keeps one `Code`, with a
+backslash in the content, which is closer and still not exact.
+
+    printf '{"pandoc-api-version":[1,23,1],"meta":{},"blocks":[{"t":"Header","c":[6,["",[],[]],[{"t":"Str","c":"T"}]]}]}' > /tmp/t.json
+    pandoc /tmp/t.json -f json -t rst | pandoc -f rst -t json |
+      python3 -c 'import json,sys; print([b["t"] for b in json.load(sys.stdin)["blocks"]])'
+    # ['Para'] - a Header went in
+
 **Pandoc's renderer is bounded, and this writer matches its fallback.**
 It converts what it can to Unicode and gives up on the rest, warning as
 it goes, and the two agree from there on:

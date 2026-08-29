@@ -171,9 +171,19 @@ impl Writer {
                 }
             }
             Block::Div(_, inner) => self.blocks(inner, out, prefix),
+            // **A figure is its caption in brackets**, the same shape an
+            // image takes here — the picture is not there to be shown, so
+            // the caption is the only thing that carries. Written as
+            // content then caption it produced the alt text *and* the
+            // caption, as two paragraphs.
             Block::Figure(_, caption, inner) => {
-                self.blocks(inner, out, prefix);
-                self.blocks(&caption.blocks, out, prefix);
+                if caption.blocks.is_empty() {
+                    self.blocks(inner, out, prefix);
+                } else {
+                    let mut text = Vec::new();
+                    self.blocks(&caption.blocks, &mut text, "");
+                    out.push(indent(&format!("[{}]", text.join("\n").trim()), prefix));
+                }
             }
             Block::BulletList(items) => self.list(items, out, prefix, |_| "- ".to_owned()),
             Block::OrderedList(attrs, items) => {
@@ -225,7 +235,15 @@ impl Writer {
                     }
                     out.push(text);
                 }
-                self.blocks(&table.caption.blocks, out, prefix);
+                // **A caption is `: text`**, indented with the table —
+                // written as an ordinary paragraph it read as prose that
+                // had nothing to do with the table above it.
+                if !table.caption.blocks.is_empty() {
+                    let mut caption = Vec::new();
+                    self.blocks(&table.caption.blocks, &mut caption, "");
+                    let text = caption.join("\n");
+                    out.push(indent(&format!("  : {}", text.trim()), prefix));
+                }
             }
             // The rule fills the column count asked for, not a fixed 72.
             Block::HorizontalRule => {
@@ -306,7 +324,18 @@ impl Writer {
     /// cell plus two, a dashed rule under the head, and `AlignRight`
     /// columns padded on the left. Measured against pandoc cell by cell.
     fn table(&mut self, table: &ferrodoc_ast::Table) -> String {
-        let head: Vec<Vec<String>> = self.rows(&table.head.rows);
+        // **A header row of nothing but empty cells is not a header** —
+        // the same rule the HTML, RST, AsciiDoc and markdown writers
+        // follow, and the fifth writer to have had it wrong. Kept, it
+        // wrote a row of spaces above the rule and widened nothing.
+        let header_rows: Vec<&ferrodoc_ast::Row> = table
+            .head
+            .rows
+            .iter()
+            .filter(|row| row.cells.iter().any(|cell| !cell.blocks.is_empty()))
+            .collect();
+        let head: Vec<Vec<String>> =
+            header_rows.iter().flat_map(|row| self.rows(std::slice::from_ref(*row))).collect();
         let body: Vec<Vec<String>> = table
             .bodies
             .iter()
@@ -357,9 +386,15 @@ impl Writer {
             out
         };
         let rule: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
+        let rule = format!("  {}", rule.join(" "));
         let mut lines: Vec<String> = head.iter().map(line).collect();
-        lines.push(format!("  {}", rule.join(" ")));
+        lines.push(rule.clone());
         lines.extend(body.iter().map(line));
+        // Without a header the rule goes above *and* below, which is what
+        // closes a headerless simple table.
+        if head.is_empty() {
+            lines.push(rule);
+        }
         lines.join("\n")
     }
 

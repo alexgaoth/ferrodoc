@@ -416,14 +416,7 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
         // transition too; the bytes are the test.
         Block::HorizontalRule => out.push_str("--------------\n"),
         Block::Table(table) => table_to(table, out, def),
-        Block::Figure(_, caption, inner) => {
-            blocks(inner, out, def);
-            if !caption.blocks.is_empty() {
-                let mut text = String::new();
-                blocks(&caption.blocks, &mut text, def);
-                out.push_str(&indent(&text));
-            }
-        }
+        Block::Figure(_, caption, inner) => figure_to(caption, inner, out, def),
         Block::Div(attr, inner) => container_to(attr, inner, out, def),
         Block::RawBlock(format, text) => raw_block_to(&format.0, text, out),
     }
@@ -473,6 +466,48 @@ fn para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
             let mut text = String::new();
             inlines(list, &mut text, def);
             let _ = writeln!(out, "{}", text.trim_end());
+}
+
+/// **A figure is a `figure` directive** when its body is one image: the
+/// URL is the argument, the image's alt text an `:alt:` option, and the
+/// caption the directive's content. Written as a substitution followed
+/// by an indented paragraph it produced the alt text as a picture *and*
+/// the caption as a block quote, which is two things where the document
+/// had one.
+fn figure_to(
+    caption: &ferrodoc_ast::Caption,
+    inner: &[Block],
+    out: &mut String,
+    def: &mut Defs,
+) {
+            let lone_image = match inner {
+                [Block::Plain(list) | Block::Para(list)] => match list.as_slice() {
+                    [Inline::Image(_, alt, target)] => Some((alt, target)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some((alt, target)) = lone_image else {
+                blocks(inner, out, def);
+                if !caption.blocks.is_empty() {
+                    let mut text = String::new();
+                    blocks(&caption.blocks, &mut text, def);
+                    out.push_str(&indent(&text));
+                }
+                return;
+            };
+            let _ = writeln!(out, ".. figure:: {}", target.url);
+            let mut alt_text = String::new();
+            inlines(alt, &mut alt_text, def);
+            if !alt_text.is_empty() {
+                let _ = writeln!(out, "{INDENT}:alt: {}", alt_text.trim());
+            }
+            if !caption.blocks.is_empty() {
+                out.push('\n');
+                let mut text = String::new();
+                blocks(&caption.blocks, &mut text, def);
+                out.push_str(&indent(&text));
+            }
 }
 
 /// **A div is a `container` directive**, which is what pandoc's own RST

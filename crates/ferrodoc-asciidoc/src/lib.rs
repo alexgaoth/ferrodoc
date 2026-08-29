@@ -196,6 +196,14 @@ fn quote_to(inner: &[Block], out: &mut String, depth: Depth) {
 fn block_to(block: &Block, out: &mut String, depth: Depth) {
     match block {
         Block::Plain(list) | Block::Para(list) => {
+            // **Display math is a block, not a role.** `latexmath:[…]` is
+            // the inline one; a paragraph that is nothing but display
+            // math is a `[latexmath]` passthrough block, which is the
+            // shape every reader produces for `$$…$$` on its own line.
+            if let [Inline::Math(ferrodoc_ast::MathType::DisplayMath, math)] = list.as_slice() {
+                let _ = writeln!(out, "[latexmath]\n++++\n{math}\n++++");
+                return;
+            }
             let mut text = String::new();
             inlines(list, &mut text);
             let text = text.trim_end();

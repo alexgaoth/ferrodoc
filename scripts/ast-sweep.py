@@ -74,7 +74,10 @@ case("inline/Link+title", {"t": "Para", "c": [{"t": "Link", "c": [A, inls("t"), 
 case("inline/Link+attr", {"t": "Para", "c": [{"t": "Link", "c": [attr("i", ["c"]), inls("t"), ["u", ""]]}]})
 case("inline/Link.empty-text", {"t": "Para", "c": [{"t": "Link", "c": [A, [], ["u", ""]]}]})
 case("inline/Image", {"t": "Para", "c": [S("a"), SP, {"t": "Image", "c": [A, inls("alt"), ["p", ""]]}]})
-case("inline/Image+title", {"t": "Para", "c": [S("a"), SP, {"t": "Image", "c": [A, inls("alt"), ["p", "ti"]]}]})
+# **A distinct alt text**, because RST names a substitution after it and
+# uniquifies a repeat to `|image1|` — two cases sharing "alt" made the
+# second look like a writer difference when both writers agree.
+case("inline/Image+title", {"t": "Para", "c": [S("a"), SP, {"t": "Image", "c": [A, inls("titled"), ["p", "ti"]]}]})
 case("inline/Span+attr", {"t": "Para", "c": [{"t": "Span", "c": [attr("i", ["c"]), inls("x")]}]})
 case("inline/Span.bare", {"t": "Para", "c": [{"t": "Span", "c": [A, inls("x")]}]})
 case("inline/Note", {"t": "Para", "c": [S("a"), {"t": "Note", "c": [para("body")]}]})
@@ -219,10 +222,19 @@ DELIBERATE = {
     # `\setcounter` before `\def`: pandoc's reader takes the start value
     # from the first directive it meets, so pandoc's order loses it.
     ("latex", "block/OrderedList.start3"),
+    # Pandoc runs out of RST underline characters at level 6 and writes
+    # a line of **spaces**, which is not an underline: its own reader
+    # gives the heading back as a paragraph. Five quotes survive.
+    ("rst", "block/Header6"),
+    # A backtick inside `:literal:` ends the role in pandoc's output,
+    # and its reader gives back three inlines where the document had
+    # one. Escaping keeps a single `Code`, with a backslash in the
+    # content - closer, and still not exact.
+    ("rst", "inline/Code+backtick"),
 }
 
 FLOORS = {"markdown": 137, "commonmark": 137, "gfm": 139, "html": 137,
-          "latex": 129, "rst": 134, "asciidoc": 137, "plain": 133}
+          "latex": 129, "rst": 138, "asciidoc": 139, "plain": 136}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]
