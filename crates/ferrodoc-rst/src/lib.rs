@@ -309,20 +309,7 @@ fn closes_indented(block: &Block) -> bool {
 
 fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
     match block {
-        Block::Plain(list) | Block::Para(list) => {
-            // **A hard break has no paragraph spelling in RST**, so a
-            // paragraph holding one is written as a line block: each hard
-            // break starts a new `| ` line and a soft break continues the
-            // one before it, indented two. Written as plain text the
-            // break simply vanished.
-            if list.iter().any(|inline| matches!(inline, Inline::LineBreak)) {
-                hard_broken_para_to(list, out, def);
-                return;
-            }
-            let mut text = String::new();
-            inlines(list, &mut text, def);
-            let _ = writeln!(out, "{}", text.trim_end());
-        }
+        Block::Plain(list) | Block::Para(list) => para_to(list, out, def),
         Block::LineBlock(lines) => {
             for line in lines {
                 let mut text = String::new();
@@ -462,6 +449,32 @@ fn hard_broken_para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
 /// `.. raw:: html` is RST's way to carry another format's syntax through,
 /// and a toolchain that emits that format uses it. Dropping the block
 /// deleted every table and comment a converted page had.
+/// A paragraph, in whichever of the three shapes RST needs for it.
+fn para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
+            // **A hard break has no paragraph spelling in RST**, so a
+            // paragraph holding one is written as a line block: each hard
+            // break starts a new `| ` line and a soft break continues the
+            // one before it, indented two. Written as plain text the
+            // break simply vanished.
+            if list.iter().any(|inline| matches!(inline, Inline::LineBreak)) {
+                hard_broken_para_to(list, out, def);
+                return;
+            }
+            // **Display math is a directive, not a role.** `:math:` is
+            // the inline one; a paragraph that is nothing but display
+            // math is `.. math:: …`, which is the shape every reader
+            // produces for `$$…$$` on a line of its own. Pandoc splits a
+            // paragraph that holds one *among other text* as well — that
+            // case still writes the role here.
+            if let [Inline::Math(ferrodoc_ast::MathType::DisplayMath, math)] = list {
+                let _ = writeln!(out, ".. math:: {math}");
+                return;
+            }
+            let mut text = String::new();
+            inlines(list, &mut text, def);
+            let _ = writeln!(out, "{}", text.trim_end());
+}
+
 /// **A div is a `container` directive**, which is what pandoc's own RST
 /// reader reads back as a `Div`. Writing only the content dropped the
 /// grouping and every attribute on it — the classes become the

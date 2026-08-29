@@ -31,7 +31,8 @@ mod write;
 
 pub use write::{
     Flavour, write_gfm, write_gfm_wrapped, write_markdown, write_markdown_wrapped,
-    write_pandoc_markdown, write_pandoc_markdown_wrapped,
+    write_notebook, write_notebook_wrapped, write_pandoc_markdown,
+    write_pandoc_markdown_wrapped,
 };
 
 use comrak::nodes::{AstNode, ListDelimType, ListType, NodeValue, TableAlignment};

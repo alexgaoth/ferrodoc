@@ -54,8 +54,14 @@ for kind in ["SingleQuote", "DoubleQuote"]:
     case(f"inline/Quoted.{kind}",
          {"t": "Para", "c": [{"t": "Quoted", "c": [{"t": kind}, inls("x")]}]})
 for kind in ["InlineMath", "DisplayMath"]:
+    # `x^2` is one pandoc **renders** to markup; `\frac` is one it gives
+    # up on and writes back as TeX. Only the first was here, so the
+    # fallback — which is what most real math hits — went unmeasured,
+    # and both the HTML and plain writers had it wrong.
     case(f"inline/Math.{kind}",
          {"t": "Para", "c": [{"t": "Math", "c": [{"t": kind}, "x^2"]}]})
+    case(f"inline/Math.{kind}.unrenderable",
+         {"t": "Para", "c": [{"t": "Math", "c": [{"t": kind}, "\\frac{a}{b}"]}]})
 case("inline/Code", {"t": "Para", "c": [{"t": "Code", "c": [A, "a b"]}]})
 case("inline/Code+attr", {"t": "Para", "c": [{"t": "Code", "c": [attr("i", ["c"]), "x"]}]})
 case("inline/Code+backtick", {"t": "Para", "c": [{"t": "Code", "c": [A, "a ` b"]}]})
@@ -215,8 +221,8 @@ DELIBERATE = {
     ("latex", "block/OrderedList.start3"),
 }
 
-FLOORS = {"markdown": 135, "commonmark": 135, "gfm": 135, "html": 135,
-          "latex": 127, "rst": 131, "asciidoc": 136, "plain": 131}
+FLOORS = {"markdown": 137, "commonmark": 137, "gfm": 139, "html": 137,
+          "latex": 129, "rst": 134, "asciidoc": 137, "plain": 133}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]

@@ -52,8 +52,28 @@ pub enum Flavour {
     CommonMark,
     /// `GitHub` Flavored Markdown.
     Gfm,
+    /// A notebook cell: `GitHub` Flavored Markdown **except for math**.
+    ///
+    /// Pandoc's `ipynb` writer takes the same four GFM constructs and
+    /// writes `$x^2$` where its `gfm` writer writes `` $`x^2`$ ``. One
+    /// flavour served both here until 2026-08-28, which is right for
+    /// exactly one of them.
+    Ipynb,
     /// Pandoc's own markdown.
     Pandoc,
+}
+
+impl Flavour {
+    /// Whether the four GFM constructs are available: pipe tables, task
+    /// items, strikethrough, and the extra escaping a bare URL needs.
+    ///
+    /// **A method rather than `== Flavour::Gfm`**, because `Ipynb` is
+    /// GFM in everything but math and a bare comparison silently gave it
+    /// `CommonMark`'s escaping the day it was added — the notebook round
+    /// trip fell 11/16 to 6/16 and nothing else moved.
+    fn is_gfm(self) -> bool {
+        matches!(self, Flavour::Gfm | Flavour::Ipynb)
+    }
 }
 
 /// Render a document as **pandoc's own markdown**, the dialect
@@ -126,6 +146,19 @@ pub fn write_gfm_wrapped(doc: &Pandoc, columns: usize) -> String {
 /// degrades in a stated way rather than silently: see the module docs.
 pub fn write_gfm(doc: &Pandoc) -> String {
     render(doc, Flavour::Gfm)
+}
+
+/// Render a document as a **notebook cell**: [`write_gfm`] with pandoc's
+/// `ipynb` spelling of math, `$x^2$` rather than `` $`x^2`$ ``.
+#[must_use]
+pub fn write_notebook(doc: &Pandoc) -> String {
+    render(doc, Flavour::Ipynb)
+}
+
+/// The same, filled to `columns`.
+#[must_use]
+pub fn write_notebook_wrapped(doc: &Pandoc, columns: usize) -> String {
+    render_with(doc, Flavour::Ipynb, Some(columns))
 }
 
 fn render(doc: &Pandoc, flavour: Flavour) -> String {
@@ -218,7 +251,7 @@ impl Writer {
     /// Whether the four GFM constructs are available: pipe tables, task
     /// items, strikethrough, and the extra escaping a bare URL needs.
     fn gfm(&self) -> bool {
-        self.flavour == Flavour::Gfm
+        self.flavour.is_gfm()
     }
 
     /// Whether this is pandoc's own markdown, which differs from both of
@@ -1453,7 +1486,7 @@ impl Writer {
                 // Pandoc's `gfm` writer instead emits GitHub's `` $`x`$ `` and
                 // a ```` ```math ```` fence; one writer serves both here, and
                 // the dollar form is the one both readers accept.
-                write_math(out, *kind, text);
+                write_math(out, *kind, text, self.flavour == Flavour::Gfm);
             }
             Inline::Link(attr, inner, target) => self.link(out, attr, inner, target),
             Inline::Image(_, alt, target) => {
@@ -1812,7 +1845,23 @@ fn digits_since_line_start(out: &str) -> bool {
 }
 
 /// Write `$x$` or `$$x$$`, content untouched.
-fn write_math(out: &mut String, kind: MathType, text: &str) {
+fn write_math(out: &mut String, kind: MathType, text: &str, github: bool) {
+    // **GitHub has its own math syntax and pandoc writes it**: `` $`x`$ ``
+    // inline and a ```` ```math ```` fence for display, neither of which
+    // is the dollar form the other two dialects take. One spelling served
+    // all three here, on the note that "the dollar form is the one both
+    // readers accept" — true, and not what pandoc writes.
+    if github {
+        match kind {
+            MathType::InlineMath => {
+                let _ = write!(out, "$`{text}`$");
+            }
+            MathType::DisplayMath => {
+                let _ = write!(out, "``` math\n{text}\n```");
+            }
+        }
+        return;
+    }
     let delimiter = match kind {
         MathType::InlineMath => "$",
         MathType::DisplayMath => "$$",
@@ -1897,7 +1946,7 @@ fn opens_autolink(out: &str, ch: char) -> bool {
 /// - the GFM autolink triggers. Pandoc writes literal `http://x` bare and
 ///   its own reader turns the text into a link.
 fn escape_text(out: &mut String, text: &str, flavour: Flavour, preceded: bool) {
-    let gfm = flavour == Flavour::Gfm;
+    let gfm = flavour.is_gfm();
     // **Pandoc's dialect un-smartens as it writes.** It reads `---` as an
     // em-dash, so it writes an em-dash back out as `---` and the document
     // round trips; and it escapes the three characters its own reader
@@ -2614,12 +2663,19 @@ mod tests {
         let doc = Pandoc::new(vec![Block::Para(vec![
             Inline::Math(MathType::InlineMath, r"L = \sum_i (y_i)^2".to_owned()),
         ])]);
-        assert_eq!(write_gfm(&doc), "$L = \\sum_i (y_i)^2$\n");
+        assert_eq!(write_notebook(&doc), "$L = \\sum_i (y_i)^2$\n");
 
         let display = Pandoc::new(vec![Block::Para(vec![
             Inline::Math(MathType::DisplayMath, "E = mc^2".to_owned()),
         ])]);
-        assert_eq!(write_gfm(&display), "$$E = mc^2$$\n");
+        assert_eq!(write_notebook(&display), "$$E = mc^2$$\n");
+
+        // **The `gfm` writer spells the same AST differently**, and this
+        // test asserted the notebook answer for it until 2026-08-28.
+        // Pandoc writes GitHub's syntax there: a code span between
+        // dollars inline, and a ```` ```math ```` fence for display.
+        assert_eq!(write_gfm(&doc), "$`L = \\sum_i (y_i)^2`$\n");
+        assert_eq!(write_gfm(&display), "``` math\nE = mc^2\n```\n");
     }
 
     #[test]

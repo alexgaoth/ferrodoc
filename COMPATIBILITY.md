@@ -1897,6 +1897,27 @@ differential gate exists:
 One thing is **not** matched, stated rather than hidden: pandoc renders
 `Math` as Unicode — `$x^2$` becomes `x²` — where this writes the TeX.
 
+**Pandoc's renderer is bounded, and this writer matches its fallback.**
+It converts what it can to Unicode and gives up on the rest, warning as
+it goes, and the two agree from there on:
+
+    printf '{"pandoc-api-version":[1,23,1],"meta":{},"blocks":[{"t":"Para","c":[{"t":"Math","c":[{"t":"InlineMath"},"\\\\frac{a}{b}"]}]}]}' > /tmp/t.json
+    pandoc /tmp/t.json -f json -t plain
+    # [WARNING] Could not convert TeX math \frac{a}{b}, rendering as TeX
+    # $\frac{a}{b}$
+
+So `x^2` differs and `\frac{a}{b}` does not, which is most real
+mathematics. The **delimiters** of that fallback were wrong here until
+2026-08-28 — HTML wrote `\(…\)`, which is pandoc's `--mathjax` form
+and not its default, and the plain writer stripped the dollars
+altogether, leaving `\frac{a}{b}` reading as prose with nothing to say
+it had ever been an expression.
+
+Three writers spell math three ways and one function served all of
+them: `gfm` takes GitHub's `` $`x`$ `` and a ```` ```math ```` fence,
+`ipynb` takes `$x$`, and RST takes a `.. math::` directive for display
+where `:math:` is only the inline role.
+
 The second used to be the fill, and is not any more: this writer is
 byte-identical to pandoc's `--wrap=auto` on all twelve documents at 20,
 40, 72 and 100 columns. Four rules were needed and none of them is the

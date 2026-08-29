@@ -187,8 +187,8 @@ fn cell(
             {
                 let cell = Pandoc { blocks, ..Pandoc::default() };
                 match columns {
-                    Some(columns) => ferrodoc_markdown::write_gfm_wrapped(&cell, columns),
-                    None => ferrodoc_markdown::write_gfm(&cell),
+                    Some(columns) => ferrodoc_markdown::write_notebook_wrapped(&cell, columns),
+                    None => ferrodoc_markdown::write_notebook(&cell),
                 }
             }
                 .trim_end_matches('\n')

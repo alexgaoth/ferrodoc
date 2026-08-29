@@ -1422,9 +1422,17 @@ fn write_inline(out: &mut String, inline: &Inline) {
         Inline::Code(attr, text) => write_code_span(out, attr, text),
         Inline::Math(math_type, text) => {
             use ferrodoc_ast::MathType;
+            // **Dollar delimiters, not `\(`.** Pandoc writes `\(…\)`
+            // only under `--mathjax`, which this has no flag for; its
+            // default keeps the TeX between dollars, and that is what a
+            // reader sees when nothing renders it. Pandoc *does* render
+            // simple expressions to markup — `x^2` becomes
+            // `<em>x</em><sup>2</sup>` — and falls back to this form for
+            // anything with a fraction, a root or a sum. Only the
+            // fallback is written here; COMPATIBILITY.md records the gap.
             let (class, open, close) = match math_type {
-                MathType::InlineMath => ("math inline", "\\(", "\\)"),
-                MathType::DisplayMath => ("math display", "\\[", "\\]"),
+                MathType::InlineMath => ("math inline", "$", "$"),
+                MathType::DisplayMath => ("math display", "$$", "$$"),
             };
             let _ = write!(out, "<span class=\"{class}\">{open}");
             escape_text(out, text);

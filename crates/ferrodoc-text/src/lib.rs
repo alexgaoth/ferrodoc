@@ -409,7 +409,20 @@ impl Writer {
     fn one(&mut self, out: &mut String, inline: &Inline) {
         {
             match inline {
-                Inline::Str(s) | Inline::Code(_, s) | Inline::Math(_, s) => out.push_str(s),
+                Inline::Str(s) | Inline::Code(_, s) => out.push_str(s),
+                // **Math keeps its dollars in plain text.** Stripping
+                // them left `\frac{a}{b}` reading as prose, with nothing
+                // to say it was ever an expression; pandoc keeps the
+                // delimiters for anything it cannot render to Unicode.
+                Inline::Math(kind, s) => {
+                    let fence = match kind {
+                        ferrodoc_ast::MathType::InlineMath => "$",
+                        ferrodoc_ast::MathType::DisplayMath => "$$",
+                    };
+                    out.push_str(fence);
+                    out.push_str(s);
+                    out.push_str(fence);
+                }
                 Inline::Space => out.push(BREAK),
                 Inline::SoftBreak => out.push(SOFT),
                 Inline::LineBreak => out.push('\n'),
