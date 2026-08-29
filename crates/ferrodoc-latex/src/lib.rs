@@ -439,6 +439,14 @@ fn definition_list_to(
     out: &mut String,
 ) {
             out.push_str("\\begin{description}\n");
+            // **A description list is tight on the same rule as the other
+            // two**: every definition opening with a `Plain` rather than a
+            // `Para`. Pandoc writes `\tightlist` for one and this wrote
+            // none, so a tight definition list rendered with paragraph
+            // spacing pandoc does not give it.
+            let bodies: Vec<Vec<Block>> =
+                entries.iter().flat_map(|(_, d)| d.iter().cloned()).collect();
+            tightlist(&bodies, out);
             for (term, definitions) in entries {
                 out.push_str("\\item[");
                 inlines(term, out);

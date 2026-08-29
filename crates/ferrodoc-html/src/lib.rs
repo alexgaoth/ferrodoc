@@ -539,7 +539,11 @@ fn collect_toc(blocks: &[Block], depth: i64, out: &mut Vec<(i64, String)>) {
                 // class, so that span is replaced rather than repeated.
                 let mut inlines = inlines.as_slice();
                 if let Some(number) = attr.attributes.iter().find(|(key, _)| key == "number") {
-                    html.push_str("<span class=\"toc-section-number\">");
+                    // The attribute is a **break opportunity**, as it is
+                    // on the `<a>` above: pandoc fills a contents entry
+                    // and will break between `<span` and its class
+                    // rather than overrun the column.
+                    let _ = write!(html, "<span{BREAK}class=\"toc-section-number\">");
                     escape_text(&mut html, &number.1);
                     html.push_str("</span> ");
                     if let [Inline::Span(attr, _), Inline::Space, rest @ ..] = inlines {

@@ -92,6 +92,11 @@ for ch in ["*", "_", "`", "#", "[", "]", "<", ">", "|", "~", "^", "\\", "'", '"'
 for lead in ["#", "-", "+", "*", ">", "1.", "1)", "2.", "    ", "==="]:
     case(f"escape/line-start {lead!r}", {"t": "Para", "c": [S(lead), SP, S("x")]})
 case("escape/em-dash", {"t": "Para", "c": [S("a—b")]})
+# The dialect un-smartens these back to straight quotes, and the corpus
+# saw it only through one drop-in row.
+for name, ch in [("lsquo", "\u2018"), ("rsquo", "\u2019"),
+                 ("ldquo", "\u201c"), ("rdquo", "\u201d")]:
+    case(f"escape/{name}", {"t": "Para", "c": [S(f"a{ch}b")]})
 case("escape/ellipsis", {"t": "Para", "c": [S("a…b")]})
 case("escape/nbsp", {"t": "Para", "c": [S("a b")]})
 
@@ -118,6 +123,10 @@ case("block/DefinitionList",
      {"t": "DefinitionList", "c": [[inls("term"), [[para("def")]]]]})
 case("block/DefinitionList.two-defs",
      {"t": "DefinitionList", "c": [[inls("term"), [[para("d1")], [para("d2")]]]]})
+# A `Plain` definition is a **tight** list, which LaTeX marks
+# `\tightlist` and the loose one does not.
+case("block/DefinitionList.tight",
+     {"t": "DefinitionList", "c": [[inls("term"), [[plain("def")]]]]})
 for classes in [[], ["bash"], ["sourceCode", "bash"], ["sourceCode"]]:
     case(f"block/CodeBlock{classes}", {"t": "CodeBlock", "c": [attr("", classes), "x"]})
 case("block/CodeBlock+id", {"t": "CodeBlock", "c": [attr("i", ["bash"]), "x"]})

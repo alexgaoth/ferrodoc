@@ -18,8 +18,8 @@ Any other language with an FFI links the C ABI in
 > **It is not a drop-in `pandoc`, and the number is in the repository.**
 > `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
 > from public Makefiles and CI files — through both binaries and compares
-> every byte: **30/48 identical**, with 0 refused for a missing flag. The
-> remaining 18 rows are classified by the gate: **8 are deliberate and 10
+> every byte: **33/48 identical**, with 0 refused for a missing flag. The
+> remaining 15 rows are classified by the gate: **8 are deliberate and 7
 > are implementation work**. Seven of the eight are one thing — a
 > standalone page's highlighting stylesheet, which pandoc takes from
 > skylighting's style set and this cannot use — and the gate *computes*
@@ -323,7 +323,7 @@ at a time is what let the default flip.
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
 real pandoc command lines — collected from public Makefiles, CI files and
 scripts — through both binaries and compares every byte either wrote,
-stdout, output files and stderr. **30/48 command lines identical**, with
+stdout, output files and stderr. **33/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of
@@ -334,9 +334,11 @@ on the way in, on the way out, and under the deprecated name
 `markdown_github` — accounted for 23 misses on its own until
 **2026-08-27, when the default became pandoc's dialect** and the number
 went 12/48 to 22/48; the table of contents took it to 26/48, a figure
-caption to 27/48, and the dialect writer learning simple tables, six
-inline spellings and the fenced div took it to **30/48**. The dialect
-now accounts for **1** miss, with **1** more together with syntax
+caption to 27/48, the dialect writer learning simple tables, six inline
+spellings and the fenced div took it to 30/48, and un-smartening the
+curly quotes, a `\tightlist` on a description list and a break
+opportunity inside the contents took it to **33/48**. The dialect now
+accounts for **1** miss, with **1** more together with syntax
 highlighting, which accounts for **1** by itself.
 
 **8 rows are deliberate**, and the gate decides that rather than being
@@ -348,7 +350,7 @@ would have been wrong twice over — two *other* rows carry the same
 stylesheet difference **and** a real one underneath it, and a list would
 have retired them both.
 
-**That leaves 7**, unchanged, and they are the honest remainder: gaps in this
+**That leaves 4**, and they are the honest remainder: gaps in this
 project's own reading of pandoc's dialect, which the old default hid
 behind a decision. The number stopped being one decision away and became
 work.

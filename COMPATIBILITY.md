@@ -1897,6 +1897,26 @@ differential gate exists:
 One thing is **not** matched, stated rather than hidden: pandoc renders
 `Math` as Unicode — `$x^2$` becomes `x²` — where this writes the TeX.
 
+**A fence whose info string is two bare words is not a fence to
+pandoc's dialect, and is one here.** The dialect takes a single word
+or a `{.class}` attribute block; ```rust ignore` is neither, so
+pandoc does not open a code block at all and the backticks become an
+inline code span in a paragraph. This reads it the CommonMark way and
+keeps the block, classed `rust`.
+
+    printf '```rust ignore\nlet x = 1;\n```\n' > /tmp/t.md
+    pandoc /tmp/t.md -t json |
+      python3 -c 'import json,sys; print(json.load(sys.stdin)["blocks"][0]["t"])'
+    # Para - a fenced code block went in
+
+Two drop-in rows differ on exactly this. It is **not** emulated,
+because emulating it halfway is worse than either answer: pandoc does
+not parse the fence *at all*, so a block whose content holds a blank
+line comes back as two paragraphs of literal text, and reconstructing
+that from an already-parsed `CodeBlock` is not possible. Treating the
+fence as a fence sometimes and as prose other times, depending on a
+blank line, would be the least defensible of the three.
+
 **Two RST spellings this writer keeps and pandoc loses.** A level-6
 heading exhausts pandoc's underline characters and it writes a line of
 **spaces**, which is not an underline at all - its own reader gives the

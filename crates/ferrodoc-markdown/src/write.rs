@@ -1981,11 +1981,18 @@ fn escape_text_inner(
         // literal one is escaped — which is the whole reason these two
         // decisions have to be made in the same pass. Substituting first
         // and escaping afterwards turned every em-dash into `\-\--`.
-        if pandoc && matches!(ch, '—' | '–' | '…') {
+        if pandoc && matches!(ch, '—' | '–' | '…' | '\u{2018}' | '\u{2019}' | '\u{201C}' | '\u{201D}') {
             out.push_str(match ch {
                 '—' => "---",
                 '–' => "--",
-                _ => "...",
+                '…' => "...",
+                // **The curly quotes un-smarten too**, and land here
+                // rather than in the escape below for the same reason
+                // the dashes do: a *literal* `'` is escaped, because the
+                // reader would smarten it, and one written *for* a `’`
+                // must not be — it is meant to come back curly.
+                '\u{2018}' | '\u{2019}' => "'",
+                _ => "\"",
             });
             continue;
         }
