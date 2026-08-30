@@ -159,7 +159,7 @@ pub fn write_rst(doc: &Pandoc) -> String {
 #[must_use]
 pub fn write_rst_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
     let mut out = String::new();
-    let mut def = Defs::default();
+    let mut def = Defs { fills: matches!(wrap, Wrap::Fill(_)), ..Defs::default() };
     blocks(&doc.blocks, &mut out, &mut def);
     def.flush(&mut out);
     let text = lay_out(out.trim_end(), wrap);
@@ -201,6 +201,15 @@ struct Defs {
     /// counter for both cases pandoc invents a name for: an image with no
     /// alt text, and one whose alt text is already taken by another URL.
     generated: usize,
+    /// Whether the layout pass that follows may **re-flow** a line.
+    ///
+    /// A grid table's columns are laid out while it is written, before
+    /// that pass runs, so the table has to know what the pass will be
+    /// allowed to do: a column too narrow for its content is wrapped
+    /// when filling is available and **widened** when it is not, which
+    /// is pandoc's rule and the same one the markdown multiline table
+    /// follows.
+    fills: bool,
 }
 
 impl Defs {
@@ -683,14 +692,43 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
         return;
     }
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    // **A column stating its own width is given it**, rather than being
+    // sized from the content: that is what keeps the proportions of a
+    // table converted from DOCX, ODT or HTML. The arithmetic is the one
+    // every other writer here uses — `floor(fraction x available)` where
+    // available is `--columns` less the space between each pair — and the
+    // two spaces of cell padding come off it, because the rule counts
+    // them and the content does not.
+    //
+    // `--columns` does not reach this writer (the fill is a pass over the
+    // finished text), so it is pandoc's default of 72; a table written
+    // under a different one is laid out at 72 here.
+    let available = RST_COLUMNS.saturating_sub(columns.saturating_sub(1));
     let widths: Vec<usize> = (0..columns)
         .map(|column| {
-            rows.iter()
+            let widest = rows
+                .iter()
                 .filter_map(|row| row.get(column))
                 .map(|cell| cell.chars().count())
                 .max()
                 .unwrap_or(1)
-                .max(1)
+                .max(1);
+            if let Some(ferrodoc_ast::ColWidth::ColWidth(fraction)) =
+                table.colspecs.get(column).map(|colspec| colspec.width)
+            {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss,
+                    reason = "a column width is small, never negative, and \
+                              well inside f64's mantissa"
+                )]
+                let stated = ((fraction * available as f64).floor() as usize)
+                    .saturating_sub(2)
+                    .max(1);
+                return if def.fills { stated } else { stated.max(widest) };
+            }
+            widest
         })
         .collect();
     let rule = |fill: char, out: &mut String| {
@@ -703,13 +741,28 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
     rule('-', out);
     let header_rows = table.head.rows.len();
     for (index, row) in rows.iter().enumerate() {
-        out.push('|');
-        for (column, width) in widths.iter().enumerate() {
-            let cell = row.get(column).map_or("", String::as_str);
-            let pad = width - cell.chars().count();
-            let _ = write!(out, " {cell}{} |", " ".repeat(pad));
+        // **A cell wider than its column is wrapped**, and the row is as
+        // tall as the tallest cell. That could not happen while widths
+        // came from the content; a column given its width by the
+        // document can be narrower than what it holds, and subtracting
+        // the two the other way round overflowed a `usize` and aborted.
+        let filled: Vec<Vec<String>> = widths
+            .iter()
+            .enumerate()
+            .map(|(column, width)| {
+                wrap_cell(row.get(column).map_or("", String::as_str), *width)
+            })
+            .collect();
+        let height = filled.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        for line in 0..height {
+            out.push('|');
+            for (column, width) in widths.iter().enumerate() {
+                let piece = filled[column].get(line).map_or("", String::as_str);
+                let pad = width.saturating_sub(piece.chars().count());
+                let _ = write!(out, " {piece}{} |", " ".repeat(pad));
+            }
+            out.push('\n');
         }
-        out.push('\n');
         // A row of `=` under the head is what makes it a head.
         if index + 1 == header_rows {
             rule('=', out);
@@ -727,8 +780,45 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
 /// **the table has more than one column**. A one-column simple table is
 /// ambiguous with a section underline, and pandoc writes a grid for it
 /// however short the cell is.
+/// One cell's text, greedily wrapped to `width`.
+///
+/// Not [`fill`], which indents a wrapped line under the marker its first
+/// line begins with — right for a list item and wrong inside a cell,
+/// where every line starts at the same column.
+fn wrap_cell(text: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split([' ', BREAK, SOFT]).filter(|w| !w.is_empty()) {
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.chars().count() + 1 + word.chars().count() <= width {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(word);
+        }
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// Pandoc's default `--columns`, which a grid table's proportions are
+/// measured against.
+const RST_COLUMNS: usize = 72;
+
 fn simple_enough(table: &Table) -> bool {
-    table.colspecs.len() >= 2
+    // **A column stating its own width is not simple.** RST's simple
+    // table sizes its columns from the content and has nowhere to put a
+    // proportion, so pandoc writes a **grid** table for one — which is
+    // what every table converted from DOCX, ODT or HTML asks for.
+    table
+        .colspecs
+        .iter()
+        .all(|colspec| colspec.width == ferrodoc_ast::ColWidth::ColWidthDefault)
+        && table.colspecs.len() >= 2
         && table
             .head
             .rows

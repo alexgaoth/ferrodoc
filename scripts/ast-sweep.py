@@ -269,7 +269,7 @@ DELIBERATE = {
 }
 
 FLOORS = {"markdown": 150, "commonmark": 148, "gfm": 150, "html": 148,
-          "latex": 138, "rst": 147, "asciidoc": 150, "plain": 148}
+          "latex": 141, "rst": 150, "asciidoc": 150, "plain": 148}
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]

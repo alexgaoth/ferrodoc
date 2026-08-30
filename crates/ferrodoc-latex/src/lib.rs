@@ -637,18 +637,46 @@ fn enumerate_style(style: ListNumberStyle, delim: ListNumberDelim, name: &str) -
 
 fn table_to(table: &Table, out: &mut String) {
     let columns = table.colspecs.len().max(1);
+    // **A column stating its own width gets a `p{…}` of that width**,
+    // which is how a table converted from DOCX, ODT or HTML keeps its
+    // proportions; a table that states none gets the bare `l`/`c`/`r`.
+    // Measured on `pandoc -f json -t latex`: the available width is
+    // `\linewidth` less **2(n-1)** `\tabcolsep`, the fraction is written
+    // to four places, and each column is its own line indented two.
+    let sized = table
+        .colspecs
+        .iter()
+        .any(|colspec| colspec.width != ferrodoc_ast::ColWidth::ColWidthDefault);
+    let letter = |alignment| match alignment {
+        ferrodoc_ast::Alignment::AlignRight => 'r',
+        ferrodoc_ast::Alignment::AlignCenter => 'c',
+        _ => 'l',
+    };
+    let ragged = |alignment| match alignment {
+        ferrodoc_ast::Alignment::AlignRight => "\\raggedleft",
+        ferrodoc_ast::Alignment::AlignCenter => "\\centering",
+        _ => "\\raggedright",
+    };
     let spec: String = if table.colspecs.is_empty() {
         "l".repeat(columns)
+    } else if sized {
+        let gaps = 2 * columns.saturating_sub(1);
+        let mut lines = String::from("\n");
+        for colspec in &table.colspecs {
+            let fraction = match colspec.width {
+                ferrodoc_ast::ColWidth::ColWidth(fraction) => fraction,
+                ferrodoc_ast::ColWidth::ColWidthDefault => 0.0,
+            };
+            let _ = writeln!(
+                lines,
+                "  >{{{}\\arraybackslash}}p{{(\\linewidth - {gaps}\\tabcolsep) * \\real{{{fraction:.4}}}}}",
+                ragged(colspec.alignment)
+            );
+        }
+        lines.pop();
+        lines
     } else {
-        table
-            .colspecs
-            .iter()
-            .map(|colspec| match colspec.alignment {
-                ferrodoc_ast::Alignment::AlignRight => 'r',
-                ferrodoc_ast::Alignment::AlignCenter => 'c',
-                _ => 'l',
-            })
-            .collect()
+        table.colspecs.iter().map(|colspec| letter(colspec.alignment)).collect()
     };
     // A `longtable` with no caption still advances LaTeX's table counter,
     // so a document of uncaptioned tables numbers figures that are not
@@ -674,8 +702,14 @@ fn table_to(table: &Table, out: &mut String) {
     // ordinary rows and the table has no repeating head at all.
     let mut head = String::new();
     head.push_str("\\toprule\\noalign{}\n");
+    let aligns: Vec<&str> =
+        table.colspecs.iter().map(|colspec| ragged(colspec.alignment)).collect();
     for row in &table.head.rows {
-        row_to(row, columns, &mut head);
+        if sized {
+            row_to_boxed(row, columns, &aligns, &mut head);
+        } else {
+            row_to(row, columns, &mut head);
+        }
     }
     if !table.head.rows.is_empty() {
         head.push_str("\\midrule\\noalign{}\n");
@@ -703,6 +737,27 @@ fn table_to(table: &Table, out: &mut String) {
     if !captioned {
         out.push_str("}\n");
     }
+}
+
+/// One row. `minipage` wraps each cell the way pandoc wraps a **header**
+/// row of a table whose columns state their widths: a `p{…}` column is
+/// bottom-aligned, so the header needs a box to sit in or it rides low
+/// against the rule. Body rows take no such wrapper.
+fn row_to_boxed(row: &Row, columns: usize, aligns: &[&str], out: &mut String) {
+    let cells: Vec<String> = row
+        .cells
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| {
+            let text = cell_text(cell);
+            let ragged = aligns.get(index).copied().unwrap_or("\\raggedright");
+            format!("\\begin{{minipage}}[b]{{\\linewidth}}{ragged}\n{text}\n\\end{{minipage}}")
+        })
+        .collect();
+    let mut cells = cells;
+    cells.resize(columns, String::new());
+    let row = cells.join(" & ");
+    let _ = writeln!(out, "{row} \\\\");
 }
 
 fn row_to(row: &Row, columns: usize, out: &mut String) {
