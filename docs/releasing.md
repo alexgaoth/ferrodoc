@@ -259,6 +259,42 @@ Every wheel is built, installed and tested on four platforms in CI
 already. That is not the same as the package resolving from PyPI, and the
 README made the stronger claim while `pip install ferrodoc` 404'd.
 
+## What 0.8.0 taught, 2026-08-30
+
+- **A version bump moves the internal dependency pins too.** The
+  workspace `Cargo.toml` names each crate with `version = "0.7.0"` beside
+  its path, and `cargo publish --workspace` refuses a `^0.7.0`
+  requirement against a 0.8.0 path crate — `failed to select a version
+  for the requirement ferrodoc-asciidoc = "^0.7.0"`. Five manifests, an
+  npm `package.json`, the caret in `bindings/python/Cargo.toml`, and
+  eleven pins in the workspace root.
+- **The Python binding's tests ran on release day and nowhere else, and
+  that is where they failed.** `bindings/python` is outside the workspace
+  and resolves `ferrodoc` from crates.io, so neither `cargo test
+  --workspace` nor `verify.sh` builds it; two assertions stranded by the
+  2026-08-28 dialect change sat green for two days and took three of four
+  wheels down against the tag. CI has a `python-binding` job now. The
+  failure cost nothing because **`publish to PyPI` needs every wheel**, so
+  it skipped rather than publishing a partial release — the same
+  property that makes a re-cut safe.
+- **A plain `pip install` straight after the publish can still resolve
+  the previous version.** `pip install ferrodoc==0.8.0` worked and
+  `pip install ferrodoc` gave 0.7.0 for a few minutes, with
+  `--no-cache-dir` on both. Query `https://pypi.org/pypi/<name>/json` and
+  re-run rather than concluding the publish failed.
+
+## Known state, 2026-08-30 — **0.8.0 is out on all three**
+
+- **crates.io** — twelve crates at 0.8.0; `cargo install ferrodoc` gives
+  `ferrodoc 0.8.0` and converts.
+- **PyPI** — four wheels and an sdist; `pip install ferrodoc` gives 0.8.0
+  and converts.
+- **npm** — 0.8.0, published with `--provenance`; `npm install ferrodoc`
+  converts through the named async `convert`.
+
+All three were checked by installing from the registry and converting a
+document, not by reading a workflow's exit status.
+
 ## What the first real release taught, 2026-08-23
 
 Everything below happened on the way to 0.2.0 and is now either fixed in
