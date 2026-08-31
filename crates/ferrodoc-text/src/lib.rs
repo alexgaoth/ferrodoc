@@ -49,6 +49,7 @@ fn render(doc: &Pandoc, columns: Option<usize>, preserve: bool) -> String {
     let mut writer = Writer { columns, preserve, ..Writer::default() };
     let mut paragraphs = Vec::new();
     writer.blocks(&doc.blocks, &mut paragraphs, "");
+    writer.flush_notes();
     for (index, body) in writer.notes.iter().enumerate() {
         paragraphs.push(format!("[{}] {body}", index + 1));
     }
@@ -61,8 +62,18 @@ fn render(doc: &Pandoc, columns: Option<usize>, preserve: bool) -> String {
 
 #[derive(Default)]
 struct Writer {
-    /// Footnote bodies in reference order; written at the end as `[N] …`.
+    /// Footnote bodies in label order, filled after the main pass.
     notes: Vec<String>,
+    /// The blocks of each **top-level** note, queued while the document
+    /// is written. A note met while rendering one of these queues
+    /// nothing — pandoc numbers the document's own notes first and a
+    /// nested one after all of them, and gives the nested one no body.
+    pending: Vec<Vec<Block>>,
+    /// The next label to hand out; not `notes.len()`, because a nested
+    /// note takes a label and contributes no body.
+    next_note: usize,
+    /// Whether a note's body is being rendered right now.
+    in_note: bool,
     /// The column to fill to, or `None` to leave every line as it falls.
     columns: Option<usize>,
     /// Columns already spoken for by list markers. A list item renders
@@ -91,6 +102,36 @@ struct Writer {
 }
 
 impl Writer {
+    /// Render every queued note body, once the main pass is over.
+    ///
+    /// A note met **here** takes the next label — by then the counter is
+    /// past every top-level note — and queues nothing, which is what
+    /// leaves a note inside a note with a reference and no body, exactly
+    /// as pandoc writes it.
+    fn flush_notes(&mut self) {
+        let mut index = 0;
+        while index < self.pending.len() {
+            let blocks = std::mem::take(&mut self.pending[index]);
+            let mut inner = Vec::new();
+            // The body is written after `[N] `, and those columns are
+            // gone before the first word: the label is not a hanging
+            // indent — the second line starts at column zero — but the
+            // first line is that much shorter.
+            let hanging = std::mem::replace(&mut self.hanging, format!("[{}] ", index + 1).chars().count());
+            let in_cell = std::mem::take(&mut self.in_cell);
+            let outer = std::mem::replace(&mut self.in_note, true);
+            self.blocks(&blocks, &mut inner, "");
+            self.in_note = outer;
+            self.in_cell = in_cell;
+            self.hanging = hanging;
+            // The body's blocks stay blocks: a footnote of two paragraphs
+            // and a list is three paragraphs at the end of the document,
+            // not one run-on line.
+            self.notes.push(inner.join("\n\n"));
+            index += 1;
+        }
+    }
+
     /// Turn the break marks into spaces, or into a fill at the width the
     /// prefix leaves. The prefix is part of the line pandoc counts, so a
     /// quote or a list item fills to less than the full width.
@@ -599,26 +640,17 @@ impl Writer {
                 | Inline::Span(_, i)
                 | Inline::Link(_, i, _) => self.collect(out, i),
                 Inline::Note(blocks) => {
-                    // Reserve the number before rendering, so a note inside
-                    // a note cannot take this one's.
-                    let index = self.notes.len();
-                    self.notes.push(String::new());
-                    let mut inner = Vec::new();
-                    // The body is written after `[N] `, and those columns
-                    // are gone before the first word: the label is not a
-                    // hanging indent — the second line starts at column
-                    // zero — but the first line is that much shorter.
-                    let hanging = self.hanging;
-                    self.hanging = format!("[{}] ", index + 1).chars().count();
-                    let in_cell = std::mem::take(&mut self.in_cell);
-                    self.blocks(blocks, &mut inner, "");
-                    self.in_cell = in_cell;
-                    self.hanging = hanging;
-                    // The body's blocks stay blocks: a footnote of two
-                    // paragraphs and a list is three paragraphs at the
-                    // end of the document, not one run-on line.
-                    self.notes[index] = inner.join("\n\n");
-                    let _ = write!(out, "[{}]", index + 1);
+                    // **Queued, not rendered here.** Pandoc numbers the
+                    // document's own notes first and a note nested inside
+                    // one of them after all of them — so writing the body
+                    // depth-first gave the inner note the next label and
+                    // pushed every later note up by one, which is a
+                    // difference that runs to the end of the document.
+                    self.next_note += 1;
+                    let _ = write!(out, "[{}]", self.next_note);
+                    if !self.in_note {
+                        self.pending.push(blocks.clone());
+                    }
                 }
                 Inline::RawInline(..) => {}
             }

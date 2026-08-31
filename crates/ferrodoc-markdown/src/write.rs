@@ -186,6 +186,19 @@ fn render_with(doc: &Pandoc, flavour: Flavour, columns: Option<usize>, layout: u
     out
 }
 
+/// What a measuring pass moves and a rewind puts back. **A footnote is
+/// the one that matters**: laying a table cell out twice without this
+/// queued its body twice and numbered every later note one too high.
+#[derive(Clone, Copy)]
+struct Mark {
+    pending: usize,
+    next_note: usize,
+    bullet: char,
+    alternate: bool,
+    at: Standing,
+    depth: usize,
+}
+
 /// The two places the writer's position changes what it must escape.
 #[derive(Default, Clone, Copy)]
 struct Standing {
@@ -206,8 +219,18 @@ struct Standing {
 
 #[derive(Default)]
 struct Writer {
-    /// Footnote bodies, collected as they are referenced.
+    /// Rendered footnote bodies, in label order, filled by
+    /// [`Writer::flush_notes`] rather than as they are referenced.
     notes: Vec<String>,
+    /// The blocks of each **top-level** note, queued while the document
+    /// is written and rendered afterwards. A note met while rendering one
+    /// of these queues nothing: see [`Writer::note`].
+    pending: Vec<Vec<Block>>,
+    /// The next label to hand out. Not `notes.len()`, because a nested
+    /// note takes a label and contributes no body.
+    next_note: usize,
+    /// Whether a note's body is being rendered right now.
+    in_note: bool,
 
     /// The bullet the next list uses. Two adjacent bullet lists would
     /// merge into one on re-reading; alternating the character splits
@@ -390,17 +413,29 @@ impl Writer {
         }
     }
 
+    /// A footnote reference, and its body queued for the end.
+    ///
+    /// **Pandoc numbers the document's own notes first, and a nested one
+    /// after all of them.** Two notes with a third inside the first come
+    /// out `a[^1]`, `b[^2]`, `[^1]: x[^3]` — and `[^3]` is never defined,
+    /// because markdown has nowhere to put a note inside a note. Writing
+    /// the body here instead, depth-first, gave the inner note label 2
+    /// and pushed every later note up by one; a single nested note moved
+    /// **five** writers' worth of sweep cases, since each one's numbering
+    /// drifted from that point to the end of the document.
+    ///
+    /// So the body is queued rather than rendered, and
+    /// [`Writer::flush_notes`] renders it once the main pass is over.
+    /// A note met *there* still takes a label — by then the counter is
+    /// past every top-level note — and queues nothing.
     fn note(&mut self, out: &mut String, blocks: &[Block]) {
-        // Reserve the number before rendering: a note nested inside this
-        // one would otherwise take this one's label.
-        let index = self.notes.len();
-        self.notes.push(String::new());
-        let mut body = String::new();
-        let labelled = self.gfm() || self.pandoc();
-        self.blocks(&mut body, blocks, if labelled { INDENT } else { "" });
-        self.notes[index] = body;
-        let caret = if labelled { "^" } else { "" };
-        let _ = write!(out, "[{caret}{}]", index + 1);
+        self.next_note += 1;
+        let label = self.next_note;
+        if !self.in_note {
+            self.pending.push(blocks.to_vec());
+        }
+        let caret = if self.gfm() || self.pandoc() { "^" } else { "" };
+        let _ = write!(out, "[{caret}{label}]");
     }
 
     /// Write the collected footnote bodies, which belong at the very end of
@@ -414,6 +449,21 @@ impl Writer {
     /// with both references labelled `[^1]` and the first body nested
     /// inside the second.
     fn flush_notes(&mut self, out: &mut String) {
+        let labelled = self.gfm() || self.pandoc();
+        // Rendered here rather than where they were referenced, so that a
+        // note inside a note is met only after every top-level one has
+        // taken its label. Indexed rather than iterated because rendering
+        // a body borrows the writer.
+        let mut index = 0;
+        while index < self.pending.len() {
+            let blocks = std::mem::take(&mut self.pending[index]);
+            let mut body = String::new();
+            let outer = std::mem::replace(&mut self.in_note, true);
+            self.blocks(&mut body, &blocks, if labelled { INDENT } else { "" });
+            self.in_note = outer;
+            self.notes.push(body);
+            index += 1;
+        }
         for (index, body) in std::mem::take(&mut self.notes).iter().enumerate() {
             let body = body.trim_end();
             out.push('\n');
@@ -817,17 +867,24 @@ impl Writer {
     /// so a measuring pass can be rewound. A footnote is the one that
     /// matters: rendering a cell twice without this collected its body
     /// twice and numbered every later note one too high.
-    fn mark(&self) -> (usize, char, bool, Standing, usize) {
-        (self.notes.len(), self.bullet, self.alternate, self.at, self.depth)
+    fn mark(&self) -> Mark {
+        Mark {
+            pending: self.pending.len(),
+            next_note: self.next_note,
+            bullet: self.bullet,
+            alternate: self.alternate,
+            at: self.at,
+            depth: self.depth,
+        }
     }
 
-    fn rewind(&mut self, mark: (usize, char, bool, Standing, usize)) {
-        let (notes, bullet, alternate, at, depth) = mark;
-        self.notes.truncate(notes);
-        self.bullet = bullet;
-        self.alternate = alternate;
-        self.at = at;
-        self.depth = depth;
+    fn rewind(&mut self, mark: Mark) {
+        self.pending.truncate(mark.pending);
+        self.next_note = mark.next_note;
+        self.bullet = mark.bullet;
+        self.alternate = mark.alternate;
+        self.at = mark.at;
+        self.depth = mark.depth;
     }
 
     /// One row's cells, each laid out as its own lines — filled to

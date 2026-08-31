@@ -161,6 +161,7 @@ pub fn write_rst_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
     let mut out = String::new();
     let mut def = Defs { fills: matches!(wrap, Wrap::Fill(_)), ..Defs::default() };
     blocks(&doc.blocks, &mut out, &mut def);
+    def.render_notes();
     def.flush(&mut out);
     let text = lay_out(out.trim_end(), wrap);
     if text.is_empty() { text } else { text + "\n" }
@@ -194,9 +195,19 @@ fn separate(out: &mut String) {
 struct Defs {
     /// Substitution name to URL, in first-use order.
     images: Vec<(String, String)>,
-    /// Footnote bodies, in reference order — which is what pairs them with
-    /// the auto-numbered `[#]_` references.
+    /// Footnote bodies, in label order, filled after the main pass.
     notes: Vec<String>,
+    /// The blocks of each **top-level** note, queued while the document is
+    /// written. Pandoc numbers the document's own notes first and a note
+    /// nested inside one of them after all of them, and gives the nested
+    /// one no body — so rendering depth-first here handed the inner note
+    /// a label out of order and moved every later one.
+    pending: Vec<Vec<Block>>,
+    /// The next label to hand out; not `notes.len()`, because a nested
+    /// note takes a label and contributes no body.
+    next_note: usize,
+    /// Whether a note's body is being rendered right now.
+    in_note: bool,
     /// How many names have been invented, so the next is `imageN`. One
     /// counter for both cases pandoc invents a name for: an image with no
     /// alt text, and one whose alt text is already taken by another URL.
@@ -213,6 +224,24 @@ struct Defs {
 }
 
 impl Defs {
+    /// Render every queued note body, once the main pass is over.
+    ///
+    /// A note met **here** takes the next label — past every top-level
+    /// note by then — and queues nothing, which leaves a note inside a
+    /// note with a reference and no body, as pandoc writes it.
+    fn render_notes(&mut self) {
+        let mut index = 0;
+        while index < self.pending.len() {
+            let queued = std::mem::take(&mut self.pending[index]);
+            let mut text = String::new();
+            let outer = std::mem::replace(&mut self.in_note, true);
+            blocks(&queued, &mut text, self);
+            self.in_note = outer;
+            self.notes.push(trimmed(&text).to_owned());
+            index += 1;
+        }
+    }
+
     /// The substitution name for one image, reusing a definition when the
     /// same alt text already names the same URL and uniquing it when it
     /// names a different one. Two definitions of one name is an error in
@@ -1114,13 +1143,16 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             let _ = write!(out, "|{name}|");
         }
         Inline::Note(blocks_in_note) => {
-            let mut text = String::new();
-            blocks(blocks_in_note, &mut text, def);
-            def.notes.push(trimmed(&text).to_owned());
             // Numbered, not `[#]_`: pandoc numbers them, and a numbered
             // label is what pairs a reference with its body when a
-            // document is split.
-            let _ = write!(out, " [{}]_", def.notes.len());
+            // document is split. **Queued rather than rendered**, so a
+            // note inside a note is met only once every top-level one
+            // has taken its label.
+            def.next_note += 1;
+            let _ = write!(out, " [{}]_", def.next_note);
+            if !def.in_note {
+                def.pending.push(blocks_in_note.clone());
+            }
         }
     }
 }
