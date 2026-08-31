@@ -17,7 +17,8 @@
     "js/ferrodoc.mjs",
     "js/ferrodoc.d.mts",
     "js/ferrodoc.wasm",
-    "README.md"
+    "README.md",
+    "THIRD-PARTY.md"
   ],
   "scripts": {
     "test": "node --test test/ferrodoc.test.mjs"

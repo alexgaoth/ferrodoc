@@ -106,7 +106,7 @@ That is checkable, and 1.0 is not reachable until it is checked.
 
 Today's gates score *ASTs and single conversions*. They cannot answer "would
 this user notice". `scripts/dropin.sh` does, and **its number today is
-`33/48`** — it was `0/48` when the corpus was collected:
+`40/48`** — it was `0/48` when the corpus was collected:
 
 - a corpus of **real command lines** — the invocations that appear in
   Makefiles, CI jobs and scripts, not synthetic ones;

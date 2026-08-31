@@ -1083,16 +1083,42 @@ nothing at all**, not an empty `<nav>`; **`-H`, `-B` and `-A` imply
 document's metadata as variables**, so `-M linkcolor="#007bff"` colours
 the links, with `-V` beating `-M` where both name one.
 
-What `-s` still differs on is the **highlighting stylesheet**, and it is
-now a difference in colours rather than an absence of them. A page with a
-highlighted code block makes pandoc add 65 lines of CSS from
-skylighting's style set — not from `data/templates`, so the BSD carve-out
-this repository vendors the template under does not reach it. Since
-2026-08-26 this writes **its own** 47 lines instead, under this project's
-licence, in the same place: appended to the same `<style>` element, after
-the default stylesheet, and only when the document holds a code block in
-a language the highlighter knows. That is exactly pandoc's condition,
-probed one shape at a time.
+**`-s` no longer differs at all, including the highlighting
+stylesheet.** A page with a highlighted code block makes pandoc append 65
+lines of CSS after the default stylesheet — `styleToCss pygments`, fixed,
+the same for every document and every language. Those 65 lines are now
+here verbatim, and a standalone page with highlighted code is
+byte-identical.
+
+They were not, until 2026-08-31, and the reason was a reading that
+stopped one licence too early. The CSS is not in pandoc's
+`data/templates`, so the BSD-3 carve-out that lets this repository vendor
+pandoc's *template* does not reach it — true, and it is where the
+question was dropped. But the CSS is not pandoc's: it is
+**skylighting's**, and skylighting is three packages licensed apart.
+
+| what | package | licence |
+|---|---|---|
+| the `pygments` colours (`Skylighting.Styles`) | `skylighting-core` | **BSD-3** |
+| `styleToCss`, which renders them | `skylighting-format-blaze-html` | **BSD-3** |
+| the KDE **syntax definitions** (XML) | `skylighting` | GPL-2 |
+
+The wrapper's own description says why it is the GPL one: "provides
+generated syntax modules based on the KDE XML definitions provided by the
+`skylighting-core` package. As a result this package is licensed under
+the GPL." The core's says the mirror image: "the core highlighting
+functionality under a permissive license. It also bundles XML parser
+definitions licensed under the GPL."
+
+**This project reads none of those definitions.**
+`crates/ferrodoc-html/src/highlight.rs` is a highlighter written here, and
+the GPL never attached to what was needed. `styles/LICENSE` carries the
+notice and `THIRD-PARTY.md` carries it to the binaries, the wheels and the
+npm package, because BSD-3 asks for it in redistributions in binary form
+and not only in source.
+
+It moved the drop-in corpus from **33/48 to 40/48**: seven rows differed
+by that stylesheet and nothing else.
 
 The trade is stated rather than buried. A standalone page **with no
 highlighted code is byte-identical to pandoc's**, as it always was. One

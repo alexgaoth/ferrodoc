@@ -47,7 +47,12 @@ jobs:
         run: |
           name="ferrodoc-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir "$name"
-          cp README.md COMPATIBILITY.md LICENSE-MIT LICENSE-APACHE "$name/"
+          # THIRD-PARTY.md carries the BSD-3 notices for the vendored
+          # template and highlighting stylesheet. That licence asks for
+          # them in redistributions **in binary form**, which is this
+          # archive — the repository alone does not satisfy it.
+          cp README.md COMPATIBILITY.md LICENSE-MIT LICENSE-APACHE \
+             THIRD-PARTY.md "$name/"
           if [ -f "target/${{ matrix.target }}/release/ferrodoc.exe" ]; then
             cp "target/${{ matrix.target }}/release/ferrodoc.exe" "$name/"
             7z a "$name.zip" "$name"

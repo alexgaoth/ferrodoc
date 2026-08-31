@@ -81,11 +81,14 @@ deliberate() {
 
 # Whether two output trees differ *only* inside `<style>` elements.
 #
+# **Nothing has matched this since 2026-08-31**, and the check stays.
 # A standalone page whose code is highlighted carries a stylesheet, and
-# pandoc's comes from skylighting's style set — which its BSD carve-out
-# does not reach, so this ships its own colours instead. COMPATIBILITY.md
-# records the trade under "What `-s` still differs on". Seven rows in this
-# corpus are that stylesheet and nothing else.
+# pandoc's comes from skylighting — whose own BSD-3 does reach it, once
+# the question is asked of skylighting's licence rather than pandoc's, so
+# those 65 lines are vendored and the seven rows that differed by them and
+# nothing else are identical. Kept because it is the shape a *future*
+# stylesheet difference would take, and because a computed classification
+# that never fires costs one `awk` per row.
 #
 # **Computed rather than listed by id**, because a hard-coded id keeps its
 # verdict after the row starts differing for a second reason, and nobody

@@ -21,14 +21,23 @@ use ferrodoc_ast::{MetaValue, Pandoc};
 const DEFAULT_TEMPLATE: &str = include_str!("../templates/html5.html");
 /// Pandoc's default stylesheet, verbatim. See `templates/LICENSE`.
 const DEFAULT_STYLES: &str = include_str!("../templates/styles.html");
-/// The colours for highlighted code — **this project's own**, and kept
-/// out of `templates/` for that reason. Pandoc appends its equivalent to
-/// the same `<style>` element, after the default stylesheet, and only
-/// when the document holds a code block in a language it can highlight.
-/// Its own version of this file is part of `skylighting`'s style set
-/// rather than of `data/templates`, so the BSD-3 carve-out that lets
-/// this repository vendor the *template* does not reach it: the spans
-/// were written and the colours were not, until 2026-08-26.
+/// The colours for highlighted code, appended to the same `<style>`
+/// element after the default stylesheet and only when the document holds
+/// a code block in a language the highlighter knows — which is pandoc's
+/// condition exactly, probed one shape at a time.
+///
+/// **Skylighting's, under its own BSD-3, since 2026-08-31.** Pandoc's
+/// `COPYRIGHT` carve-out covers `data/templates` and this is not in it,
+/// which is why the file used to hold colours written here — but that
+/// reasoning stopped at pandoc's licence. Skylighting is three packages:
+/// the `pygments` colours (`skylighting-core`) and the `styleToCss` that
+/// renders them (`skylighting-format-blaze-html`) are **BSD-3**, and only
+/// the wrapper bundling KDE's syntax XML is GPL. This project reads none
+/// of that XML — `highlight.rs` is its own highlighter — so the GPL never
+/// attached. See `styles/LICENSE`; the notice travels to binaries too.
+///
+/// The file carries **no leading indentation**: the template's partial
+/// supplies four spaces, and leaving pandoc's in gave every line eight.
 #[cfg(feature = "highlight")]
 const HIGHLIGHT_STYLES: &str = include_str!("../styles/highlight.css");
 /// A build with no highlighter writes no spans, so it needs no colours.

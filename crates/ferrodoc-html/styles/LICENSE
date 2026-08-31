@@ -1,0 +1,64 @@
+The file beside this one — `highlight.css` — is skylighting's, taken
+verbatim from what pandoc 3.8.2.1 appends to a standalone page when it
+highlights a code block:
+
+    pandoc -s --syntax-highlighting=none doc.md   # the page without it
+    pandoc -s doc.md                              # the same page with it
+
+The 65 lines by which the second differs from the first are
+`styleToCss pygments`, and they do not vary with the document or with the
+languages in it.
+
+**Pandoc as a whole is GPL-2.0-or-later, and this is not pandoc's.** It
+comes from skylighting, which is three packages licensed separately, and
+the split is the whole point:
+
+  * `skylighting-core` — **BSD-3** — holds `Skylighting.Styles`, where
+    the `pygments` colours are defined. Its description: "provides the
+    core highlighting functionality under a permissive license. It also
+    bundles XML parser definitions licensed under the GPL."
+  * `skylighting-format-blaze-html` — **BSD-3** — holds
+    `Skylighting.Format.HTML`, whose `styleToCss` renders those colours
+    as the stylesheet below.
+  * `skylighting` — **GPL-2** — is the wrapper, and it is GPL *because*
+    of what it bundles: "provides generated syntax modules based on the
+    KDE XML definitions provided by the skylighting-core package. As a
+    result this package is licensed under the GPL."
+
+The GPL attaches to the **KDE syntax definitions**. This project uses
+none of them: `crates/ferrodoc-html/src/highlight.rs` is a highlighter
+written here, and it reads no XML. What is taken is the colour data and
+its CSS rendering, and both of those are BSD-3.
+
+    Copyright (c) 2016-2022, John MacFarlane.
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions
+    are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the
+      distribution.
+
+    * Neither the name of John MacFarlane nor the names of other
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+**The third clause is a real constraint, not boilerplate**: nothing here
+may present John MacFarlane or pandoc as endorsing this project.

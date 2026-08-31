@@ -7,6 +7,10 @@ name = "ferrodoc"
 description = "Convert documents between markdown, HTML and DOCX — in process, without shelling out to pandoc"
 requires-python = ">=3.9"
 license = { text = "MIT OR Apache-2.0" }
+# The BSD-3 notices for the vendored pandoc template and skylighting
+# stylesheet, which that licence asks for in redistributions **in
+# binary form** — a wheel is one.
+license-files = ["THIRD-PARTY.md"]
 readme = "README.md"
 keywords = ["pandoc", "docx", "markdown", "html", "converter"]
 classifiers = [
