@@ -148,7 +148,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
-| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **14/20** over every markdown document in `corpus/`, and **498/652** over the CommonMark spec; `-f markdown` uses this dialect, while `-f commonmark` selects CommonMark |
+| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **14/20** over every markdown document in `corpus/`, and **502/652** over the CommonMark spec; `-f markdown` uses this dialect, while `-f commonmark` selects CommonMark |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **37/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **646/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
@@ -284,8 +284,13 @@ same set, plus `latex`, `rst`, `asciidoc` and `plain`; `markdown` and
 > `pandoc_markdown` name is available on both sides. `-t markdown` also
 > writes Pandoc Markdown; use `-t commonmark` for strict CommonMark. The
 > Pandoc Markdown reader is not complete: it agrees on **14 of 20** markdown documents in `corpus/` and
-> **498 of 652** CommonMark-spec examples. Its remaining gaps include
-> parser-level emphasis and link rules, not merely extensions:
+> **502 of 652** CommonMark-spec examples. Its remaining gaps are
+> parser-level, not missing extensions: of the 150 spec examples it still
+> reads differently, **40 are emphasis** and **25 are links**. Pandoc's
+> markdown does not apply CommonMark's flanking rules, so `*foo bar *`
+> and `*(*foo)` are emphasis for pandoc and literal text here. Exactly
+> one of the 652 is *refused* rather than read differently, so this is a
+> difference in the tree and not a wall to hit:
 >
 > ```sh
 > cargo run -p ferrodoc-harness -- diff-pandoc-md corpus --verbose

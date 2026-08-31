@@ -506,7 +506,7 @@ and each with its own test:
 | bracketed spans `[t]{#id}` | 11/20 | 496 |
 | metadata block scalars (was a **refusal**) | 12/20 | 496 |
 | fence attributes, task items, footnote `Para` | 13/20 | 496 |
-| an unclosed fence and an unclosed comment are text | **14/20** | **498** |
+| an unclosed fence and an unclosed comment are text | **14/20** | **502** |
 
 **Not one example regressed**, at any step: every change was checked
 example by example against the trees the reader produced before it.

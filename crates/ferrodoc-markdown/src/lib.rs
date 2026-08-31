@@ -974,6 +974,40 @@ fn native_spans(tokens: Vec<Inline>) -> Vec<Inline> {
 /// recorded in `COMPATIBILITY.md` rather than papered over, because the
 /// alternative is reading source positions to tell two identical ASTs
 /// apart.
+/// Percent-encode a link or image destination the way pandoc's
+/// **markdown** reader does — and only there.
+///
+/// `commonmark` and `gfm` hand the destination back exactly as it was
+/// written, so this cannot go on the shared path: probed a dialect at a
+/// time, `[a](<sp ace>)` is `sp%20ace` for `-f markdown` and `sp ace` for
+/// the other two.
+///
+/// The set is whitespace plus ``<>|"{}[]^` ``, probed a character at a
+/// time. It is **not** any reserved set and not `isAllowedInURI`: `[` and
+/// `]` are escaped here where those permit them, and a backslash is left
+/// alone where those would not. `%` is not in the set either, so a
+/// destination already carrying `%20` is not encoded a second time.
+fn escape_uri(dialect: Dialect, url: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    if dialect != Dialect::Pandoc {
+        return url.to_owned();
+    }
+    let mut out = String::with_capacity(url.len());
+    for ch in url.chars() {
+        if ch.is_whitespace() || "<>|\"{}[]^`".contains(ch) {
+            let mut buffer = [0_u8; 4];
+            for byte in ch.encode_utf8(&mut buffer).bytes() {
+                out.push('%');
+                out.push(char::from(HEX[usize::from(byte >> 4)]));
+                out.push(char::from(HEX[usize::from(byte & 0x0F)]));
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn autolink_class(dialect: Dialect, text: &[Inline], url: &str) -> Attr {
     if dialect != Dialect::Pandoc {
         return Attr::default();
@@ -2167,7 +2201,10 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
             out.push(Inline::Link(
                 Box::new(attr),
                 text,
-                Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
+                Box::new(Target {
+                    url: escape_uri(dialect, &l.url),
+                    title: l.title.clone(),
+                }),
             ));
         }
         // One `Note` per reference, body cloned: pandoc duplicates the
@@ -2182,7 +2219,10 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
         NodeValue::Image(l) => out.push(Inline::Image(
             Box::new(written()),
             inlines(node.children(), defs, dialect),
-            Box::new(Target { url: l.url.clone(), title: l.title.clone() }),
+            Box::new(Target {
+                url: escape_uri(dialect, &l.url),
+                title: l.title.clone(),
+            }),
         )),
         _ => {}
     }
