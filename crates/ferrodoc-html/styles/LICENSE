@@ -9,6 +9,29 @@ The 65 lines by which the second differs from the first are
 `styleToCss pygments`, and they do not vary with the document or with the
 languages in it.
 
+**Pandoc is how they were captured, not where they come from**, and the
+difference matters: every byte was checked back against skylighting's own
+BSD-3 sources rather than trusted because pandoc printed it.
+
+  * the structural preamble — `/* CSS for syntax highlighting */`,
+    `html { -webkit-text-size-adjust: 100%; }`,
+    `pre > code.sourceCode { white-space: pre; position: relative; }`
+    and the rest — are string literals in `Skylighting/Format/HTML.hs`;
+  * the token colours are the `pygments` value in `Skylighting/Styles.hs`:
+    Keyword `#007020`, Comment `#60a0b0`, String `#4070a0`, DataType
+    `#902000`, Error `#ff0000`, each matching the line below that carries
+    it.
+
+So the chain is BSD-3 source to BSD-3 source. Pandoc is a GPL program
+that ran it, which is not the same as a GPL program that owns it.
+
+**One thing upstream is worth knowing.** `Skylighting/Styles.hs` says the
+`pygments` style is "based on pygments's default colors" and carries no
+notice for the Pygments project, which is BSD-2. That is skylighting's
+relationship to its own upstream rather than this project's, and both
+licences are permissive, but it is recorded here rather than left for
+someone to find.
+
 **Pandoc as a whole is GPL-2.0-or-later, and this is not pandoc's.** It
 comes from skylighting, which is three packages licensed separately, and
 the split is the whole point:
