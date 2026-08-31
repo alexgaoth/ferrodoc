@@ -433,3 +433,31 @@ jobs:
         env:
           FERRODOC_FUZZ_SEED: ${{ github.run_id }}
         run: ./scripts/verify.sh --fuzz-only
+
+  # **The Python binding's tests ran only on release day, and that is how
+  # two stale assertions reached one.** `bindings/python` is outside the
+  # workspace and depends on `ferrodoc` from *crates.io*, so `cargo test
+  # --workspace` cannot reach it and `verify.sh` never built it — the
+  # dialect change on 2026-08-28 left `pandoc_markdown` asserted
+  # write-only and a heading asserted without pandoc's identifier, and
+  # nothing failed until `wheels.yml` ran against the v0.8.0 tag.
+  #
+  # It builds against the **published** facade, one release behind the
+  # tree by construction, so a red here after a bump means the binding's
+  # expectations are stale rather than that the tree is broken.
+  python-binding:
+    name: python binding
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install --quiet maturin pytest
+      - name: build the wheel and test the installed package
+        run: |
+          maturin build --release -m bindings/python/Cargo.toml
+          python3 -m pip install --quiet bindings/python/target/wheels/*.whl
+          python3 -m pytest bindings/python/tests -q

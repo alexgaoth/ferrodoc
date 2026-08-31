@@ -97,13 +97,16 @@ def test_empty_input_is_an_empty_document_not_an_error():
 def test_every_named_format_converts_in_the_direction_it_claims():
     # `formats()` is the union, and iterating it in one direction fails on
     # the first format that only goes the other way. That is exactly what
-    # happened: `pandoc_markdown` is read-only, and this test could not
-    # run at all for two versions because the wheel would not build, so
-    # nothing said so.
+    # happened, and this test could not run at all for two versions
+    # because the wheel would not build, so nothing said so.
+    #
+    # **`pandoc_markdown` goes both ways from 0.8.0.** It was read-only
+    # until `-t markdown` learned the dialect; `plain` is the direction
+    # test now, and it is write-only because nothing reads it back.
     readable = ferrodoc.read_formats()
     writable = ferrodoc.write_formats()
     assert set(readable) | set(writable) == set(ferrodoc.formats())
-    assert "pandoc_markdown" in readable and "pandoc_markdown" not in writable
+    assert "pandoc_markdown" in readable and "pandoc_markdown" in writable
     assert "plain" in writable and "plain" not in readable
 
     # Every writable format, in the type it should come back as. The
@@ -138,15 +141,13 @@ def test_a_buffer_is_accepted_and_a_wrong_type_says_what_it_got():
     # have to copy it first to satisfy a rule with no reason behind it.
     for data in (b"# T\n", bytearray(b"# T\n"), memoryview(b"# T\n")):
         # **This tracks the published `ferrodoc`, not the tree it sits
-        # in**: `Cargo.toml` here depends on `ferrodoc = "0.7"` from
-        # crates.io so the sdist resolves for anyone building it, so this
-        # binding is one release behind the CLI by construction. On
-        # 2026-08-28 `markdown` became pandoc's dialect in both
-        # directions, which gives a heading pandoc's identifier — so when
-        # the dependency is bumped past 0.7 this becomes
-        # `<h1 id="t">T</h1>`, and the C and wasm bindings, which depend
-        # by path, already say so.
-        assert ferrodoc.convert(data, "markdown", "html") == "<h1>T</h1>\n"
+        # in**: `Cargo.toml` here depends on `ferrodoc` from crates.io so
+        # the sdist resolves for anyone building it. On 2026-08-28
+        # `markdown` became pandoc's dialect in both directions, which
+        # gives a heading pandoc's identifier — the previous comment here
+        # predicted this line would change when the dependency passed
+        # 0.7, and at 0.8.0 it did.
+        assert ferrodoc.convert(data, "markdown", "html") == '<h1 id="t">T</h1>\n'
     with pytest.raises(ValueError, match="not int"):
         ferrodoc.convert(42, "markdown", "html")
 
