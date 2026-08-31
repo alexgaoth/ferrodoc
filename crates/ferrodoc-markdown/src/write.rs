@@ -187,7 +187,7 @@ fn render_with(doc: &Pandoc, flavour: Flavour, columns: Option<usize>, layout: u
 }
 
 /// The two places the writer's position changes what it must escape.
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 struct Standing {
     /// Whether the next block written is the first of a list item that
     /// holds more than one block. Four spaces there are the marker's own
@@ -806,8 +806,155 @@ impl Writer {
             self.simple_table(out, table, prefix, at);
         } else if self.pandoc() && multiline_table_applies(table) {
             self.multiline_table(out, table, prefix);
+        } else if self.pandoc() && grid_table_applies(table) {
+            self.grid_table(out, table, prefix);
         } else {
             Self::unrepresentable(out, block, prefix);
+        }
+    }
+
+    /// Everything the writer carries that laying a cell out would move,
+    /// so a measuring pass can be rewound. A footnote is the one that
+    /// matters: rendering a cell twice without this collected its body
+    /// twice and numbered every later note one too high.
+    fn mark(&self) -> (usize, char, bool, Standing, usize) {
+        (self.notes.len(), self.bullet, self.alternate, self.at, self.depth)
+    }
+
+    fn rewind(&mut self, mark: (usize, char, bool, Standing, usize)) {
+        let (notes, bullet, alternate, at, depth) = mark;
+        self.notes.truncate(notes);
+        self.bullet = bullet;
+        self.alternate = alternate;
+        self.at = at;
+        self.depth = depth;
+    }
+
+    /// One row's cells, each laid out as its own lines — filled to
+    /// `width` where there is one, and left as they fall to be measured
+    /// where there is not.
+    fn grid_cells(&mut self, row: &Row, widths: Option<&[usize]>) -> Vec<Vec<String>> {
+        let mut out = Vec::with_capacity(row.cells.len());
+        for (index, cell) in row.cells.iter().enumerate() {
+            let saved = (self.columns, self.layout);
+            match widths.and_then(|widths| widths.get(index)) {
+                // Two of the width are the padding either side.
+                Some(width) => {
+                    let inner = width.saturating_sub(2).max(1);
+                    self.columns = Some(inner);
+                    self.layout = inner;
+                }
+                None => self.columns = Some(usize::MAX),
+            }
+            let mut text = String::new();
+            self.blocks(&mut text, &cell.blocks, "");
+            self.columns = saved.0;
+            self.layout = saved.1;
+            out.push(
+                text.trim_end_matches('\n').split('\n').map(str::to_owned).collect::<Vec<_>>(),
+            );
+        }
+        out
+    }
+
+    /// Pandoc's **grid table**, which is what a cell holding anything but
+    /// a single `Plain` or `Para` gets: a code block, two paragraphs, a
+    /// list, a blockquote. Every one of those fell back to raw `<table>`
+    /// here — and a cell with structure in it is exactly what a DOCX or
+    /// HTML table becomes, so the fallback sat on an ordinary path.
+    ///
+    /// Probed against `pandoc -f json -t markdown` one shape at a time:
+    ///
+    /// * a column's width is its content plus two, and a row is `| `,
+    ///   the cell padded to that width, ` |`, per column;
+    /// * a header is closed by `+===+` and every body row by `+---+`; a
+    ///   table with no header carries no `=` rule anywhere;
+    /// * alignment is a `:` at one or both ends of that `=` rule — or of
+    ///   the **top** rule where there is no header, the only place left
+    ///   for it;
+    /// * a column stating its own width takes
+    ///   `floor(fraction × (columns − count))`, and the **last** column
+    ///   takes the remainder so the row comes out exact;
+    /// * without stated widths a column is as wide as its content wants;
+    ///   where they do not all fit, the ones that do keep their width and
+    ///   the rest divide what is left — a fair share, redistributed;
+    /// * `--wrap=none` never narrows a column, it widens to the content,
+    ///   which is the multiline table's rule reappearing.
+    fn grid_table(&mut self, out: &mut String, table: &Table, prefix: &str) {
+        let count = table.colspecs.len();
+        let header: Vec<&Row> = table
+            .head
+            .rows
+            .iter()
+            .filter(|row| row.cells.iter().any(|cell| !cell.blocks.is_empty()))
+            .collect();
+        let body: Vec<&Row> = table
+            .head
+            .rows
+            .iter()
+            .skip(header.len())
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows)
+            .collect();
+
+        // **Measure, then rewind, then lay out.** Every width below is a
+        // function of what the cells come out as, so they have to be
+        // rendered before they can be placed — and the writer carries
+        // state that a second pass would move.
+        let mark = self.mark();
+        let measured: Vec<Vec<Vec<String>>> =
+            header.iter().chain(&body).map(|row| self.grid_cells(row, None)).collect();
+        let wanted: Vec<usize> = (0..count)
+            .map(|index| {
+                measured
+                    .iter()
+                    .filter_map(|row| row.get(index))
+                    .flat_map(|lines| lines.iter())
+                    .map(|line| line.chars().count())
+                    .max()
+                    .unwrap_or(0)
+                    + 2
+            })
+            .collect();
+        self.rewind(mark);
+
+        // **`--wrap=preserve` still fills a grid cell**, which is where
+        // this differs from the multiline table above: pandoc re-flows a
+        // cell to its column in every mode but `none`, so the test is
+        // the sentinel alone and not `columns.is_some()`. Asked the
+        // other way, a cell that should have wrapped to 20 columns kept
+        // its natural 32.
+        let fills = self.columns != Some(usize::MAX);
+        let widths = grid_widths(table, &wanted, self.layout, fills);
+        let aligns: Vec<Alignment> = table.colspecs.iter().map(|spec| spec.alignment).collect();
+
+        if header.is_empty() {
+            push_line(out, prefix, &grid_rule(&widths, '-', Some(&aligns)));
+        } else {
+            push_line(out, prefix, &grid_rule(&widths, '-', None));
+            for (index, row) in header.iter().enumerate() {
+                if index > 0 {
+                    push_line(out, prefix, &grid_rule(&widths, '-', None));
+                }
+                let cells = self.grid_cells(row, Some(&widths));
+                for line in grid_row(&cells, &widths) {
+                    push_line(out, prefix, &line);
+                }
+            }
+            push_line(out, prefix, &grid_rule(&widths, '=', Some(&aligns)));
+        }
+        for row in &body {
+            let cells = self.grid_cells(row, Some(&widths));
+            for line in grid_row(&cells, &widths) {
+                push_line(out, prefix, &line);
+            }
+            push_line(out, prefix, &grid_rule(&widths, '-', None));
+        }
+        if !table.caption.blocks.is_empty() {
+            push_line(out, prefix, "");
+            let mut caption = String::new();
+            self.blocks(&mut caption, &table.caption.blocks, "");
+            push_line(out, prefix, &format!(": {}", caption.trim()));
         }
     }
 
@@ -1857,19 +2004,185 @@ fn simple_table_applies(table: &Table) -> bool {
 /// Whether every cell holds at most one `Plain` or `Para` and spans one
 /// row and one column — what both the simple and the multiline table
 /// need, and what sends anything else to a grid table.
-fn cells_are_single_blocks(table: &Table) -> bool {
-    let rows = table
+fn table_rows(table: &Table) -> impl Iterator<Item = &Row> {
+    table
         .head
         .rows
         .iter()
         .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
-        .chain(&table.foot.rows);
-    rows.flat_map(|row| &row.cells).all(|cell| {
-        cell.col_span.max(1) == 1
-            && cell.row_span.max(1) == 1
-            && cell.blocks.len() <= 1
-            && cell.blocks.iter().all(|b| matches!(b, Block::Plain(_) | Block::Para(_)))
-    })
+        .chain(&table.foot.rows)
+}
+
+/// Whether every cell occupies exactly one row and one column. A spanned
+/// cell has no spelling in **any** markdown table, grid included, and
+/// keeps the raw-HTML fallback.
+fn cells_span_one(table: &Table) -> bool {
+    table_rows(table)
+        .flat_map(|row| &row.cells)
+        .all(|cell| cell.col_span.max(1) == 1 && cell.row_span.max(1) == 1)
+}
+
+fn cells_are_single_blocks(table: &Table) -> bool {
+    cells_span_one(table)
+        && table_rows(table).flat_map(|row| &row.cells).all(|cell| {
+            cell.blocks.len() <= 1
+                && cell.blocks.iter().all(|b| matches!(b, Block::Plain(_) | Block::Para(_)))
+        })
+}
+
+/// Whether a table has a **grid table** spelling — the shape that holds
+/// whatever a simple or multiline table cannot.
+fn grid_table_applies(table: &Table) -> bool {
+    !table.colspecs.is_empty() && cells_span_one(table)
+}
+
+/// The inner width of each column: everything between two `+`, the
+/// single space of padding at each side included.
+fn grid_widths(table: &Table, wanted: &[usize], layout: usize, fills: bool) -> Vec<usize> {
+    let count = table.colspecs.len();
+    let stated: Vec<Option<f64>> = table
+        .colspecs
+        .iter()
+        .map(|spec| match spec.width {
+            ferrodoc_ast::ColWidth::ColWidth(fraction) => Some(fraction),
+            ferrodoc_ast::ColWidth::ColWidthDefault => None,
+        })
+        .collect();
+
+    if stated.iter().any(Option::is_some) {
+        // The cells share `columns - count` and the separators are
+        // `count + 1`, so a row of stated widths comes out one column
+        // **wider** than `--columns`. That is pandoc's arithmetic as
+        // measured, not a rounding of ours.
+        let available = layout.saturating_sub(count);
+        let mut widths: Vec<usize> = stated
+            .iter()
+            .map(|fraction| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss,
+                    reason = "a column width is small, never negative, and \
+                              well inside f64's mantissa"
+                )]
+                fraction.map_or(0, |fraction| (fraction * available as f64).floor() as usize)
+            })
+            .collect();
+        // **The last column takes the remainder**, so three columns of a
+        // quarter, a quarter and a half come out 9, 9 and 19 of 37 —
+        // where flooring the last would give 18 and leave the row short.
+        let used: usize = widths.iter().take(count.saturating_sub(1)).sum();
+        if let Some(last) = widths.last_mut() {
+            *last = available.saturating_sub(used);
+        }
+        if !fills {
+            for (width, want) in widths.iter_mut().zip(wanted) {
+                *width = (*width).max(*want);
+            }
+        }
+        return widths;
+    }
+
+    if !fills {
+        return wanted.to_vec();
+    }
+    fair_share(wanted, layout.saturating_sub(count + 1))
+}
+
+/// Divide `available` among columns that each *want* a width: everyone
+/// asking for no more than an equal share gets exactly what they asked
+/// for, and what they leave behind is shared out again among the rest.
+///
+/// Two columns wanting 32 and 7 of 27 come out 20 and 7 — the small one
+/// is satisfied and the large one takes the rest — and three wanting 4,
+/// 5 and 38 of 26 come out 4, 5 and 17. Both measured.
+fn fair_share(wanted: &[usize], available: usize) -> Vec<usize> {
+    let mut widths = vec![0_usize; wanted.len()];
+    let mut settled = vec![false; wanted.len()];
+    let mut left = available;
+    let mut open = wanted.len();
+    while open > 0 {
+        let share = left / open;
+        let mut moved = false;
+        for (index, want) in wanted.iter().enumerate() {
+            if !settled[index] && *want <= share {
+                widths[index] = *want;
+                settled[index] = true;
+                left -= *want;
+                open -= 1;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    if let Some(share) = left.checked_div(open) {
+        let mut last = None;
+        for index in 0..wanted.len() {
+            if !settled[index] {
+                widths[index] = share;
+                last = Some(index);
+            }
+        }
+        // The last unsettled column absorbs the division's remainder, so
+        // the row is exactly as wide as it was told to be.
+        let used: usize = widths.iter().sum();
+        if let Some(index) = last {
+            widths[index] += available.saturating_sub(used);
+        }
+    }
+    widths
+}
+
+/// A `+---+` rule, or the `+===+` that closes a header — carrying the
+/// alignment markers where they belong.
+fn grid_rule(widths: &[usize], fill: char, aligns: Option<&[Alignment]>) -> String {
+    let mut out = String::from("+");
+    for (index, width) in widths.iter().enumerate() {
+        let alignment =
+            aligns.and_then(|aligns| aligns.get(index)).copied().unwrap_or(Alignment::AlignDefault);
+        let (left, right) = match alignment {
+            Alignment::AlignLeft => (true, false),
+            Alignment::AlignRight => (false, true),
+            Alignment::AlignCenter => (true, true),
+            Alignment::AlignDefault => (false, false),
+        };
+        let marks = usize::from(left) + usize::from(right);
+        if left {
+            out.push(':');
+        }
+        for _ in 0..width.saturating_sub(marks) {
+            out.push(fill);
+        }
+        if right {
+            out.push(':');
+        }
+        out.push('+');
+    }
+    out
+}
+
+/// One row laid out: as tall as its tallest cell, every cell padded to
+/// its column and held between pipes.
+fn grid_row(cells: &[Vec<String>], widths: &[usize]) -> Vec<String> {
+    let height = cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
+    (0..height)
+        .map(|line| {
+            let mut text = String::from("|");
+            for (index, width) in widths.iter().enumerate() {
+                let piece =
+                    cells.get(index).and_then(|lines| lines.get(line)).map_or("", String::as_str);
+                text.push(' ');
+                text.push_str(piece);
+                for _ in piece.chars().count()..width.saturating_sub(2) {
+                    text.push(' ');
+                }
+                text.push_str(" |");
+            }
+            text
+        })
+        .collect()
 }
 
 fn pipe_row(cells: &[String], widths: &[usize], alignments: &[Alignment]) -> String {
@@ -3176,6 +3489,65 @@ mod tests {
         // CommonMark has no table syntax, so the same document degrades to
         // its cell contents there — that is the loss GFM mode exists for.
         assert!(!write_markdown(&doc).contains('|'));
+    }
+
+    /// **The grid table**, which no round trip can see: the raw `<table>`
+    /// it replaced reads back as one `RawBlock`, so a fidelity gate was
+    /// happy with either and only the literal bytes tell them apart.
+    ///
+    /// `pandoc -f json -t markdown --columns=72` on a two-column table
+    /// whose first cell holds a fenced code block.
+    #[test]
+    fn a_grid_table_holds_what_a_simple_one_cannot() {
+        let plain = |t: &str| cell(1, vec![Block::Plain(vec![Inline::Str(t.to_owned())])]);
+        let code = cell(
+            1,
+            vec![Block::CodeBlock(
+                ferrodoc_ast::Attr {
+                    classes: vec!["bash".to_owned()],
+                    ..ferrodoc_ast::Attr::default()
+                },
+                "x".to_owned(),
+            )],
+        );
+        let table = Block::Table(Box::new(Table {
+            attr: ferrodoc_ast::Attr::default(),
+            caption: ferrodoc_ast::Caption { short: None, blocks: Vec::new() },
+            colspecs: vec![
+                ferrodoc_ast::ColSpec {
+                    alignment: Alignment::AlignDefault,
+                    width: ferrodoc_ast::ColWidth::ColWidthDefault,
+                };
+                2
+            ],
+            head: ferrodoc_ast::TableHead {
+                attr: ferrodoc_ast::Attr::default(),
+                rows: vec![Row {
+                    attr: ferrodoc_ast::Attr::default(),
+                    cells: vec![plain("h1"), plain("h2")],
+                }],
+            },
+            bodies: vec![ferrodoc_ast::TableBody {
+                attr: ferrodoc_ast::Attr::default(),
+                row_head_columns: 0,
+                head: Vec::new(),
+                body: vec![Row {
+                    attr: ferrodoc_ast::Attr::default(),
+                    cells: vec![code, plain("b")],
+                }],
+            }],
+            foot: ferrodoc_ast::TableFoot::default(),
+        }));
+        assert_eq!(
+            write_pandoc_markdown(&Pandoc::new(vec![table])),
+            "+----------+----+\n\
+             | h1       | h2 |\n\
+             +==========+====+\n\
+             | ``` bash | b  |\n\
+             | x        |    |\n\
+             | ```      |    |\n\
+             +----------+----+\n"
+        );
     }
 
     /// **The simple table**, in the three shapes the corpus cannot show.

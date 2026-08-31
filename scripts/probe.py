@@ -60,6 +60,11 @@ def _inlines(items):
 
 
 def _blocks(items):
+    # A bare string is one `Plain`, not an iterable of characters — which
+    # is what it used to become, so `table(..., caption="Cap")` died in
+    # the recursion instead of asking its question.
+    if isinstance(items, str):
+        return [plain(items)]
     if isinstance(items, dict):
         return [items]
     return [b for item in items for b in _blocks(item)]
@@ -185,8 +190,17 @@ def table(widths, head, body, aligns=None, caption=None):
              {"t": "ColWidthDefault"} if w is None else {"t": "ColWidth", "c": w}]
             for a, w in zip(aligns, widths)]
 
-    def cell(text):
-        return [A, {"t": "AlignDefault"}, 1, 1, [plain(text)] if text else []]
+    def cell(content):
+        """A string is one `Plain`; anything else is its own blocks.
+
+        A cell holding more than a `Plain` is what sends pandoc to a
+        **grid** table, so a `table()` that could only take strings
+        could not ask about grid tables at all."""
+        if isinstance(content, str):
+            blocks = [plain(content)] if content else []
+        else:
+            blocks = _blocks(content)
+        return [A, {"t": "AlignDefault"}, 1, 1, blocks]
 
     def row(cells):
         return [A, [cell(c) for c in cells]]
