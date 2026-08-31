@@ -107,6 +107,20 @@ for ch in ["*", "_", "`", "#", "[", "]", "<", ">", "|", "~", "^", "\\", "'", '"'
     case(f"escape/{ch}", {"t": "Para", "c": [S(f"a{ch}b")]})
 for lead in ["#", "-", "+", "*", ">", "1.", "1)", "2.", "    ", "==="]:
     case(f"escape/line-start {lead!r}", {"t": "Para", "c": [S(lead), SP, S("x")]})
+# **The same leads on a *continuation* line, which is a different
+# question and was never asked.** Only a block's first line can open a
+# block, so an ordered marker further down is ordinary text: pandoc
+# writes `128.` bare, and this wrote `128\.` into the middle of a
+# paragraph for as long as nothing measured it.
+#
+# A **hard** break, because this sweep runs `--wrap=none` and a
+# `SoftBreak` collapses to a space there — a soft-continuation case would
+# be one line of prose wearing a name about line starts. The rule is the
+# same for both breaks (probed), and the soft form is what the prose in
+# the writers corpus exercises.
+for lead in ["#", "-", "+", "*", ">", "1.", "1)", "2.", "    ", "==="]:
+    case(f"escape/continuation {lead!r}",
+         {"t": "Para", "c": [S("a"), {"t": "LineBreak"}, S(lead), SP, S("x")]})
 case("escape/em-dash", {"t": "Para", "c": [S("a—b")]})
 # The dialect un-smartens these back to straight quotes, and the corpus
 # saw it only through one drop-in row.
@@ -176,6 +190,81 @@ case("block/Table.widths.uneven",
      table(["AlignDefault"] * 3, [["h1", "h2", "h3"]], [["a", "b", "c"]],
            widths=[0.25, 0.25, 0.5]))
 case("block/Table.empty-cells", table(["AlignDefault"] * 2, [["a", "b"]], [["", ""]]))
+
+# ---- composition: every construct inside every container ------------------
+# **Enumeration covers the alphabet; this is the sentences.** Everything
+# above asks whether a writer knows a construct *at all*, each one alone
+# at the top of a document. It cannot ask whether two layers compose,
+# which is where this project's writer bugs have actually lived: a
+# backtick that is right in a paragraph and wrong in a table cell, an
+# indent that is right at top level and lost inside a list item. Written
+# as a cross product rather than picked, for the same reason the axis
+# above beat a document corpus — a chosen case is blind wherever its
+# author was.
+
+def _table_of(blocks):
+    """A one-column table whose single body cell holds `blocks`."""
+    spec = [[{"t": "AlignDefault"}, {"t": "ColWidthDefault"}]]
+    body_cell = [A, {"t": "AlignDefault"}, 1, 1, blocks]
+    return {"t": "Table", "c": [A, [None, []], spec,
+                                [A, [row(["h"])]],
+                                [[A, 0, [], [[A, [body_cell]]]]],
+                                [A, []]]}
+
+INLINE_IN = [
+    ("Emph", lambda i: {"t": "Para", "c": [{"t": "Emph", "c": [i]}]}),
+    ("Link", lambda i: {"t": "Para", "c": [{"t": "Link", "c": [A, [i], ["u", ""]]}]}),
+    ("Header", lambda i: {"t": "Header", "c": [2, A, [i]]}),
+    ("Quoted", lambda i: {"t": "Para", "c": [
+        {"t": "Quoted", "c": [{"t": "DoubleQuote"}, [i]]}]}),
+    ("Note", lambda i: {"t": "Para", "c": [
+        S("a"), {"t": "Note", "c": [{"t": "Para", "c": [i]}]}]}),
+    ("Term", lambda i: {"t": "DefinitionList", "c": [[[i], [[para("d")]]]]}),
+    ("Cell", lambda i: _table_of([{"t": "Plain", "c": [i]}])),
+]
+
+INNER_INLINES = [
+    ("Code", {"t": "Code", "c": [A, "a`b"]}),
+    ("Math", {"t": "Math", "c": [{"t": "InlineMath"}, "x^2"]}),
+    ("Link", {"t": "Link", "c": [A, inls("t"), ["u", ""]]}),
+    ("Image", {"t": "Image", "c": [A, inls("pic"), ["p", ""]]}),
+    ("Note", {"t": "Note", "c": [para("n")]}),
+    ("Strikeout", wrap("Strikeout", "s")),
+    ("SmallCaps", wrap("SmallCaps", "s")),
+    ("LineBreak", {"t": "LineBreak"}),
+    ("RawInline", {"t": "RawInline", "c": ["html", "<b>x</b>"]}),
+    ("markup-chars", S("*x*")),
+]
+
+for _outer, _build in INLINE_IN:
+    for _inner, _node in INNER_INLINES:
+        case(f"in/{_outer}<{_inner}", _build(_node))
+
+BLOCK_IN = [
+    ("BlockQuote", lambda bs: {"t": "BlockQuote", "c": bs}),
+    ("Div", lambda bs: {"t": "Div", "c": [attr("", ["d"]), bs]}),
+    ("Bullet", lambda bs: {"t": "BulletList", "c": [bs]}),
+    ("Ordered", lambda bs: {"t": "OrderedList",
+                            "c": [[1, {"t": "Decimal"}, {"t": "Period"}], [bs]]}),
+    ("Definition", lambda bs: {"t": "DefinitionList", "c": [[inls("term"), [bs]]]}),
+    ("Note", lambda bs: {"t": "Para", "c": [S("a"), {"t": "Note", "c": bs}]}),
+    ("Cell", lambda bs: _table_of(bs)),
+]
+
+INNER_BLOCKS = [
+    ("CodeBlock", [{"t": "CodeBlock", "c": [attr("", ["bash"]), "x"]}]),
+    ("BulletList", [{"t": "BulletList", "c": [[plain("a")], [plain("b")]]}]),
+    ("Table", [table(["AlignDefault"] * 2, [["h1", "h2"]], [["a", "b"]])]),
+    ("BlockQuote", [{"t": "BlockQuote", "c": [para("q")]}]),
+    ("Header", [{"t": "Header", "c": [2, A, inls("H")]}]),
+    ("HorizontalRule", [{"t": "HorizontalRule"}]),
+    ("LineBlock", [{"t": "LineBlock", "c": [inls("one"), inls("two")]}]),
+    ("Para.two", [para("one"), para("two")]),
+]
+
+for _outer, _build in BLOCK_IN:
+    for _inner, _blocks in INNER_BLOCKS:
+        case(f"in/{_outer}<{_inner}", _build(_blocks))
 
 # **Letters and digits only.** `@@%d@@` looked unambiguous and was not:
 # this writer escapes an `@` that follows an alphanumeric, to keep gfm
@@ -268,8 +357,21 @@ DELIBERATE = {
     ("rst", "block/Header6"),
 }
 
+# **Two axes, two floors, because one scalar over both gates neither.**
+# Under a single floor over all 276 cases a construct from the flat axis
+# can regress while a composition case is fixed and the total holds — the
+# same defect as a percentage over a large corpus, which this project
+# already refuses elsewhere. The flat floors are the whole-alphabet
+# contract every writer had already met; the composition floors start
+# where the cross product first found them and rise from there.
+def group_of(name):
+    return "composition" if name.startswith("in/") else "flat"
+
 FLOORS = {"markdown": 150, "commonmark": 148, "gfm": 150, "html": 148,
           "latex": 141, "rst": 150, "asciidoc": 150, "plain": 148}
+COMPOSITION = {"markdown": 93, "commonmark": 97, "gfm": 93, "html": 118,
+               "latex": 96, "rst": 68, "asciidoc": 95, "plain": 87}
+GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"
 ARGS = sys.argv[1:]
@@ -291,24 +393,32 @@ for writer, ours, theirs in WRITERS:
     found = sweep(writer, ours, theirs)
     kept = [f for f in found if (writer, f[0]) in DELIBERATE]
     bad = [f for f in found if (writer, f[0]) not in DELIBERATE]
-    score = len(CASES) - len(bad)
     total += len(bad)
-    summary.append(f"{writer} {score}/{len(CASES)}")
-    scores[writer] = score
-    floor = FLOORS.get(writer, 0)
-    if score < floor:
-        below += 1
-        print(f"=== {writer}: {score}/{len(CASES)} — BELOW ITS FLOOR OF {floor}")
-    elif not FLOORS_ONLY:
-        print(f"\n=== {writer}: {score}/{len(CASES)} constructs identical")
-    if FLOORS_ONLY and score >= floor:
-        continue
-    for name, p, f in bad:
-        print(f"  {name}")
-        print(f"      pandoc: {p!r}")
-        print(f"      ours:   {f!r}")
-    for name, _, _ in kept:
-        print(f"  {name} — deliberate, see COMPATIBILITY.md")
+    shown = False
+    parts = []
+    for group, table in GROUPS:
+        size = sum(1 for name, _ in CASES if group_of(name) == group)
+        missed = [f for f in bad if group_of(f[0]) == group]
+        score = size - len(missed)
+        scores[(group, writer)] = score
+        parts.append(f"{score}/{size}")
+        floor = table.get(writer, 0)
+        if score < floor:
+            below += 1
+            print(f"=== {writer} {group}: {score}/{size} — BELOW ITS FLOOR OF {floor}")
+        elif not FLOORS_ONLY:
+            print(f"\n=== {writer} {group}: {score}/{size} constructs identical")
+        if FLOORS_ONLY and score >= floor:
+            continue
+        shown = True
+        for name, p, f in missed:
+            print(f"  {name}")
+            print(f"      pandoc: {p!r}")
+            print(f"      ours:   {f!r}")
+    summary.append(f"{writer} {'+'.join(parts)}")
+    if shown:
+        for name, _, _ in kept:
+            print(f"  {name} — deliberate, see COMPATIBILITY.md")
 
 # **`--bless` rewrites the floors from this run**, which is the one edit
 # here that is pure transcription — eight of them by hand in a day, and a
@@ -318,19 +428,25 @@ for writer, ours, theirs in WRITERS:
 if BLESS:
     source = open(__file__, encoding="utf-8").read()
     raised = []
-    for writer, score in scores.items():
-        floor = FLOORS.get(writer, 0)
-        if score > floor:
-            raised.append(f"{writer} {floor} -> {score}")
-            FLOORS[writer] = score
-    if raised:
-        table = ",\n          ".join(
-            ", ".join(f'"{w}": {FLOORS[w]}' for w in group)
-            for group in (list(FLOORS)[:4], list(FLOORS)[4:])
+    for name, group, table in (("FLOORS", "flat", FLOORS),
+                               ("COMPOSITION", "composition", COMPOSITION)):
+        moved = False
+        for writer in list(table):
+            score = scores.get((group, writer))
+            if score is not None and score > table[writer]:
+                raised.append(f"{writer} {group} {table[writer]} -> {score}")
+                table[writer] = score
+                moved = True
+        if not moved:
+            continue
+        body = (",\n" + " " * (len(name) + 4)).join(
+            ", ".join(f'"{w}": {table[w]}' for w in half)
+            for half in (list(table)[:4], list(table)[4:])
         )
-        start = source.index("FLOORS = {")
+        start = source.index(name + " = {")
         end = source.index("}", start) + 1
-        source = source[:start] + "FLOORS = {" + table + "}" + source[end:]
+        source = source[:start] + name + " = {" + body + "}" + source[end:]
+    if raised:
         open(__file__, "w", encoding="utf-8").write(source)
         print("raised: " + ", ".join(raised))
     else:

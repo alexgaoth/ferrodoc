@@ -5,7 +5,7 @@ compatibility ledger: [`COMPATIBILITY.md`](COMPATIBILITY.md) says what works
 and what differs today; this file says what should change, in what order, and
 what evidence makes an item done.
 
-**Current planning baseline: 0.2.0.** Dates are intentionally absent. A date
+**Current planning baseline: 0.7.0.** Dates are intentionally absent. A date
 would be a promise made without users; an exit criterion is a promise the
 repository can verify.
 
@@ -106,7 +106,7 @@ That is checkable, and 1.0 is not reachable until it is checked.
 
 Today's gates score *ASTs and single conversions*. They cannot answer "would
 this user notice". `scripts/dropin.sh` does, and **its number today is
-`4/48`** — it was `0/48` when the corpus was collected:
+`33/48`** — it was `0/48` when the corpus was collected:
 
 - a corpus of **real command lines** — the invocations that appear in
   Makefiles, CI jobs and scripts, not synthetic ones;
@@ -115,10 +115,27 @@ this user notice". `scripts/dropin.sh` does, and **its number today is
 - one published number, `N/M command lines identical`, with every miss
   classified as *fixable*, *deliberate*, or *out of surface*.
 
-That number is the 1.0 release criterion. It replaces "feels compatible"
-with a percentage that can fall — and starting it at zero is the point:
-every other score in this repository was above 90% before anyone asked
-this question.
+The current 15 misses are eight deliberate divergences and seven implementation
+gaps.
+That means ferrodoc is ready to be described as compatible with the named,
+passing commands, but **not** as a general pandoc replacement.
+
+The corpus is *complete enough to decide a release* when all of the following
+are true; it is never complete merely because it has a round number of rows:
+
+- every supported reader, writer, flag, diagnostic mode, output mode and
+  documented flag interaction occurs in at least one sourced real command;
+- additions are prompted by a real command, newly supported surface, or a
+  regression — not by synthetic padding;
+- every row is byte-compared for stdout, files, exit status and stderr, and
+  has a current classification;
+- it is at least **95% byte-identical**, has no *fixable* rows or missing-flag
+  refusals, and every remainder is a documented *deliberate* or *out of
+  surface* decision.
+
+That is the 1.0 release criterion. It replaces "feels compatible" with a
+percentage that can fall — and starting it at zero is the point: every other
+score in this repository was above 90% before anyone asked this question.
 
 ---
 
@@ -127,6 +144,12 @@ this question.
 Each version states the claim that becomes true, what has to be built, the
 test that decides it, and what it deliberately excludes. Cards from the
 protocol above are the unit of execution inside each.
+
+**Reading discipline:** 0.3 through 0.7 are release history, retained with
+their dated measurements because they explain the gates now in use. The
+active queue begins at **0.7.5**, then 0.8–1.0. A statement of present status
+belongs in the measurement section above or in an explicitly dated update;
+historical numbers are not current claims.
 
 ### 0.3 — Reachable
 
@@ -205,9 +228,9 @@ indefinitely:
   migrating. **Decide it as a compatibility question**: either match pandoc
   and keep the readable-diff behaviour behind a flag, or keep it and treat
   every wrapped output as a known, counted difference.
-- `-f markdown` means CommonMark here and pandoc-markdown there. The dialect
-  now exists as `pandoc_markdown`; decide whether `markdown` aliases it,
-  with the same reasoning.
+- At the time, `-f markdown` meant CommonMark here and Pandoc Markdown there.
+  This was resolved: `markdown` now aliases Pandoc Markdown and `commonmark`
+  remains explicit.
 - `+ext-ext` syntax is refused by name today. Refusal is honest; **accepting
   the extensions the three dialects actually implement** is the drop-in step.
 - The flags a real Makefile breaks on that are not yet present:
@@ -235,7 +258,7 @@ mean shipping eight of them with no way to say whether they helped.
 | **D4.1 — the drop-in corpus** | Collect **real** pandoc command lines — from Makefiles, CI jobs, README snippets, the pandoc manual's own examples — with the documents they run on. Commit them as data, not as a script. | At least 40 invocations, each recorded with its source, running under pandoc alone. A synthetic invocation nobody writes is not admitted. | Running ferrodoc against them. Any flag work. |
 | **D4.2 — `scripts/dropin.sh`** | Run each corpus command line through both binaries, comparing stdout, any output file, exit code and stderr byte for byte. Print `N/M command lines identical` and classify every miss as *fixable*, *deliberate* or *out of surface*. | Wired into `verify.sh`; publishes its number; mutation-tested by breaking one known-good flag and watching the number fall. | Fixing any miss it finds. |
 | **D4.3 — the `--wrap` decision** *(decided)* | **Match pandoc, in stages.** See below. | `dropin.sh` re-run; the three modes tested against every writer class. | The dialect question. Any other flag. |
-| **D4.4 — the `markdown` dialect decision** *(decided)* | **No alias, and here is the number.** See below. | `diff-pandoc-md corpus` gates the reader at its measured 30%; `diff-spec` and `diff-gfm` unmoved. | Extension syntax. |
+| **D4.4 — the `markdown` dialect decision** *(completed)* | CLI input `markdown` now aliases pandoc's dialect; `commonmark` remains explicit, and `pandoc_markdown` names the dialect writer. The historical decision and reversal are recorded below. | `diff-pandoc-md corpus` remains measured; `scripts/dropin.sh` records the effect on real commands. | Extension syntax. |
 | **D4.5 — extension syntax** *(done)* | Accepted where the named dialect already does it; refused by name otherwise, saying which of the three reads it. A name pandoc does not have is a typo and says so — checked before the no-op test, which had accepted `-nothing`. | `extension_syntax_is_accepted_when_it_asks_for_nothing` in `main.rs`; `dropin-008` now runs with the `markdown_github-hard_line_breaks` its source actually wrote. | Implementing a missing extension. |
 | **D4.6 — diagnostics** | `--quiet`, `--verbose`, `--log`, `--fail-if-warnings`, and unknown-flag behaviour: fail naming the flag and whether it is unimplemented or out of scope. | Every unknown flag produces a message naming it; `--fail-if-warnings` turns the metadata-block warning into a non-zero exit. **No silent acceptance anywhere.** | Rewriting existing warnings. |
 | **D4.7 — paths and defaults** *(done)* | `--defaults` splices its flags in **where the flag appeared** (pandoc's precedence, measured both ways round); `--resource-path` is searched after the document's own directory; `--data-dir` supplies `templates/default.html5` and names a `--template`. A key with no flag behind it is refused by name. | The seven `--defaults` rows in `dropin/` run; `--resource-path` embeds a picture neither binary finds without it. | `--reference-doc`, which is 0.5. |
@@ -377,11 +400,13 @@ So the order that follows from the measurement is: **the dialect, then
 highlighting, then read the nineteen**. Neither of the two is a flag any
 more; each is a body of work with a card.
 
-#### D4.4 — decided: `markdown` does not alias `pandoc_markdown`, yet
+#### D4.4 — historical decision, superseded 2026-08-27
 
-The card asked whether `-f markdown` should mean pandoc's dialect here as
-it does there. The answer is a measurement, and it was not available
-until this card: the `pandoc_markdown` reader agrees with
+This was the decision before the CLI input alias changed. `-f markdown` now means
+pandoc's dialect, as it does in pandoc; `-f commonmark` is the explicit
+CommonMark spelling. The account below is retained as the measurement that
+made the change safe to revisit. At that time, the `pandoc_markdown` reader
+agreed with
 `pandoc -f markdown` on **6 of 20** markdown documents in `corpus/`.
 
 Aliasing a reader that disagrees with pandoc on two thirds of a corpus
@@ -458,12 +483,11 @@ close to 100" — should be re-read as *close to 100 on what a dialect
 built this way can reach*, and the honest way to say that is the section
 table rather than the total.
 
-**Which makes the aliasing decision a different question than it was.**
-`markdown` still does not alias `pandoc_markdown`, and the reason is
-unchanged: 496/652 is not 100, and a silent change of meaning on a
-quarter of documents is worse than a flag someone types. What has
-changed is that the remaining quarter is now *named* — it is the four
-parser sections above, not an unread list.
+**This historical decision was later reversed.** `markdown` now aliases the
+dialect on the input side despite the remaining reader gaps, because matching
+pandoc's default is more useful to CLI callers and `commonmark` preserves an
+explicit stable escape hatch. The remaining parser sections are still named
+work, not an unread list.
 
 #### Where the dialect stands, 2026-08-24 (end of day)
 
@@ -721,10 +745,9 @@ converted had said nothing about any of them.
 Each floor is the score that writer reached, because every point below
 one is a document that used to be byte-identical and is not any more.
 
-`markdown` stays low for a stated reason rather than an unstated one:
-`-t markdown` is `CommonMark` here and pandoc's own dialect there, so
-that row measures the dialect gap on the writer side and moves when
-D4.4 does.
+`markdown` is now the Pandoc-Markdown writer on both sides. `commonmark` is
+the separately measured strict-CommonMark writer; the two rows must never be
+described as one writer or as a dialect gap.
 
 **Exit test:** the sweep reports no divergence outside the recorded set,
 `docs/divergences.md` and `COMPATIBILITY.md` agree with the gates, and

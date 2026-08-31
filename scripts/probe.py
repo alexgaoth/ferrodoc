@@ -242,16 +242,27 @@ def main():
         # **What the writers produce is only half a rule.** Reading it
         # back says whether matching pandoc's bytes would cost the
         # document — which is how four divergences here were decided.
+        #
+        # **Compare the whole value, not the block tags.** Printing
+        # `['Para']` for both sides answered nothing: every difference
+        # worth deciding — a footnote pandoc references and never
+        # defines, a `LineBreak` it drops inside `Emph` — is an *inline*,
+        # and both sides are a `Para` either way. A proxy that cannot
+        # move is not evidence.
         if args.from_:
             for name, text in (("pandoc", theirs), ("ours", ours)):
                 back = subprocess.run(
                     ["pandoc", "-f", args.from_, "-t", "json"],
                     input=text, capture_output=True, text=True).stdout
                 try:
-                    got = [b["t"] for b in json.loads(back)["blocks"]]
+                    got = json.loads(back)["blocks"]
                 except (ValueError, KeyError):
-                    got = ["<unreadable>"]
-                print(f"  {name} reads back as: {got}")
+                    print(f"  {name} round-trip: <unreadable>")
+                    continue
+                if got == blocks:
+                    print(f"  {name} round-trip: identical")
+                else:
+                    print(f"  {name} round-trip: CHANGED -> {json.dumps(got)}")
     return 1 if differed else 0
 
 

@@ -91,7 +91,8 @@ gate_claims() {
 "RST writer (fidelity)	ours	COMPATIBILITY.md	\`diff-rst\` | RST writer" \
 "RST writer (fidelity)	pandoc	COMPATIBILITY.md	\`diff-rst\` | RST writer" \
 "flags vs pandoc	ours	COMPATIBILITY.md	flag combinations byte-identical" \
-"real command lines	ours	README.md	command lines identical"
+"real command lines	ours	README.md	command lines identical" \
+"real command lines	ours	dropin/README.md	Today the answer is"
 }
 
 # The figure in one recorded score line: `N/M` from ours, or the `N/M`
@@ -125,12 +126,12 @@ check_gates() {
         published "$figure" "$where" "$anchor"
     done < <(gate_claims)
 
-    # `writers.sh` prints its seven scores on one line and each has a
+    # `writers.sh` prints its eight scores on one line and each has a
     # table row of its own. Nothing checked them until 2026-08-23, and the
     # LaTeX row had said 0/8 for as long as it had a row.
     local writers score
     writers=$(grep -P "^\Qtext writers vs pandoc's\E\t" "$scores" || true)
-    for writer in html latex plain gfm rst asciidoc markdown; do
+    for writer in html latex plain gfm rst asciidoc markdown commonmark; do
         score=$(printf '%s' "$writers" | grep -oE "\b$writer [0-9]+/[0-9]+" | awk '{print $2}')
         if [ -z "$score" ]; then
             printf '  MISSING  %-34s no writers.sh score in this run\n' "$writer"

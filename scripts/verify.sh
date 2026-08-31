@@ -251,11 +251,21 @@ if [ "$want_gates" = 1 ]; then
     # above scores an AST or one conversion with flags the gate chose;
     # this runs 48 command lines people actually wrote and compares the
     # bytes. It was a measurement while it read 0/48, on the promise that
-    # it became a gate the day it was not zero. That day was the one
-    # `--defaults` landed. A **count**, not a percentage: over 48 rows a
-    # percentage floor tolerates a whole row going backwards.
+    # it became a gate the day it was not zero. A **count**, not a
+    # percentage: over 48 rows a percentage floor tolerates a whole row
+    # going backwards.
+    #
+    # **The floor is the score, not a margin under it** — the same rule
+    # the writer floors follow. It sat at 11 while this climbed 26 -> 33,
+    # which left 22 passing commands free to regress unread: a baseline
+    # guard where the thing wanted was a contract. 33 is what this machine
+    # and five consecutive CI runs both report, over a corpus with no
+    # timing, network or environment input, so there is no variance for
+    # headroom to absorb and a point below it is a regression to read
+    # rather than a flake to tolerate. The 15 rows that differ are 8
+    # deliberate and 7 open, each named by the script.
     # See dropin/README.md.
-    gate "real command lines" ./scripts/dropin.sh --fail-under 11
+    gate "real command lines" ./scripts/dropin.sh --fail-under 33
 
     # Every flag that shapes output, against pandoc, over every document
     # in `corpus/`. A **gate at 100**, not a floor: a flag's whole job is
@@ -280,11 +290,19 @@ if [ "$want_gates" = 1 ]; then
     # byte-identical and is not any more, which is a regression rather
     # than a range. 1 s.
     gate "text writers vs pandoc's" ./scripts/writers.sh --floors
-    # **The corpus-free gate.** Every other differential score here is
-    # over documents somebody wrote, so it can only fail on constructs
-    # those documents contain; this one walks the AST, which is a finite
-    # set of variants and therefore has no blind spot. It found the
-    # `plain` writer at 104/137 while it scored 38/40 on documents.
+    # **The AST-shape gate, on two axes with a floor each.** Every other
+    # differential score here is over documents somebody wrote, so it can
+    # only fail on constructs those documents contain. The *flat* axis
+    # puts each AST variant alone at the top of a document — the
+    # alphabet — and found the `plain` writer at 104/137 while it scored
+    # 38/40 on documents. The *composition* axis is the cross product of
+    # container and content — the sentences — and found 281 further
+    # disagreements across the eight writers on the day it was added,
+    # every one of them on a writer already passing the flat axis whole
+    # or nearly. Two floors and not one total, because a single scalar
+    # over both lets a regression on one axis hide behind a fix on the
+    # other. Neither axis covers attribute *values* or any reader
+    # grammar.
     gate "every AST construct vs pandoc" ./scripts/ast-sweep.sh --floors
     # And the binary writers, which have no bytes worth comparing: the
     # judge is what pandoc reads back out of them. `corpus/docx` and

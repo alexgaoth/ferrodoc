@@ -1,5 +1,12 @@
 # Every failing document, and what it fails on
 
+> **Historical diagnosis, not a current EPUB compatibility claim.** The
+> `epub-spec` result is a monitor of malformed-XHTML recovery, where
+> ferrodoc deliberately differs from pandoc's TagSoup behavior. It currently
+> reports 11/22; it does not gate EPUB-reader compatibility or define release
+> readiness. The analysis below explains why the earlier "HTML-reader
+> divergence" explanation was retired.
+
 > **Understated, and measured so on 2026-08-19; re-measured 2026-08-25.**
 > This census counts the documents the gates score. For the HTML reader
 > that is eight `corpus/*.html` files, and it named six divergences.
@@ -19,7 +26,7 @@ them — that the HTML reader's 26 divergences are what holds
 One of those is refuted below.
 
 **Scope.** Every gate in `scripts/verify.sh` scoring under 100%, except
-the two *fidelity* runs (`diff-latex` 1/13, `diff-rst` 3/13), which are
+the two *fidelity* runs (`diff-latex` 1/13, `diff-rst` 4/13), which are
 excluded on purpose: pandoc itself scores 1/13 and 4/13 on the same
 corpus, so their failures measure the format, not this project, and 20
 more rows of "the format cannot hold it" would drown the signal.
@@ -133,7 +140,7 @@ drops `ElementFlags::self_closing`.
 
 ---
 
-## Is `epub-spec` 10/22 really the HTML reader? No — not as stated
+## Historical: was `epub-spec` 10/22 really the HTML reader? No — not as stated
 
 `corpus/epub-spec/generate.sh` and `COMPATIBILITY.md` both say each chunk
 fails because it contains "one of the HTML reader's 26 known

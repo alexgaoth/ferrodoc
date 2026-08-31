@@ -10,29 +10,25 @@ break published without its note is a break twice.
 
 ## Unreleased
 
-### `markdown` is pandoc's markdown when reading
+### `markdown` is Pandoc Markdown in both directions
 
-**This changes what `ferrodoc x.md` does.** A `.md` file with no `-f`, and
-`-f markdown` spelled out, now read pandoc's own dialect — heading
-identifiers, footnotes, definition lists, `{#id .class}` attributes and a
-YAML metadata block — where they read CommonMark before.
+**This changes what `ferrodoc x.md` and `-t markdown` do.** A `.md` file with
+no `-f`, `-f markdown`, and `-t markdown` now use Pandoc's own dialect —
+heading identifiers, footnotes, definition lists, `{#id .class}` attributes
+and a YAML metadata block — where they used CommonMark before.
 
-> **If you want the old behaviour, pass `-f commonmark`.** It is the same
-> reader, under the name pandoc gives it.
+> **If you want the old behaviour, pass `-f commonmark` or `-t commonmark`.**
+> It is the explicit strict-CommonMark spelling.
 
 Measured over this repository's own documents against `pandoc -t html`
 with no `-f` on either side, the difference from pandoc's output falls
-from **2,466 lines to 241**, and no document gets worse. The 48 real
-command lines in `dropin/` go from **12/48 to 22/48** byte-identical.
+from **2,466 lines to 241**, and no document gets worse. The initial input
+alias took the 48 real command lines in `dropin/` from **12/48 to 22/48**;
+later work has the current result at 33/48 (see `dropin/README.md`).
 
-**`-t markdown` still writes CommonMark.** There is no writer for
-pandoc's dialect yet, so the name is asymmetric: it reads one thing and
-writes another. That is stated rather than smoothed over, and it is the
-next thing worth building.
-
-`Format::parse` is unchanged and still maps `markdown` to CommonMark;
-the new `Format::parse_input` and `Format::from_input_path` are what the
-CLI uses for the input side.
+`markdown`, `md`, and `pandoc_markdown` now name the same format in the public
+API and CLI. `Format::parse_input` remains as a backwards-compatible public
+API alias for callers that want to state their intent.
 
 ## 0.7.0 — 2026-08-26
 

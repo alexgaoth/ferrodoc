@@ -2103,13 +2103,28 @@ fn header(out: &mut String, prefix: &str, level: i64, text: &str) {
     push_line(out, prefix, &format!("{hashes} {text}"));
 }
 
+/// The one line start at which no marker can open a block: the line after
+/// a **hard** break continues the same paragraph, and pandoc writes `- x`
+/// and `128.` bare there.
+///
+/// **A soft break is a different position, and probing only the hard one
+/// says nothing about it.** Relaxed for both, `> foo\n    - bar` came
+/// back as a blockquote holding `foo` alone — the `-` had opened a list —
+/// and `diff-md` fell 652/652 to 649/652 on that, `CommonMark` example
+/// 312 and the spec's own `1\. not a list`. A soft continuation line
+/// *can* open a block; only this one cannot.
+fn after_hard_break(out: &str) -> bool {
+    out.ends_with("\\\n")
+}
+
 /// Whether everything written on the current line is digits, and there is
 /// at least one — the only position where a following `.` or `)` opens an
 /// ordered list. Scans backwards over the digit run only, so prose (whose
 /// last character is rarely a digit) costs nothing.
 fn digits_since_line_start(out: &str) -> bool {
     let before = out.trim_end_matches(|c: char| c.is_ascii_digit());
-    before.len() < out.len() && (before.is_empty() || before.ends_with('\n'))
+    before.len() < out.len()
+        && (before.is_empty() || (before.ends_with('\n') && !after_hard_break(before)))
 }
 
 /// Write `$x$` or `$$x$$`, content untouched.
@@ -2358,7 +2373,14 @@ fn escape_text_inner(
             // heading, which is not a block opener at all and is why this
             // is wider than pandoc's rule. Pandoc loses `Foo\nbar\n\---`
             // to a heading; `CommonMark` example 106 is that document.
-            '-' | '+' if opens_here && (opens_block || next == Some(ch)) => {
+            // The one line start exempted is the one after a **hard**
+            // break, where pandoc writes the marker bare — see
+            // [`after_hard_break`].
+            '-' | '+'
+                if opens_here
+                    && !after_hard_break(out)
+                    && (opens_block || next == Some(ch)) =>
+            {
                 out.push('\\');
                 out.push(ch);
             }
@@ -2366,7 +2388,9 @@ fn escape_text_inner(
             // a run of `=` is only dangerous on a continuation line —
             // `out.is_empty()` is the block's first line, where pandoc
             // does not escape and neither should this. It escaped `===
-            // x` there, which cannot be an underline at all.
+            // x` there, which cannot be an underline at all. No
+            // hard-break exemption: a `===` line under one still
+            // underlines the paragraph.
             '=' if opens_here && !out.is_empty() && next == Some('=') => {
                 out.push('\\');
                 out.push(ch);

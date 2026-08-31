@@ -1,5 +1,6 @@
-//! Universal document converter: read markdown (`CommonMark` or GFM),
-//! HTML, DOCX or the pandoc JSON AST, write any of those plus plain text.
+//! Universal document converter: read Pandoc Markdown, `CommonMark`, GFM,
+//! HTML, DOCX, ODT, EPUB, notebooks or the pandoc JSON AST; write supported
+//! formats plus plain text.
 //!
 //! Everything goes through one document model — the same AST pandoc uses —
 //! so any supported input can produce any supported output.
@@ -53,11 +54,9 @@ pub enum Format {
     /// block, header attributes, definition lists and
     /// superscript/subscript on top of what [`Format::Gfm`] reads.
     ///
-    /// A separate name rather than a change to [`Format::Markdown`],
-    /// because the two disagree on documents valid in both and a silent
-    /// change of meaning is worse than a flag someone has to type.
-    /// Readable only: writing it would be a second markdown writer, and
-    /// [`Format::Markdown`] already round-trips what the AST can hold.
+    /// Readable and writable. On the CLI, `markdown`, `md`, and
+    /// `pandoc_markdown` all select this format; [`Format::Markdown`] is
+    /// reached by the explicit `commonmark` spelling.
     PandocMarkdown,
     /// HTML. Readable and writable.
     Html,

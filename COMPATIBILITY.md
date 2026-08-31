@@ -12,6 +12,7 @@ published sources describe a later pandoc than this binary.
 
 | | read | write |
 |---|---|---|
+| Pandoc Markdown (`markdown`, `md`, `pandoc_markdown`) | yes, with documented parser gaps | yes |
 | CommonMark | yes | yes (no tables — see below) |
 | GFM | yes (the five spec extensions) | yes |
 | HTML | yes | yes (fragment, or `-s` for a whole page) |
@@ -30,8 +31,9 @@ Reachable from Rust, Python (`pip install ferrodoc`), JavaScript
 language with an FFI (a C ABI in `bindings/c`), and the command line. Every binding converts through the same crates and is held
 to the numbers below.
 
-Everything else pandoc supports — LaTeX, EPUB, RST, Org, presentations, the
-rest of its ~40 — is not converted today.
+Many formats and subsystems pandoc supports — Org, presentations, citation
+processing, filters, bibliography handling, and most of its ~40 formats — are
+outside ferrodoc today. LaTeX, RST, and AsciiDoc are deliberately output-only.
 
 ## Measured conformance
 
@@ -72,7 +74,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-ipynb` | notebook reader produces pandoc's AST | **8/8** |
 | `diff-ipynb-write` | notebook writer survives a round trip through pandoc | **8/8** |
 | `diff-latex` | LaTeX writer round-trips the document | **1/13** (pandoc: 1/13) — **reported, not gated**; see below |
-| `diff-rst` | RST writer round-trips the document | **3/13** (pandoc: 4/13) |
+| `diff-rst` | RST writer round-trips the document | **4/13** (pandoc: 4/13) |
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
@@ -1408,14 +1410,14 @@ directly without asking its reader to survive anything.
 
 | writer | byte-identical to pandoc | floor |
 |---|---|---|
-| `html` | **38/40** | 38 |
-| `rst` | 36/40 | 36 |
-| `plain` | **38/40** | 38 |
-| `latex` | 36/40 | 36 |
-| `asciidoc` | **38/40** | 38 |
-| `gfm` | 28/40 | 28 |
-| `commonmark` | 29/40 | 29 |
-| `markdown` | **29/40** | 29 |
+| `html` | **40/42** | 40 |
+| `rst` | 38/42 | 38 |
+| `plain` | **40/42** | 40 |
+| `latex` | 38/42 | 38 |
+| `asciidoc` | **40/42** | 40 |
+| `gfm` | 29/42 | 29 |
+| `commonmark` | 30/42 | 30 |
+| `markdown` | **30/42** | 30 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill
@@ -1513,14 +1515,10 @@ list carries the **loose/tight** distinction a bullet list does: a
 definition whose first block is a `Para` takes a blank line and a `Plain`
 does not.
 
-`commonmark` and `markdown` are **the same ferrodoc writer** measured
-against two different pandoc writers, and the pair is the honest way to
-report it. `-t markdown` is CommonMark here and pandoc's own dialect
-there, so the `markdown` row measures the dialect gap on the writer side
-and moves when `pandoc_markdown` does rather than when the writer does —
-ROADMAP card D4.4. The `commonmark` row asks the writer's own question,
-and it went 3 to 8 the day it was asked separately: tables, divs and
-footnotes were being lost or mis-spelled where no gate was looking.
+`markdown` and `pandoc_markdown` are the same Pandoc-Markdown writer, and
+`commonmark` is a separate strict-CommonMark writer. Their rows are measured
+against the matching pandoc writers. Do not interpret a score in either row
+as evidence for the other dialect.
 
 **All four misses left are pandoc losing information, each checked by
 round-tripping pandoc's own output through pandoc:**
@@ -2315,17 +2313,17 @@ nests the other way round, and the four `.gfm` documents, which are read
 by a dialect that is not GFM and disagree about pipes in code spans and
 about how a run of task items is cut into lists.
 
-### `markdown` means pandoc's markdown on the way in, CommonMark on the way out
+### Historical: the `markdown` naming decision (superseded 2026-08-28)
 
 **Reversed on 2026-08-27.** It used to mean CommonMark in both
 directions, and the paragraphs below describe what that cost; they are
 kept because the cost is what decided it.
 
-`ferrodoc -f markdown` and a `.md` file with no `-f` now read pandoc's
-own dialect, as they do in pandoc. `-f commonmark` names CommonMark.
-**`-t markdown` still writes CommonMark**; the dialect writer is
-`-t pandoc_markdown`. Keeping those output names distinct preserves the
-original writer contract while making pandoc's spelling available.
+The paragraphs and measurements below record the decision before the output
+alias landed. **Current behavior is simpler:** `markdown` (and
+`pandoc_markdown`) means Pandoc Markdown in both directions; `commonmark`
+means strict CommonMark. Historical figures in this section, including 22/48,
+are not current claims.
 
 What decided it, measured over this repository's own documents against
 `pandoc -t html` with no `-f` on either side:
@@ -2371,9 +2369,8 @@ $ ferrodoc -f markdown -t html sample.md
 <p>H~2~O and E=mc^2^.</p>
 ```
 
-Footnotes are the exception that moved: `-f gfm` reads them, matching
-`pandoc -f gfm`, and `-f markdown` reads none, matching `pandoc -f
-commonmark`.
+At the time, footnotes were one visible difference: `-f gfm` read them and
+the old `-f markdown` behavior did not. That is no longer current behavior.
 
 **Only the metadata block makes the output wrong rather than narrower** —
 the title and author appear in the body — so that one case warns on
@@ -2405,11 +2402,10 @@ What is left is the honest remainder: twelve rows are gaps in this
 project's own reading of pandoc's dialect, which the old default kept out
 of sight behind a decision.
 
-**This was the pre-alias analysis.** The input decision is now implemented
-and the corpus is 22/48, not "one decision from the high thirties". The
-remaining rows are tracked as parser and command-surface work; the
-`pandoc_markdown` writer supplies the dialect output separately from the
-longstanding CommonMark `-t markdown` name.
+**This was the pre-alias analysis.** Both aliases are now implemented. The
+current drop-in score and classifications live in the README and
+`dropin/README.md`; this historical account is retained only for its
+measurement method.
 
 ### `--wrap` — pandoc's, since 2026-08-24
 

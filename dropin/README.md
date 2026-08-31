@@ -12,8 +12,10 @@ repository each came from, so that `scripts/dropin.sh` can ask the one
 question no other gate in this project asks: **if a user swapped the
 binary in their Makefile, would they get the same bytes?**
 
-Today the answer is **0 of 48**. That is the honest starting point, and
-the number this repository's 1.0 criterion is written against.
+Today the answer is **33/48**. The remaining 15 are classified by the
+gate: **8 deliberate** divergences and **7 implementation** gaps. This is a
+useful compatibility measurement, not a general claim that ferrodoc can
+replace pandoc.
 
 ## Where they came from
 

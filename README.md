@@ -1,6 +1,6 @@
 # ferrodoc
 
-Convert documents — markdown (CommonMark and GFM), HTML, DOCX, ODT and
+Convert documents — Pandoc Markdown, CommonMark, GFM, HTML, DOCX, ODT and
 EPUB in; those plus LaTeX, reStructuredText and AsciiDoc out —
 semantically and in your own process, with output checked against pandoc
 document by document.
@@ -262,7 +262,8 @@ ferrodoc README.md -o readme.html        # an HTML fragment
 ferrodoc README.md -s -o readme.html     # a page a browser can open        # formats inferred from extensions
 ferrodoc report.docx -o copy.docx        # DOCX in, DOCX out — keeps its images
 ferrodoc report.docx -t gfm             # DOCX in, GitHub markdown out — keeps tables
-ferrodoc report.docx -t markdown         # DOCX in, CommonMark out — no table syntax
+ferrodoc report.docx -t markdown         # DOCX in, Pandoc Markdown out
+ferrodoc report.docx -t commonmark       # DOCX in, strict CommonMark out
 ferrodoc report.docx -t plain            # DOCX in, text out, to stdout
 ferrodoc report.docx -t gfm --extract-media out   # ...and keep the pictures
 ferrodoc minutes.odt -t gfm              # LibreOffice in, GitHub markdown out
@@ -272,17 +273,17 @@ ferrodoc --help                          # every option and format
 ```
 
 CLI inputs: `markdown` (pandoc's dialect; `md`), `commonmark`, `gfm`, `html`,
-`docx`, `odt`, `epub`, `ipynb`, `json` (the pandoc AST). Outputs:
-`markdown` (CommonMark), `pandoc_markdown` (pandoc's dialect), and those
-formats plus `latex`, `rst`, `asciidoc` and `plain`.
+`docx`, `odt`, `epub`, `ipynb`, `json` (the pandoc AST). Outputs are the
+same set, plus `latex`, `rst`, `asciidoc` and `plain`; `markdown` and
+`pandoc_markdown` are equivalent names for Pandoc Markdown, and
+`commonmark` is strict CommonMark.
 
 > **CLI input `markdown` is pandoc's markdown dialect.** This matches
 > `pandoc -f markdown` and the default inferred for `.md` files; use
 > `-f commonmark` when that stricter dialect is intended. The explicit
-> `pandoc_markdown` name is available on both sides. `-t markdown` remains
-> the CommonMark writer for compatibility with ferrodoc's original output
-> name; use `-t pandoc_markdown` for pandoc's dialect. The reader is not
-> complete: it agrees on **14 of 20** markdown documents in `corpus/` and
+> `pandoc_markdown` name is available on both sides. `-t markdown` also
+> writes Pandoc Markdown; use `-t commonmark` for strict CommonMark. The
+> Pandoc Markdown reader is not complete: it agrees on **14 of 20** markdown documents in `corpus/` and
 > **498 of 652** CommonMark-spec examples. Its remaining gaps include
 > parser-level emphasis and link rules, not merely extensions:
 >
@@ -290,10 +291,10 @@ formats plus `latex`, `rst`, `asciidoc` and `plain`.
 > cargo run -p ferrodoc-harness -- diff-pandoc-md corpus --verbose
 > ```
 
-Footnotes are read by `gfm` and not by `markdown` — which is how pandoc
-has it too. The one case where the output is *wrong* rather than narrower
-is a YAML metadata block, because the title and author land in the body,
-so ferrodoc prints a line to stderr when a document opens with one.
+Pandoc Markdown and GFM both read footnotes. Pandoc Markdown also accepts
+YAML metadata, header attributes, definition lists, superscript and
+subscript; the reader's incomplete score above is why users with demanding
+Pandoc-Markdown input should still validate their own corpus.
 
 `-s`/`--standalone` writes a complete page
 **through pandoc's own default template**, which is vendored here under
@@ -301,9 +302,9 @@ the BSD-3 licence pandoc offers for it: byte-identical output across
 `--toc`, `--toc-depth`, `--css`, `-V`, `-H`, `-B`, `-A` and a
 third-party `--template`, checked by `./scripts/flags.sh`.
 
-Prefer `-t gfm` over `-t markdown` for anything with a table: CommonMark has
-no table syntax, so a table is written there as the raw `<table>` pandoc
-writes, which keeps the document but is not markdown anybody wants to read.
+Prefer `-t gfm` or `-t markdown` over `-t commonmark` for anything with a
+table: strict CommonMark has no table syntax, so a table is written there as
+raw `<table>` HTML. That keeps the document but is not pleasant source text.
 
 **Line layout is pandoc's**, as of 2026-08-24. Every text writer fills to
 `--columns` (72 by default), keeps the document's own breaks under

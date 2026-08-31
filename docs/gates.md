@@ -28,6 +28,45 @@ Conformance is pinned to **pandoc 3.8.2.1**, and the script refuses to score
 against any other version rather than publish a number that means something
 else. A green run means "identical to this pandoc".
 
+## What a green run does not prove
+
+The gates are strong regression evidence, not a blanket compatibility or
+security certificate. These limits are deliberate and must stay visible:
+
+- **Platform and oracle scope.** Differential conformance runs against pinned
+  pandoc 3.8.2.1 on Linux. The project also builds and tests on macOS and
+  Windows, but it does not publish a cross-version or cross-platform pandoc
+  equivalence claim.
+- **The real-CLI floor is the score.** The corpus measures 33/48 identical
+  commands and the threshold is 33, so every one of them is the supported
+  contract and a single row going backwards fails the run. It sat at 11
+  while the score climbed 26 -> 33, which had left 22 passing commands free
+  to regress unread. What the floor still does not say is that the other 15
+  are close: 8 are deliberate divergences and 7 are open.
+- **A sub-100 format floor is not completion.** It prevents a measured
+  baseline from falling; it does not turn a 96% reader or a 70% dialect
+  reader into general compatibility. Read the current score and each named
+  divergence in `COMPATIBILITY.md` before relying on that path.
+- **The commands are representative, not literal substitution tests.** 27 of
+  48 have a retargeted output format or local stand-in asset; they test the
+  command and flag shape, not an unmodified external workflow. See
+  `dropin/README.md`.
+- **The AST sweep is exhaustive over constructors, not over their
+  composition.** Its *flat* axis puts each implemented AST variant alone at
+  the top of a document, and its *composition* axis crosses container against
+  content — 286 cases with a floor for each axis. Neither covers attribute
+  *values*, input grammar, or real document style, and the composition axis
+  is one fixed cross product rather than every nesting.
+- **EPUB writer read-back currently has a floor of zero.** It runs and reports
+  differences, but does not prevent an additional EPUB semantic regression.
+  `epubcheck` is the validity check; it is not an equivalence gate.
+- **The resource gate is narrow.** It bounds supported conversions of a
+  generated 10 MB Markdown file to 80 times input RSS. It does not yet impose
+  a whole-input/output limit or prove resistance to every hostile archive.
+- **Fuzzing is evidence, not a proof.** CI runs corpus mutations for panics
+  and hangs; the default local verification does not, and it is not a
+  coverage-complete security audit.
+
 The gates, and what each one proves:
 
 | gate | proves |
@@ -65,7 +104,7 @@ see, and `verify.sh` runs all three:
 |---|---|---|
 | `scripts/flags.sh` | every CLI flag, against pandoc, over every document in `corpus/` | **gated at 100** — a flag's whole job is to produce particular bytes |
 | `scripts/dropin.sh` | 48 real pandoc command lines from public Makefiles and CI files, byte for byte, with every miss classified | gated at a **count** of rows, not a percentage |
-| `scripts/writers.sh` | each text writer against **pandoc's own writer**, on the same AST, over twelve documents | gated at **one floor per writer**, each the score that writer reached |
+| `scripts/writers.sh` | each text writer against **pandoc's own writer**, on the same AST, over 21 documents in two wrap modes | gated at **one floor per writer**, each the score that writer reached |
 
 `writers.sh` is why "pandoc cannot read AsciiDoc, so it has no oracle" is
 no longer the whole story: pandoc *writes* every text format this writes,
@@ -74,7 +113,8 @@ AsciiDoc has ever had.
 
 Two things about it are worth knowing before reading its number.
 
-**Its corpus is twelve documents and four of them are GFM.** The eight in
+**Its corpus is 21 documents, run twice each — as they fall and filled.**
+Four are GFM and nine are this repository's own prose; the eight in
 `corpus/` are read as CommonMark, which has no table, no task list and no
 footnote — so a score over them alone cannot see the constructs the
 writers are worst at. Adding the four in `corpus/gfm/` found, on the

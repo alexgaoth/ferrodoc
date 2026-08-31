@@ -64,20 +64,15 @@ esac
 # the whole corpus, and the two that are not are held to what they have.
 floor_for() {
     case "$1" in
-        html)     echo 38 ;;
-        rst)      echo 36 ;;
-        plain)    echo 38 ;;
-        latex)    echo 36 ;;
-        asciidoc) echo 38 ;;
-        gfm)      echo 28 ;;
-        # The like-for-like row: `-t markdown` here **is** CommonMark, so
-        # pandoc's `commonmark` writer is the writer to compare it with.
-        # It went 3 to 8 the day it was asked separately, and all four
-        # misses left are pandoc losing information — a code block that
-        # opens a blockquote or a list item comes back from its own round
-        # trip as a paragraph, and its `<!-- -->` list separator comes
-        # back as a `RawBlock` that was never in the document.
-        commonmark) echo 29 ;;
+        html)     echo 40 ;;
+        rst)      echo 38 ;;
+        plain)    echo 40 ;;
+        latex)    echo 38 ;;
+        asciidoc) echo 40 ;;
+        gfm)      echo 29 ;;
+        # The strict-CommonMark row. `markdown` is Pandoc Markdown; callers
+        # wanting this dialect must spell `commonmark` explicitly.
+        commonmark) echo 30 ;;
         # `-t markdown` against `pandoc -t markdown`: the same question
         # asked of both binaries, which is what it always should have
         # been. The **CommonMark** writer scored 6 here while it was the
@@ -88,7 +83,7 @@ floor_for() {
         # accepted spelling of the same `Format`, so it cannot diverge
         # from this row, and two identical numbers in a published table
         # read as two pieces of evidence.
-        markdown) echo 29 ;;
+        markdown) echo 30 ;;
         *)        echo 0 ;;
     esac
 }
@@ -114,8 +109,8 @@ summary=""
 # ROADMAP, COMPATIBILITY and `docs/` were not. Adding them on 2026-08-25
 # scored **asciidoc 0/8 and rst 1/8** on writers that were at 11/12 and
 # 12/12 here, and every one of the five bugs behind that was real.
-# `commonmark` and `markdown` are the same ferrodoc writer measured
-# against two different pandoc writers — see `floor_for` above.
+# `commonmark` and `markdown` are separate output dialects and are compared
+# against their matching pandoc writers — see `floor_for` above.
 for format in html commonmark markdown gfm latex rst asciidoc plain; do
     case "$format" in
         html|plain) wrap=none ;;
