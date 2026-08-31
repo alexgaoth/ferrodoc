@@ -8,7 +8,7 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
-## Unreleased
+## 0.8.0 — 2026-08-30
 
 ### `markdown` is Pandoc Markdown in both directions
 
@@ -29,6 +29,58 @@ later work has the current result at 33/48 (see `dropin/README.md`).
 `markdown`, `md`, and `pandoc_markdown` now name the same format in the public
 API and CLI. `Format::parse_input` remains as a backwards-compatible public
 API alias for callers that want to state their intent.
+
+### The dialect writer, which `-t markdown` now reaches
+
+`-t markdown` writes Pandoc Markdown, so the constructs CommonMark has no
+spelling for survive a round trip: **definition lists**, fancy ordered-list
+markers, line blocks, `{#id .class}` attributes, superscript and subscript,
+raw blocks, citations written from their data rather than their rendered
+text, and pandoc's three table shapes — **simple**, **multiline** and, new
+in this release, **grid**.
+
+A grid table is what a cell holding anything but a single paragraph gets: a
+code block, two paragraphs, a list, a blockquote. Those used to fall back to
+raw `<table>`, which is what every DOCX or HTML table with structure in a
+cell became.
+
+### Link destinations are percent-encoded, in the dialect only
+
+`[link](/my uri)` reads as `/my%20uri`, matching `pandoc -f markdown`. The
+set is whitespace plus ``<>|"{}[]^` ``. `-f commonmark` and `-f gfm` are
+unchanged and hand the destination back exactly as written.
+
+### Escaping a paragraph's later lines
+
+`128.`, `- x` and `+ x` on a line after a **hard** break are written bare, as
+pandoc writes them; they used to be escaped. After a *soft* break they are
+still escaped, because a list can open there.
+
+### Archives declare a bound
+
+An archive is refused past **100× its compressed size or 64 MB, whichever is
+larger**, so a decompression bomb is an error rather than an allocation. The
+end-to-end bound is unchanged: peak resident memory stays within **80× the
+source document** on every gated conversion.
+
+### Smaller DOCX output
+
+The DOCX writer emits one run per formatting change rather than per word:
+17.7 MB became 3.3 MB on the document that showed it.
+
+### Highlighting
+
+Rust, Ruby and C join Python and Bash, and the Python and Bash rules were
+reworked against system files rather than hand-picked lines.
+
+### Where it stands
+
+`ferrodoc` is byte-identical to pandoc 3.8.2.1 on **33 of the 48 real
+command lines** in `dropin/`, **224/224** output-shaping flag combinations,
+**652/652** CommonMark-spec documents through the CommonMark reader, and
+**286** AST constructs across eight text writers. The Pandoc Markdown
+*reader* is the incomplete part — **502/652** on the spec — and
+`README.md` and `COMPATIBILITY.md` say where the rest of that gap is.
 
 ## 0.7.0 — 2026-08-26
 
