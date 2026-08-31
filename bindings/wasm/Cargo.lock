@@ -154,6 +154,7 @@ name = "ferrodoc-latex"
 version = "0.8.0"
 dependencies = [
  "ferrodoc-ast",
+ "ferrodoc-html",
 ]
 
 [[package]]
