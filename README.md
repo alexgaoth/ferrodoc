@@ -18,7 +18,7 @@ Any other language with an FFI links the C ABI in
 > **It is not a drop-in `pandoc`, and the number is in the repository.**
 > `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
 > from public Makefiles and CI files — through both binaries and compares
-> every byte: **40/48 identical**, with 0 refused for a missing flag. The
+> every byte: **41/48 identical**, with 0 refused for a missing flag. The
 > remaining 15 rows are classified by the gate: **8 are deliberate and 7
 > are implementation work**. Seven of the eight are one thing — a
 > standalone page's highlighting stylesheet, which pandoc takes from
@@ -329,7 +329,7 @@ at a time is what let the default flip.
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
 real pandoc command lines — collected from public Makefiles, CI files and
 scripts — through both binaries and compares every byte either wrote,
-stdout, output files and stderr. **40/48 command lines identical**, with
+stdout, output files and stderr. **41/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of

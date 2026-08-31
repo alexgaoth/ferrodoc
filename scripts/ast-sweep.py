@@ -368,9 +368,9 @@ def group_of(name):
     return "composition" if name.startswith("in/") else "flat"
 
 FLOORS = {"markdown": 159, "commonmark": 152, "gfm": 154, "html": 158,
-          "latex": 151, "rst": 160, "asciidoc": 160, "plain": 158}
+          "latex": 157, "rst": 160, "asciidoc": 160, "plain": 158}
 COMPOSITION = {"markdown": 116, "commonmark": 111, "gfm": 108, "html": 118,
-               "latex": 96, "rst": 83, "asciidoc": 95, "plain": 102}
+               "latex": 100, "rst": 83, "asciidoc": 95, "plain": 102}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"

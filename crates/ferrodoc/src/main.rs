@@ -798,6 +798,17 @@ fn render_fragment(
             wrap.unwrap_or(ferrodoc::Wrap::Auto(72)),
         ));
     }
+    // **The LaTeX writer highlights too, since 2026-08-31**, so it needs
+    // the same question asked of it. `Wrap::Preserve` rather than
+    // `Auto(72)` because that is this writer's own default and the flag
+    // must not quietly turn filling on.
+    #[cfg(feature = "latex")]
+    if to == Format::Latex && page.highlighting == ferrodoc::Highlighting::None {
+        return Ok(ferrodoc::render_latex_unhighlighted(
+            doc,
+            wrap.unwrap_or(ferrodoc::Wrap::Preserve),
+        ));
+    }
     // A fragment with `--id-prefix` needs the prefix on the footnote
     // identifiers too, and those are invented by the writer rather than
     // carried by the tree.

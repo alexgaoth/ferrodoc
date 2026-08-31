@@ -23,7 +23,16 @@ mod template;
 pub use page::{Page, write_page};
 
 #[cfg(feature = "highlight")]
-mod highlight;
+/// The syntax highlighter, exposed for the **LaTeX** writer.
+///
+/// Not part of the supported surface — `#[doc(hidden)]`, like
+/// `ferrodoc-docx`'s `xml` and `media`, which `ferrodoc-odt` and
+/// `ferrodoc-epub` are built on for the same reason. Pandoc highlights
+/// LaTeX with the same token classes it uses for HTML, so a second
+/// highlighter would be the same 4,000 lines with different names on the
+/// output.
+#[doc(hidden)]
+pub mod highlight;
 pub use read::{MAX_NESTING, read_html, read_html_without_generated_identifiers};
 
 /// What can go wrong reading HTML.

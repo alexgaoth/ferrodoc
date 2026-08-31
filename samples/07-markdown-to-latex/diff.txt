@@ -1,6 +1,6 @@
---- samples/07-markdown-to-latex/pandoc.tex	2026-08-31 08:13:31.519597510 -0700
-+++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-31 08:13:31.385597588 -0700
-@@ -1,138 +1,37 @@
+--- samples/07-markdown-to-latex/pandoc.tex	2026-08-31 14:08:22.721795029 -0700
++++ samples/07-markdown-to-latex/ferrodoc.tex	2026-08-31 14:08:22.591795110 -0700
+@@ -1,45 +1,27 @@
 -% Options for packages loaded elsewhere
 -\PassOptionsToPackage{unicode}{hyperref}
 -\PassOptionsToPackage{hyphens}{url}
@@ -29,7 +29,16 @@
 -  \usepackage[]{microtype}
 -  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
 -}{}
--\makeatletter
++\documentclass{article}
++\usepackage[T1]{fontenc}
++\usepackage[utf8]{inputenc}
++\usepackage{graphicx}
++\usepackage{longtable,booktabs}
++\providecommand{\st}[1]{{\leavevmode\setbox0=\hbox{#1}%
++  \rlap{\rule[0.5ex]{\wd0}{0.4pt}}\box0}}
++\providecommand{\tightlist}{%
++  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+ \makeatletter
 -\@ifundefined{KOMAClassName}{% if non-KOMA class
 -  \IfFileExists{parskip.sty}{%
 -    \usepackage{parskip}
@@ -38,45 +47,30 @@
 -    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
 -}{% if KOMA class
 -  \KOMAoptions{parskip=half}}
--\makeatother
++\newsavebox\pandoc@box
++\providecommand*\pandocbounded[1]{% scales image to fit in text height/width
++  \sbox\pandoc@box{#1}%
++  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
++  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
++  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi%
++  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
++  \else\usebox{\pandoc@box}%
++  \fi%
++}
+ \makeatother
 -\usepackage{color}
--\usepackage{fancyvrb}
++\usepackage{hyperref}
+ \usepackage{fancyvrb}
 -\newcommand{\VerbBar}{|}
 -\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
--\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
--% Add ',fontsize=\small' for more characters per line
--\newenvironment{Shaded}{}{}
--\newcommand{\AlertTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
--\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
--\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.49,0.56,0.16}{#1}}
--\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
--\newcommand{\BuiltInTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{#1}}
--\newcommand{\CharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
--\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textit{#1}}}
--\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
--\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.53,0.00,0.00}{#1}}
--\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
--\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.56,0.13,0.00}{#1}}
--\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
--\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.73,0.13,0.13}{\textit{#1}}}
--\newcommand{\ErrorTok}[1]{\textcolor[rgb]{1.00,0.00,0.00}{\textbf{#1}}}
--\newcommand{\ExtensionTok}[1]{#1}
--\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.25,0.63,0.44}{#1}}
--\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.02,0.16,0.49}{#1}}
--\newcommand{\ImportTok}[1]{\textcolor[rgb]{0.00,0.50,0.00}{\textbf{#1}}}
--\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
--\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{\textbf{#1}}}
--\newcommand{\NormalTok}[1]{#1}
--\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.40,0.40,0.40}{#1}}
--\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.00,0.44,0.13}{#1}}
--\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.74,0.48,0.00}{#1}}
--\newcommand{\RegionMarkerTok}[1]{#1}
--\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
--\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.73,0.40,0.53}{#1}}
--\newcommand{\StringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
--\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
--\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
--\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
++\usepackage{xcolor}
+ \DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+ % Add ',fontsize=\small' for more characters per line
+ \newenvironment{Shaded}{}{}
+@@ -74,65 +56,18 @@
+ \newcommand{\VariableTok}[1]{\textcolor[rgb]{0.10,0.09,0.49}{#1}}
+ \newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.25,0.44,0.63}{#1}}
+ \newcommand{\WarningTok}[1]{\textcolor[rgb]{0.38,0.63,0.69}{\textbf{\textit{#1}}}}
 -\usepackage{longtable,booktabs,array}
 -\newcounter{none} % for unnumbered tables
 -\usepackage{calc} % for calculating minipage widths
@@ -88,31 +82,21 @@
 -% Allow footnotes in longtable head/foot
 -\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
 -\makesavenoteenv{longtable}
-+\documentclass{article}
-+\usepackage[T1]{fontenc}
-+\usepackage[utf8]{inputenc}
- \usepackage{graphicx}
-+\usepackage{longtable,booktabs}
-+\providecommand{\st}[1]{{\leavevmode\setbox0=\hbox{#1}%
-+  \rlap{\rule[0.5ex]{\wd0}{0.4pt}}\box0}}
-+\providecommand{\tightlist}{%
-+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
- \makeatletter
- \newsavebox\pandoc@box
+-\usepackage{graphicx}
+-\makeatletter
+-\newsavebox\pandoc@box
 -\newcommand*\pandocbounded[1]{% scales image to fit in text height/width
-+\providecommand*\pandocbounded[1]{% scales image to fit in text height/width
-   \sbox\pandoc@box{#1}%
-   \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
-   \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
+-  \sbox\pandoc@box{#1}%
+-  \Gscale@div\@tempa{\textheight}{\dimexpr\ht\pandoc@box+\dp\pandoc@box\relax}%
+-  \Gscale@div\@tempb{\linewidth}{\wd\pandoc@box}%
 -  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi% select the smaller of both
-+  \ifdim\@tempb\p@<\@tempa\p@\let\@tempa\@tempb\fi%
-   \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
-   \else\usebox{\pandoc@box}%
-   \fi%
- }
+-  \ifdim\@tempa\p@<\p@\scalebox{\@tempa}{\usebox\pandoc@box}%
+-  \else\usebox{\pandoc@box}%
+-  \fi%
+-}
 -% Set default figure placement to htbp
 -\def\fps@figure{htbp}
- \makeatother
+-\makeatother
 -\ifLuaTeX
 -  \usepackage{luacolor}
 -  \usepackage[soul]{lua-ul}
@@ -132,7 +116,6 @@
 -\author{}
 -\date{}
 -
-+\usepackage{hyperref}
  \begin{document}
 -
  \section{Field Handbook}\label{field-handbook}
@@ -155,39 +138,18 @@
  
  \begin{quote}
  A conversion you cannot inspect is a conversion you cannot trust.
-@@ -194,22 +93,18 @@
+@@ -196,8 +131,8 @@
  
- Convert a directory in one pass:
- 
--\begin{Shaded}
--\begin{Highlighting}[]
+ \begin{Shaded}
+ \begin{Highlighting}[]
 -\FunctionTok{find}\NormalTok{ . }\AttributeTok{{-}name} \StringTok{\textquotesingle{}*.docx\textquotesingle{}} \AttributeTok{{-}print0} \KeywordTok{|}
 -  \FunctionTok{xargs} \AttributeTok{{-}0} \AttributeTok{{-}P8} \AttributeTok{{-}I\{\}}\NormalTok{ ferrodoc \{\} }\AttributeTok{{-}t}\NormalTok{ gfm }\AttributeTok{{-}o}\NormalTok{ \{\}.md}
--\end{Highlighting}
--\end{Shaded}
-+\begin{verbatim}
-+find . -name '*.docx' -print0 |
-+  xargs -0 -P8 -I{} ferrodoc {} -t gfm -o {}.md
-+\end{verbatim}
++\FunctionTok{find}\NormalTok{ . }\AttributeTok{-name} \StringTok{'*.docx'} \AttributeTok{-print0} \KeywordTok{|}
++  \FunctionTok{xargs} \AttributeTok{-0} \AttributeTok{-P8} \AttributeTok{-I\{\}}\NormalTok{ ferrodoc \{\} }\AttributeTok{-t}\NormalTok{ gfm }\AttributeTok{-o}\NormalTok{ \{\}.md}
+ \end{Highlighting}
+ \end{Shaded}
  
- The Python equivalent, for a pipeline that already has one:
- 
--\begin{Shaded}
--\begin{Highlighting}[]
--\ImportTok{import}\NormalTok{ ferrodoc}
--\ControlFlowTok{with} \BuiltInTok{open}\NormalTok{(}\StringTok{"report.docx"}\NormalTok{, }\StringTok{"rb"}\NormalTok{) }\ImportTok{as}\NormalTok{ f:}
--\NormalTok{    text }\OperatorTok{=}\NormalTok{ ferrodoc.convert(f.read(), }\StringTok{"docx"}\NormalTok{, }\StringTok{"gfm"}\NormalTok{)}
--\end{Highlighting}
--\end{Shaded}
-+\begin{verbatim}
-+import ferrodoc
-+with open("report.docx", "rb") as f:
-+    text = ferrodoc.convert(f.read(), "docx", "gfm")
-+\end{verbatim}
- 
- An indented code block, which is a different construct:
- 
-@@ -219,31 +114,28 @@
+@@ -219,31 +154,28 @@
  
  \subsection{Awkward cases, on purpose}\label{awkward-cases-on-purpose}
  
@@ -232,7 +194,7 @@
  
  Raw HTML block, which not every target format can hold.
  
-@@ -267,7 +159,6 @@
+@@ -267,7 +199,6 @@
  
  \subsection{Sign-off}\label{sign-off}
  

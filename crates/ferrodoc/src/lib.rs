@@ -953,6 +953,25 @@ pub fn render_html_with_id_prefix(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> 
     ferrodoc_html::write_html_wrapped(doc, id_prefix, wrap).into_bytes()
 }
 
+/// LaTeX with **no highlighting**: every code block is `verbatim`,
+/// whatever language it names.
+///
+/// `--syntax-highlighting=none` reaches the LaTeX writer through neither
+/// the page nor the wrap resolver, exactly as it did not reach the HTML
+/// writer before [`render_html_unhighlighted`] existed. Without this the
+/// flag was accepted and ignored, and `writers.sh` — which passes it to
+/// **both** binaries — read the LaTeX writer at 22/42 instead of 38/42.
+#[cfg(feature = "latex")]
+#[must_use]
+pub fn render_latex_unhighlighted(doc: &Pandoc, wrap: Wrap) -> Vec<u8> {
+    let wrap = match wrap {
+        Wrap::Auto(columns) => ferrodoc_latex::Wrap::Fill(columns),
+        Wrap::None => ferrodoc_latex::Wrap::None,
+        Wrap::Preserve => ferrodoc_latex::Wrap::Preserve,
+    };
+    ferrodoc_latex::write_latex_unhighlighted(doc, wrap).into_bytes()
+}
+
 /// The same fragment with code left uncoloured, which is what
 /// `--syntax-highlighting=none` asks for.
 #[cfg(feature = "html")]

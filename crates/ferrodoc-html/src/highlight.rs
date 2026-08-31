@@ -16,7 +16,7 @@ use std::fmt::Write as _;
 
 /// A token class, spelled as skylighting spells it in `class`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Class {
+pub enum Class {
     /// Not a token: ordinary text, written without a span.
     Normal,
     Keyword,
@@ -95,6 +95,86 @@ impl Class {
             Class::Warning => "wa",
         })
     }
+
+    /// The macro skylighting's LaTeX formatter wraps this class in.
+    ///
+    /// **`Normal` has one too**, unlike the HTML side where it is written
+    /// bare — but only when the run holds something other than
+    /// whitespace: pandoc writes `\NormalTok{ os}` after an import and
+    /// leaves a line's indent and the single spaces between tokens
+    /// alone. [`latex_line`] is where that split lives.
+    #[must_use]
+    pub fn latex(self) -> &'static str {
+        match self {
+            Class::Normal => "NormalTok",
+            Class::Keyword => "KeywordTok",
+            Class::ControlFlow => "ControlFlowTok",
+            Class::DataType => "DataTypeTok",
+            Class::DecVal => "DecValTok",
+            Class::BaseN => "BaseNTok",
+            Class::Float => "FloatTok",
+            Class::BuiltIn => "BuiltInTok",
+            Class::Str => "StringTok",
+            Class::Char => "CharTok",
+            Class::SpecialChar => "SpecialCharTok",
+            Class::Comment | Class::Docstring => "CommentTok",
+            Class::Documentation => "DocumentationTok",
+            Class::Operator => "OperatorTok",
+            Class::Preprocessor => "PreprocessorTok",
+            Class::Import => "ImportTok",
+            Class::Variable => "VariableTok",
+            Class::Attribute => "AttributeTok",
+            Class::SpecialString => "SpecialStringTok",
+            Class::Function => "FunctionTok",
+            Class::Extension => "ExtensionTok",
+            Class::Other => "OtherTok",
+            Class::VerbatimString => "VerbatimStringTok",
+            Class::Constant => "ConstantTok",
+            Class::Alert => "AlertTok",
+            Class::Information => "InformationTok",
+            Class::Error => "ErrorTok",
+            Class::Warning => "WarningTok",
+        }
+    }
+}
+
+/// One highlighted line, as skylighting's LaTeX formatter writes it.
+///
+/// Every rule here is `pandoc -f markdown -t latex` on a fenced block,
+/// read back a character at a time:
+///
+/// * a token becomes `\ClassTok{…}`, and a `Normal` run becomes
+///   `\NormalTok{…}` **unless it is nothing but whitespace**, which is
+///   written bare — a line's indent and the spaces between tokens;
+/// * inside a macro `\` is `\textbackslash{}`, `~` is
+///   `\textasciitilde{}`, `^` is `\^{}`, and `{ } # % & _` take a
+///   backslash;
+/// * **`$` is left alone**, which is the one that looks like a mistake
+///   and is not: `\StringTok{"$"}` is what pandoc writes.
+#[must_use]
+pub fn latex_line(pieces: &[(Class, String)]) -> String {
+    let mut out = String::new();
+    for (class, text) in pieces {
+        if *class == Class::Normal && text.chars().all(char::is_whitespace) {
+            out.push_str(text);
+            continue;
+        }
+        let _ = write!(out, "\\{}{{", class.latex());
+        for ch in text.chars() {
+            match ch {
+                '\\' => out.push_str("\\textbackslash{}"),
+                '~' => out.push_str("\\textasciitilde{}"),
+                '^' => out.push_str("\\^{}"),
+                '{' | '}' | '#' | '%' | '&' | '_' => {
+                    out.push('\\');
+                    out.push(ch);
+                }
+                _ => out.push(ch),
+            }
+        }
+        out.push('}');
+    }
+    out
 }
 
 /// One language's rules. Every field was measured against pandoc, and
@@ -1214,12 +1294,12 @@ fn syntax(name: &str) -> Option<&'static Syntax> {
 }
 
 /// Whether a code block written in `name` would be highlighted.
-pub(crate) fn known(name: &str) -> bool {
+pub fn known(name: &str) -> bool {
     syntax(name).is_some()
 }
 
 /// What `<code class="sourceCode …">` says for a block written `name`.
-pub(crate) fn canonical(name: &str) -> &'static str {
+pub fn canonical(name: &str) -> &'static str {
     syntax(name).map_or("", |syntax| syntax.canonical)
 }
 
@@ -1237,7 +1317,7 @@ pub(crate) enum Carried {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct State {
+pub struct State {
     /// What the line before left open, if anything.
     carried: Carried,
     /// How many `/* … */` are open. **Rust's block comments nest**, so a
@@ -1294,7 +1374,7 @@ impl Default for State {
 
 /// One line, as a run of `(class, text)` pieces with adjacent pieces of
 /// the same class already merged — pandoc emits one span per run.
-pub(crate) fn line(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)> {
+pub fn line(text: &str, name: &str, state: &mut State) -> Vec<(Class, String)> {
     alerted(uncommented(text, name, state))
 }
 

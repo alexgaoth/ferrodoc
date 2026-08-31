@@ -31,7 +31,7 @@ all = [
 
 # Syntax highlighting, for the languages `COMPATIBILITY.md` names. Off in
 # a trimmed build so its cost is measurable: see `claims.sh --sizes`.
-highlight = ["ferrodoc-html?/highlight"]
+highlight = ["ferrodoc-html?/highlight", "ferrodoc-latex?/highlight"]
 
 markdown = ["dep:ferrodoc-markdown"]
 html = ["dep:ferrodoc-html"]

@@ -1,7 +1,7 @@
 # Third-party notices
 
-ferrodoc is MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`). Two
-files in it are somebody else's, both under the **BSD 3-Clause** licence,
+ferrodoc is MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`). Three
+files in it are somebody else's, all under the **BSD 3-Clause** licence,
 and that licence asks for its notice in redistributions **in binary form**
 as well as in source — so this file ships beside the binaries, the wheels
 and the npm package, not only in the repository.
@@ -39,3 +39,15 @@ what is taken here is BSD-3 throughout. Full text and provenance:
 `crates/ferrodoc-html/styles/LICENSE`.
 
     Copyright (c) 2016-2022, John MacFarlane.
+
+## Skylighting's LaTeX highlighting preamble
+
+`crates/ferrodoc-latex/styles/highlight.tex` — the environments and token
+macros pandoc writes into a standalone LaTeX document that contains a
+highlighted code block, which are `styleToLaTeX pygments` from
+`skylighting-format-latex` (**BSD-3**, (C) 2016-2022 John MacFarlane).
+
+The same reasoning as the stylesheet above: BSD-3 throughout, because the
+GPL in skylighting is on the wrapper that bundles KDE's syntax
+definitions and ferrodoc reads none of them. Full text and provenance:
+`crates/ferrodoc-latex/styles/LICENSE`.

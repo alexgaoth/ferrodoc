@@ -78,8 +78,23 @@ pub enum Wrap {
 /// Render a document as a LaTeX fragment, laid out the way `--wrap` asks.
 #[must_use]
 pub fn write_latex_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
+    render(doc, wrap, true)
+}
+
+/// The same, with **no highlighting**: every code block is `verbatim`
+/// whatever language it names, which is `--syntax-highlighting=none`.
+///
+/// A separate entry point rather than a flag on the old one, because
+/// `ferrodoc-html` already spells it that way and a caller who wants the
+/// default should not have to say so.
+#[must_use]
+pub fn write_latex_unhighlighted(doc: &Pandoc, wrap: Wrap) -> String {
+    render(doc, wrap, false)
+}
+
+fn render(doc: &Pandoc, wrap: Wrap, colour: bool) -> String {
     let mut out = String::new();
-    blocks(&doc.blocks, 0, &mut out);
+    blocks(&doc.blocks, 0, colour, &mut out);
     lay_out(out.trim_end(), wrap) + "\n"
 }
 
@@ -199,6 +214,14 @@ fn fill(line: &str, columns: usize, force_soft: bool, depth: &mut usize, out: &m
 /// primitives instead, so the preamble needs nothing outside base LaTeX.
 pub fn write_latex_standalone(doc: &Pandoc) -> String {
     let mut out = String::from(PREAMBLE);
+    // **Only a document that highlights loads these**, which is the same
+    // rule as everything else in this preamble: `fancyvrb` and `xcolor`
+    // are not in `texlive-latex-base`, and a document with no highlighted
+    // code must still compile where they are missing. Pandoc gates
+    // `fancyvrb` the same way.
+    if highlights_something(doc) {
+        out.push_str(HIGHLIGHT_PREAMBLE);
+    }
     if let Some(title) = doc.meta.get("title") {
         let _ = writeln!(out, "\\title{{{}}}", meta_text(title));
     }
@@ -216,6 +239,62 @@ pub fn write_latex_standalone(doc: &Pandoc) -> String {
     out.push_str("\\end{document}\n");
     out
 }
+
+/// Whether any code block in the document names a language.
+///
+/// The condition [`highlighted`] uses, asked of the whole tree — and it
+/// has to reach **every** container, not the four a list and a quote
+/// make obvious: a code block in a table cell or a footnote needs the
+/// macros defined just as much, and a preamble that missed it would
+/// produce a document that does not compile.
+#[cfg(feature = "highlight")]
+fn highlights_something(doc: &Pandoc) -> bool {
+    fn walk(blocks: &[Block]) -> bool {
+        blocks.iter().any(|block| match block {
+            Block::CodeBlock(attr, _) => !attr.classes.is_empty(),
+            Block::Div(_, inner) | Block::BlockQuote(inner) | Block::Figure(_, _, inner) => {
+                walk(inner)
+            }
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                items.iter().any(|item| walk(item))
+            }
+            Block::DefinitionList(items) => {
+                items.iter().any(|(_, defs)| defs.iter().any(|d| walk(d)))
+            }
+            Block::Table(table) => table
+                .head
+                .rows
+                .iter()
+                .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+                .chain(&table.foot.rows)
+                .flat_map(|row| &row.cells)
+                .any(|cell| walk(&cell.blocks)),
+            _ => false,
+        })
+    }
+    walk(&doc.blocks)
+}
+
+#[cfg(not(feature = "highlight"))]
+fn highlights_something(_doc: &Pandoc) -> bool {
+    false
+}
+
+/// The packages and macros a highlighted block needs, appended to
+/// [`PREAMBLE`] only for a document that has one.
+///
+/// `styleToLaTeX pygments`, from skylighting's **BSD-3**
+/// `skylighting-format-latex`, on the same footing as the HTML
+/// stylesheet — see `styles/LICENSE`.
+#[cfg(feature = "highlight")]
+const HIGHLIGHT_PREAMBLE: &str = concat!(
+    "\\usepackage{fancyvrb}\n",
+    "\\usepackage{xcolor}\n",
+    include_str!("../styles/highlight.tex"),
+);
+
+#[cfg(not(feature = "highlight"))]
+const HIGHLIGHT_PREAMBLE: &str = "";
 
 const PREAMBLE: &str = concat!(
     "\\documentclass{article}\n",
@@ -272,11 +351,11 @@ const SECTIONS: &[&str] = &[
 /// The separation matters more than it looks: a blank line after an
 /// `\item` makes the item a separate paragraph, and pandoc then reads the
 /// whole list as `DefaultStyle` rather than the numbering it was given.
-fn blocks(list: &[Block], depth: usize, out: &mut String) {
+fn blocks(list: &[Block], depth: usize, colour: bool, out: &mut String) {
     let mut first = true;
     for block in list {
         let mut text = String::new();
-        block_to(block, depth, &mut text);
+        block_to(block, depth, colour, &mut text);
         let text = text.trim_end_matches('\n');
         // A raw block in somebody else's format renders to nothing, and
         // pandoc's separator goes with it: emitting the blank line anyway
@@ -294,10 +373,10 @@ fn blocks(list: &[Block], depth: usize, out: &mut String) {
     }
 }
 
-fn block_to(block: &Block, depth: usize, out: &mut String) {
+fn block_to(block: &Block, depth: usize, colour: bool, out: &mut String) {
     match block {
         Block::Plain(list) | Block::Para(list) => {
-            inlines(list, out);
+            inlines(list, colour, out);
             out.push('\n');
         }
         Block::LineBlock(lines) => {
@@ -307,36 +386,41 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
                 .iter()
                 .map(|line| {
                     let mut text = String::new();
-                    inlines(line, &mut text);
+                    inlines(line, colour, &mut text);
                     text
                 })
                 .collect();
             let _ = writeln!(out, "{}\n", rendered.join("\\\\\n"));
         }
-        Block::CodeBlock(_, code) => {
-            // `verbatim` rather than `lstlisting`: it needs no package, so
-            // the output compiles on a minimal TeX installation.
-            let _ = writeln!(out, "\\begin{{verbatim}}\n{}\n\\end{{verbatim}}", code.trim_end());
+        Block::CodeBlock(attr, code) => {
+            if let Some(text) = colour.then(|| highlighted(attr, code)).flatten() {
+                out.push_str(&text);
+            } else {
+                // `verbatim` rather than `lstlisting`: it needs no package,
+                // so the output compiles on a minimal TeX installation.
+                let _ =
+                    writeln!(out, "\\begin{{verbatim}}\n{}\n\\end{{verbatim}}", code.trim_end());
+            }
         }
         Block::BlockQuote(inner) => {
             out.push_str("\\begin{quote}\n");
-            blocks(inner, depth, out);
+            blocks(inner, depth, colour, out);
             out.push_str("\\end{quote}\n");
         }
-        Block::OrderedList(attrs, items) => ordered_list_to(attrs, items, depth, out),
+        Block::OrderedList(attrs, items) => ordered_list_to(attrs, items, depth, colour, out),
         Block::BulletList(items) => {
             out.push_str("\\begin{itemize}\n");
             tightlist(items, out);
             for item in items {
-                item_to(item, depth, out);
+                item_to(item, depth, colour, out);
             }
             out.push_str("\\end{itemize}\n");
         }
-        Block::DefinitionList(entries) => definition_list_to(entries, depth, out),
+        Block::DefinitionList(entries) => definition_list_to(entries, depth, colour, out),
         Block::Header(level, attr, list) => {
             let index = usize::try_from(*level).unwrap_or(1).saturating_sub(1);
             let mut rendered = String::new();
-            inlines(list, &mut rendered);
+            inlines(list, colour, &mut rendered);
             // Below `\subparagraph` LaTeX has nowhere to put a heading, and
             // pandoc writes the text as an ordinary paragraph rather than
             // pushing it into the deepest macro it has. Following it costs
@@ -362,7 +446,7 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
                     .cloned()
                     .collect();
                 let mut short = String::new();
-                inlines(&kept, &mut short);
+                inlines(&kept, colour, &mut short);
                 let _ = write!(out, "\\{macro_name}[{short}]");
             } else {
                 let _ = write!(out, "\\{macro_name}");
@@ -399,13 +483,13 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
             out.push('\n');
         }
         Block::HorizontalRule => out.push_str("\\begin{center}\\rule{0.5\\linewidth}{0.5pt}\\end{center}\n"),
-        Block::Table(table) => table_to(table, out),
+        Block::Table(table) => table_to(table, colour, out),
         Block::Figure(_, caption, inner) => {
             out.push_str("\\begin{figure}\n\\centering\n");
-            blocks(inner, depth, out);
+            blocks(inner, depth, colour, out);
             if !caption.blocks.is_empty() {
                 out.push_str("\\caption{");
-                caption_text(caption, out);
+                caption_text(caption, colour, out);
                 out.push_str("}\n");
             }
             out.push_str("\\end{figure}\n");
@@ -418,7 +502,7 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
                 label_to(&attr.identifier, out);
                 out.push('\n');
             }
-            blocks(inner, depth, out);
+            blocks(inner, depth, colour, out);
         }
         // Raw content is another format's syntax — except LaTeX's own,
         // which is passed through as written. That is the whole point of
@@ -436,6 +520,7 @@ fn block_to(block: &Block, depth: usize, out: &mut String) {
 fn definition_list_to(
     entries: &[(Vec<Inline>, Vec<Vec<Block>>)],
     depth: usize,
+    colour: bool,
     out: &mut String,
 ) {
             out.push_str("\\begin{description}\n");
@@ -449,7 +534,7 @@ fn definition_list_to(
             tightlist(&bodies, out);
             for (term, definitions) in entries {
                 out.push_str("\\item[");
-                inlines(term, out);
+                inlines(term, colour, out);
                 out.push_str("]\n");
                 // **A blank line between definitions.** Without it two
                 // definitions run into one paragraph.
@@ -457,7 +542,7 @@ fn definition_list_to(
                     if index > 0 {
                         out.push('\n');
                     }
-                    blocks(definition, depth, out);
+                    blocks(definition, depth, colour, out);
                 }
             }
             out.push_str("\\end{description}\n");
@@ -499,21 +584,27 @@ fn tightlist(items: &[Vec<Block>], out: &mut String) {
 ///
 /// A blank line stays empty: indenting it would put trailing whitespace
 /// where pandoc has none, and the bytes are the test.
-fn item_to(item: &[Block], depth: usize, out: &mut String) {
+fn item_to(item: &[Block], depth: usize, colour: bool, out: &mut String) {
     // A task item's box reaches this writer as the `☐`/`☒` the GFM reader
     // makes of it, and LaTeX's is the optional argument of `\item`.
     // Written as text it set as a missing glyph in most fonts.
     let (label, item) = task_box(item);
     let _ = writeln!(out, "\\item{label}");
     let mut text = String::new();
-    blocks(&item, depth, &mut text);
+    blocks(&item, depth, colour, &mut text);
     // A `verbatim` environment is flush left however deep it sits: its
     // content is literal, so two spaces of item indentation would be two
     // spaces of code. Pandoc renders it with `flush`, which is the same
     // rule stated in its own layout language.
+    //
+    // **`Shaded` is literal for the same reason** — it wraps a
+    // `Highlighting`, which is `fancyvrb`'s `Verbatim` — so a highlighted
+    // block in a list item needs the identical treatment. It did not get
+    // it the day highlighting landed, and every line of it came out two
+    // spaces to the right of pandoc's.
     let mut literal = false;
     for line in text.lines() {
-        if line == "\\begin{verbatim}" {
+        if line == "\\begin{verbatim}" || line == "\\begin{Shaded}" {
             literal = true;
         }
         if literal || line.is_empty() {
@@ -521,7 +612,7 @@ fn item_to(item: &[Block], depth: usize, out: &mut String) {
         } else {
             let _ = writeln!(out, "  {line}");
         }
-        if line == "\\end{verbatim}" {
+        if line == "\\end{verbatim}" || line == "\\end{Shaded}" {
             literal = false;
         }
     }
@@ -532,6 +623,7 @@ fn ordered_list_to(
     attrs: &ferrodoc_ast::ListAttributes,
     items: &[Vec<Block>],
     depth: usize,
+    colour: bool,
     out: &mut String,
 ) {
     out.push_str("\\begin{enumerate}\n");
@@ -564,7 +656,7 @@ fn ordered_list_to(
     }
     tightlist(items, out);
     for item in items {
-        item_to(item, depth + 1, out);
+        item_to(item, depth + 1, colour, out);
     }
     out.push_str("\\end{enumerate}\n");
 }
@@ -635,7 +727,7 @@ fn enumerate_style(style: ListNumberStyle, delim: ListNumberDelim, name: &str) -
     }
 }
 
-fn table_to(table: &Table, out: &mut String) {
+fn table_to(table: &Table, colour: bool, out: &mut String) {
     let columns = table.colspecs.len().max(1);
     // **A column stating its own width gets a `p{…}` of that width**,
     // which is how a table converted from DOCX, ODT or HTML keeps its
@@ -692,7 +784,7 @@ fn table_to(table: &Table, out: &mut String) {
     let _ = writeln!(out, "\\begin{{longtable}}[]{{@{{}}{spec}@{{}}}}");
     if captioned {
         out.push_str("\\caption{");
-        caption_text(&table.caption, out);
+        caption_text(&table.caption, colour, out);
         out.push_str("}\\tabularnewline\n");
     }
     // **The head and the foot are declared before the body.** `\endhead`
@@ -706,9 +798,9 @@ fn table_to(table: &Table, out: &mut String) {
         table.colspecs.iter().map(|colspec| ragged(colspec.alignment)).collect();
     for row in &table.head.rows {
         if sized {
-            row_to_boxed(row, columns, &aligns, &mut head);
+            row_to_boxed(row, columns, &aligns, colour, &mut head);
         } else {
-            row_to(row, columns, &mut head);
+            row_to(row, columns, colour, &mut head);
         }
     }
     if !table.head.rows.is_empty() {
@@ -727,11 +819,11 @@ fn table_to(table: &Table, out: &mut String) {
     out.push_str("\\endhead\n\\bottomrule\\noalign{}\n\\endlastfoot\n");
     for body in &table.bodies {
         for row in body.head.iter().chain(&body.body) {
-            row_to(row, columns, out);
+            row_to(row, columns, colour, out);
         }
     }
     for row in &table.foot.rows {
-        row_to(row, columns, out);
+        row_to(row, columns, colour, out);
     }
     out.push_str("\\end{longtable}\n");
     if !captioned {
@@ -743,13 +835,13 @@ fn table_to(table: &Table, out: &mut String) {
 /// row of a table whose columns state their widths: a `p{…}` column is
 /// bottom-aligned, so the header needs a box to sit in or it rides low
 /// against the rule. Body rows take no such wrapper.
-fn row_to_boxed(row: &Row, columns: usize, aligns: &[&str], out: &mut String) {
+fn row_to_boxed(row: &Row, columns: usize, aligns: &[&str], colour: bool, out: &mut String) {
     let cells: Vec<String> = row
         .cells
         .iter()
         .enumerate()
         .map(|(index, cell)| {
-            let text = cell_text(cell);
+            let text = cell_text(cell, colour);
             let ragged = aligns.get(index).copied().unwrap_or("\\raggedright");
             format!("\\begin{{minipage}}[b]{{\\linewidth}}{ragged}\n{text}\n\\end{{minipage}}")
         })
@@ -760,8 +852,8 @@ fn row_to_boxed(row: &Row, columns: usize, aligns: &[&str], out: &mut String) {
     let _ = writeln!(out, "{row} \\\\");
 }
 
-fn row_to(row: &Row, columns: usize, out: &mut String) {
-    let mut cells: Vec<String> = row.cells.iter().map(cell_text).collect();
+fn row_to(row: &Row, columns: usize, colour: bool, out: &mut String) {
+    let mut cells: Vec<String> = row.cells.iter().map(|c| cell_text(c, colour)).collect();
     cells.resize(columns, String::new());
     // `\\` and not `\tabularnewline`: both end a row, and pandoc writes
     // the short one. The row is trimmed first, so an empty cell at either
@@ -771,12 +863,12 @@ fn row_to(row: &Row, columns: usize, out: &mut String) {
     let _ = writeln!(out, "{} \\\\", row.trim_matches(|c: char| c.is_whitespace() || c == BREAK));
 }
 
-fn cell_text(cell: &Cell) -> String {
+fn cell_text(cell: &Cell, colour: bool) -> String {
     let mut out = String::new();
     for block in &cell.blocks {
         match block {
-            Block::Plain(list) | Block::Para(list) => inlines(list, &mut out),
-            other => block_to(other, 0, &mut out),
+            Block::Plain(list) | Block::Para(list) => inlines(list, colour, &mut out),
+            other => block_to(other, 0, colour, &mut out),
         }
     }
     // A cell is one line: a newline inside `&`-separated content ends the
@@ -785,11 +877,11 @@ fn cell_text(cell: &Cell) -> String {
     out.replace('\n', &BREAK.to_string()).trim().to_owned()
 }
 
-fn caption_text(caption: &Caption, out: &mut String) {
+fn caption_text(caption: &Caption, colour: bool, out: &mut String) {
     for block in &caption.blocks {
         match block {
-            Block::Plain(list) | Block::Para(list) => inlines(list, out),
-            other => block_to(other, 0, out),
+            Block::Plain(list) | Block::Para(list) => inlines(list, colour, out),
+            other => block_to(other, 0, colour, out),
         }
     }
 }
@@ -802,7 +894,7 @@ fn caption_text(caption: &Caption, out: &mut String) {
 /// renders to nothing — so `plus <br/> and` is `plus and` there and was
 /// `plus  and` here. The flag is what the `Doc` does implicitly: an empty
 /// render does not clear it, so the two spaces around it meet.
-fn inlines(list: &[Inline], out: &mut String) {
+fn inlines(list: &[Inline], colour: bool, out: &mut String) {
     let mut after_break = false;
     for inline in list {
         let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
@@ -810,7 +902,7 @@ fn inlines(list: &[Inline], out: &mut String) {
             continue;
         }
         let mut piece = String::new();
-        inline_to(inline, &mut piece);
+        inline_to(inline, colour, &mut piece);
         if piece.is_empty() {
             continue;
         }
@@ -819,10 +911,10 @@ fn inlines(list: &[Inline], out: &mut String) {
     }
 }
 
-fn inline_to(inline: &Inline, out: &mut String) {
+fn inline_to(inline: &Inline, colour: bool, out: &mut String) {
     let wrap = |name: &str, inner: &[Inline], out: &mut String| {
         let _ = write!(out, "\\{name}{{");
-        inlines(inner, out);
+        inlines(inner, colour, out);
         out.push('}');
     };
     match inline {
@@ -847,7 +939,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
                 QuoteType::DoubleQuote => ("``", "''"),
             };
             out.push_str(open);
-            inlines(inner, out);
+            inlines(inner, colour, out);
             out.push_str(close);
         }
         // **A span is braced, and an identifier on it is an anchor.**
@@ -857,12 +949,12 @@ fn inline_to(inline: &Inline, out: &mut String) {
         Inline::Span(attr, inner) => {
             label_to(&attr.identifier, out);
             out.push('{');
-            inlines(inner, out);
+            inlines(inner, colour, out);
             out.push('}');
         }
         // A citation is its content: LaTeX has no form that survives
         // pandoc's reader.
-        Inline::Cite(_, inner) => inlines(inner, out),
+        Inline::Cite(_, inner) => inlines(inner, colour, out),
         Inline::Code(_, code) => out.push_str(&verbatim(code)),
         Inline::Math(kind, math) => {
             let (open, close) = match kind {
@@ -904,7 +996,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
                 let _ = write!(out, "\\href{{{url}}}{{\\nolinkurl{{{}}}}}", escape_url(&text));
             } else {
                 let _ = write!(out, "\\href{{{url}}}{{");
-                inlines(inner, out);
+                inlines(inner, colour, out);
                 out.push('}');
             }
         }
@@ -913,7 +1005,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
             // `\includegraphics` has for it, and without it the words are
             // simply gone.
             let mut text = String::new();
-            inlines(alt, &mut text);
+            inlines(alt, colour, &mut text);
             // The whole picture is one unbreakable unit: pandoc never
             // breaks inside `alt={…}` however narrow the column, so the
             // marks come out of the alt text here.
@@ -938,7 +1030,7 @@ fn inline_to(inline: &Inline, out: &mut String) {
             out.push_str("\\footnote{");
             out.push(IN);
             let mut text = String::new();
-            blocks(blocks_in_note, 0, &mut text);
+            blocks(blocks_in_note, 0, colour, &mut text);
             // Every line but the first is indented two, the way an
             // `\item`'s content is: a footnote of more than one block is
             // laid out as a block, not run together.
@@ -1253,6 +1345,50 @@ fn escape_url(url: &str) -> String {
 /// probed with `pandoc -f json -t latex`: a space becomes `\ ` so runs of
 /// them survive, and a backtick becomes `\textasciigrave{}` so it cannot
 /// pair with another into a typographic quote.
+/// A highlighted code block, or `None` where there is nothing to
+/// highlight it with.
+///
+/// Pandoc wraps highlighted code in `Shaded` around `Highlighting`, both
+/// defined by its own preamble, and colours each token with a
+/// `\ClassTok` macro. The condition is the one the HTML writer already
+/// uses: the block names a language the highlighter knows.
+#[cfg(feature = "highlight")]
+fn highlighted(attr: &ferrodoc_ast::Attr, code: &str) -> Option<String> {
+    use ferrodoc_html::highlight;
+    // **Naming *a* language is the condition, not naming a known one.**
+    // ```` ```zzz ```` gets `Shaded` from pandoc with every line one
+    // `\NormalTok`, and only a fence with no class at all gets
+    // `verbatim`. Asking `known()` here instead sent `text` and every
+    // other unknown language down the `verbatim` path.
+    if attr.classes.is_empty() {
+        return None;
+    }
+    let language = attr.classes.iter().find(|class| highlight::known(class));
+    let mut state = highlight::State::default();
+    let mut out = String::from("\\begin{Shaded}\n\\begin{Highlighting}[]\n");
+    for source in code.trim_end().split('\n') {
+        // A tab is four columns here, which is what pandoc's own reader
+        // has already done to a known language and has not to this one.
+        let source = source.replace('\t', "    ");
+        let pieces = match language {
+            Some(language) => highlight::line(&source, highlight::canonical(language), &mut state),
+            None => vec![(highlight::Class::Normal, source)],
+        };
+        out.push_str(&highlight::latex_line(&pieces));
+        out.push('\n');
+    }
+    out.push_str("\\end{Highlighting}\n\\end{Shaded}\n");
+    Some(out)
+}
+
+/// Without the feature there is no highlighter, so every block is
+/// `verbatim` — which is what this writer did for every block until
+/// 2026-08-31.
+#[cfg(not(feature = "highlight"))]
+fn highlighted(_attr: &ferrodoc_ast::Attr, _code: &str) -> Option<String> {
+    None
+}
+
 fn verbatim(code: &str) -> String {
     let mut out = String::with_capacity(code.len() + 8);
     out.push_str("\\texttt{");
@@ -1279,16 +1415,19 @@ fn verbatim(code: &str) -> String {
 /// A metadata value as plain text for the preamble.
 fn meta_text(value: &ferrodoc_ast::MetaValue) -> String {
     use ferrodoc_ast::MetaValue;
+    // Preamble text — a title or an author. Nothing here reaches a code
+    // block, so the flag below never decides anything.
+    let colour = false;
     match value {
         MetaValue::MetaString(text) => escape(text),
         MetaValue::MetaInlines(list) => {
             let mut out = String::new();
-            inlines(list, &mut out);
+            inlines(list, colour, &mut out);
             out
         }
         MetaValue::MetaBlocks(list) => {
             let mut out = String::new();
-            blocks(list, 0, &mut out);
+            blocks(list, 0, colour, &mut out);
             out.trim().to_owned()
         }
         // Several authors are `\and`-separated, which is what `\author`

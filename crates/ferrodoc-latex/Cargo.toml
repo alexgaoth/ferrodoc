@@ -12,8 +12,20 @@ categories.workspace = true
 
 readme = "../../README.md"
 
+[features]
+# Off by default: a LaTeX writer that pulls in the HTML crate for its
+# highlighter is a size decision, and the facade turns it on with every
+# other `highlight`.
+default = []
+highlight = ["dep:ferrodoc-html"]
+
 [dependencies]
 ferrodoc-ast = { workspace = true }
+# **For the highlighter only.** Pandoc colours LaTeX with the same token
+# classes it uses for HTML, so this reuses that tokenizer rather than
+# growing a second one — the same reason `ferrodoc-odt` is built on
+# `ferrodoc-docx`'s `xml`.
+ferrodoc-html = { workspace = true, optional = true }
 
 [lints]
 workspace = true
