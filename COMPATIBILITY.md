@@ -2098,7 +2098,7 @@ gate from 3/3 to 1/3.
 
 It is also writable, and since 2026-08-28 it is what `-t markdown`
 means — the same name pandoc gives it. `scripts/writers.sh` measures it
-at **23/40** byte-identical documents (both preserved and filled
+at **30/42** byte-identical documents (both preserved and filled
 wrapping); the CommonMark writer, still reachable as `-t commonmark`, is
 a different output dialect and scored 6/40 against that particular
 pandoc writer while it held the name.
@@ -2113,6 +2113,34 @@ They were found by sweeping 42 shapes against `pandoc -f markdown -t json`;
 | `H~2 O~` — a space inside subscript | literal text | `Subscript` |
 | `a^^b` — an empty superscript | `Superscript []` | literal text |
 | a metadata block that is **not** the first thing in the file | read as metadata | read as a thematic break and a heading, as `CommonMark` does |
+| ```` ```rust ignore ```` — a fence whose info string is **two bare words** | not a fence at all: the backticks open an inline code span | a `CodeBlock` of class `rust`, as `CommonMark` and `gfm` do |
+| `outer` then `> inner` with no blank line between | literal `>`: a blockquote cannot interrupt a paragraph | a `BlockQuote`, as `CommonMark` does |
+
+Both of the last two are **block**-level rules, and the reader is comrak,
+whose block parsing is CommonMark's and has no option for either. Matching
+them means not seeing a fence, or not seeing a quote, that comrak has
+already parsed — so each would be re-parsing rather than a mapping. They
+are what `dropin-004`, `dropin-024` and `dropin-039` differ on:
+
+    printf '```rust ignore\nx\n```\n' | pandoc -f markdown -t json
+    printf 'outer\n> inner\n'          | pandoc -f markdown -t json
+
+A single bare word and an attribute block are both read here exactly as
+pandoc reads them; it is only the multi-word form that parts.
+
+**`markdown_github` is not `gfm`, whatever its own warning says.** Pandoc
+prints `Deprecated: markdown_github. Use gfm instead.` and then reads the
+document *differently* from `gfm`: an ordered list comes back
+`DefaultStyle`/`DefaultDelim` rather than `Decimal`/`Period`, which the
+HTML writer turns into a bare `<ol>` rather than `<ol type="1">`. It is
+not reachable as an extension either — `gfm-fancy_lists` still gives
+`Decimal`. This reads the alias as `gfm`, so it differs on any ordered
+list:
+
+    printf '1. a\n2. b\n' | pandoc -f markdown_github -t json
+    printf '1. a\n2. b\n' | pandoc -f gfm             -t json
+
+`dropin-011` and `dropin-043` are the two rows that use the alias.
 
 The first three are comrak's rules for `^…^` and `~…~` rather than
 pandoc's, and reconstructing the literal text for them would mean
