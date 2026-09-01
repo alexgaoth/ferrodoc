@@ -107,7 +107,16 @@ impl Format {
                 Some(Format::PandocMarkdown)
             }
             "commonmark" => Some(Format::Markdown),
-            "gfm" | "markdown_github" => Some(Format::Gfm),
+            "gfm" => Some(Format::Gfm),
+            // **`markdown_github` is not `gfm`**, whatever pandoc's own
+            // deprecation notice says. It is pandoc's *markdown* reader
+            // with GitHub's extensions, and it differs from `gfm` on
+            // fences, raw HTML, table cells and list markers — measured
+            // one construct at a time. Reading it as `gfm` differed from
+            // pandoc on two of the 48 real command lines; reading it as
+            // the dialect matches both. The one thing left over is the
+            // list marker, which the CLI takes off afterwards.
+            "markdown_github" => Some(Format::PandocMarkdown),
             // `html5` is pandoc's own spelling and produces identical
             // bytes there; a Makefile writing `-t html5` was refused for
             // a name. `html4` is *not* an alias — pandoc's html4 writer
@@ -953,6 +962,26 @@ pub fn render_html_with_id_prefix(doc: &Pandoc, id_prefix: &str, wrap: Wrap) -> 
     ferrodoc_html::write_html_wrapped(doc, id_prefix, wrap).into_bytes()
 }
 
+/// Read pandoc's deprecated `markdown_github`.
+///
+/// It resolves to [`Format::PandocMarkdown`] for everything else — the
+/// writers, the flag checks — because that is what it is: pandoc's
+/// markdown with GitHub's extensions. The *reader* differs from it in
+/// two measured places, `implicit_figures` and `smart`, and in its list
+/// markers, so the CLI asks for it by name.
+///
+/// # Errors
+///
+/// [`Error::Invalid`] for input that is not UTF-8, or a YAML metadata
+/// block outside the subset the dialect reads.
+#[cfg(feature = "markdown")]
+pub fn parse_markdown_github(input: &[u8]) -> Result<Pandoc, Error> {
+    let text = std::str::from_utf8(input)
+        .map_err(|_| Error::Invalid { format: Format::PandocMarkdown, detail: "not UTF-8".into() })?;
+    ferrodoc_markdown::read_markdown_github(text)
+        .map_err(|e| Error::Invalid { format: Format::PandocMarkdown, detail: e.to_string() })
+}
+
 /// LaTeX with **no highlighting**: every code block is `verbatim`,
 /// whatever language it names.
 ///
@@ -1351,7 +1380,7 @@ mod tests {
         // being refused for its name alone; `pandoc -t html5` and
         // `pandoc -t html` write the same bytes.
         assert_eq!(Format::parse("html5"), Some(Format::Html));
-        assert_eq!(Format::parse("markdown_github"), Some(Format::Gfm));
+        assert_eq!(Format::parse("markdown_github"), Some(Format::PandocMarkdown));
         // Not aliases: pandoc's html4 writer differs on real constructs
         // and `markdown_strict` is a different dialect, so both are
         // refused by name rather than answered wrongly.

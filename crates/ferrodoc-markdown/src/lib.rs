@@ -130,6 +130,22 @@ pub fn read_pandoc_markdown(input: &str) -> Result<Pandoc, Error> {
     read(input, Dialect::Pandoc)
 }
 
+/// Pandoc's deprecated `markdown_github`.
+///
+/// **It is not `gfm`.** Pandoc prints "Deprecated: `markdown_github`. Use
+/// gfm instead." and then reads the document as its *markdown* with
+/// GitHub's extensions — differing from `gfm` on fences, raw HTML, table
+/// cells and list markers, and from `-f markdown` in having
+/// `implicit_figures` and `smart` off. All four measured against the
+/// pinned binary.
+///
+/// # Errors
+///
+/// The same as [`read_pandoc_markdown`].
+pub fn read_markdown_github(input: &str) -> Result<Pandoc, Error> {
+    read(input, Dialect::MarkdownGithub)
+}
+
 /// Which markdown. The three disagree on real documents, so the reader is
 /// told which one it is reading rather than guessing from the content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,12 +153,27 @@ enum Dialect {
     Commonmark,
     Gfm,
     Pandoc,
+    /// Pandoc's deprecated `markdown_github`: the **dialect** reader with
+    /// GitHub's extensions, and two of pandoc's own defaults off. Not
+    /// `gfm`, whatever its deprecation notice says — it differs from it
+    /// on fences, raw HTML, table cells and list markers.
+    MarkdownGithub,
 }
 
 impl Dialect {
     /// Everything `gfm` reads, `pandoc_markdown` reads too.
     fn is_extended(self) -> bool {
-        matches!(self, Dialect::Gfm | Dialect::Pandoc)
+        !matches!(self, Dialect::Commonmark)
+    }
+
+    /// Whether this is pandoc's markdown, under either spelling.
+    ///
+    /// **A method rather than 24 `== Dialect::Pandoc`s**, so that adding
+    /// `MarkdownGithub` could not silently give it `CommonMark`'s
+    /// behaviour at a site somebody forgot — which is exactly what
+    /// adding `Flavour::Ipynb` did to the writer.
+    fn is_pandoc(self) -> bool {
+        matches!(self, Dialect::Pandoc | Dialect::MarkdownGithub)
     }
 }
 
@@ -168,7 +199,7 @@ if dialect.is_extended() {
 // Probed: `pandoc -f gfm` links a bare `example.com`; `pandoc -f
 // markdown` does not, so this one belongs to gfm alone.
 options.extension.autolink = dialect == Dialect::Gfm;
-if dialect == Dialect::Pandoc {
+if dialect.is_pandoc() {
     // Each of the four is a construct `-f markdown` reads and
     // `-f commonmark` does not; each is probed in the crate's
     // `CLAUDE.md` against `pandoc -f markdown -t json`.
@@ -186,7 +217,9 @@ if dialect == Dialect::Pandoc {
     // turns `--` into an en dash, `---` into an em dash, `...` into
     // an ellipsis, and the quotes into curly ones — and a *pair* of
     // those becomes a `Quoted` element, which `quoted` does.
-    options.parse.smart = true;
+    // **Not for `markdown_github`**, which is where pandoc turns it off:
+    // `Pandoc's` stays straight there and curls under `-f markdown`.
+    options.parse.smart = dialect == Dialect::Pandoc;
 }
     options
 }
@@ -200,7 +233,7 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
     // comrak does not recognise an **empty** front-matter block, so
     // `---\n---` reaches the parser as two thematic breaks where pandoc
     // reads an empty metadata block and emits nothing.
-    if dialect == Dialect::Pandoc {
+    if dialect.is_pandoc() {
         for opening in ["---\n---\n", "---\r\n---\r\n"] {
             if let Some(rest) = prepared.strip_prefix(opening) {
                 prepared = Cow::Owned(rest.trim_start_matches(['\n', '\r']).to_owned());
@@ -226,7 +259,7 @@ fn read(input: &str, dialect: Dialect) -> Result<Pandoc, Error> {
         Identifiers { seen: HashMap::new(), dialect }.assign(&mut blocks);
     }
     let mut document = Pandoc::new(blocks);
-    if dialect == Dialect::Pandoc {
+    if dialect.is_pandoc() {
         document.meta = front_matter(root)?;
     }
     Ok(document)
@@ -989,7 +1022,7 @@ fn native_spans(tokens: Vec<Inline>) -> Vec<Inline> {
 /// destination already carrying `%20` is not encoded a second time.
 fn escape_uri(dialect: Dialect, url: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    if dialect != Dialect::Pandoc {
+    if !dialect.is_pandoc() {
         return url.to_owned();
     }
     let mut out = String::with_capacity(url.len());
@@ -1009,7 +1042,7 @@ fn escape_uri(dialect: Dialect, url: &str) -> String {
 }
 
 fn autolink_class(dialect: Dialect, text: &[Inline], url: &str) -> Attr {
-    if dialect != Dialect::Pandoc {
+    if !dialect.is_pandoc() {
         return Attr::default();
     }
     let [Inline::Str(literal)] = text else {
@@ -1357,7 +1390,7 @@ fn blocks<'a>(
         // block-level tag is a `RawBlock` of its own and what lies
         // between two of them is markdown.
         let html = match &node.data.borrow().value {
-            NodeValue::HtmlBlock(hb) if dialect == Dialect::Pandoc => {
+            NodeValue::HtmlBlock(hb) if dialect.is_pandoc() => {
                 Some(html_literal(hb, &node.data.borrow(), src, in_quote))
             }
             _ => None,
@@ -1379,7 +1412,7 @@ fn blocks<'a>(
             // requiring `Para` meant the rule below never fired once.
             // What comes out is a `Para`, because the paragraph now runs
             // to the blank line past the quote.
-            let adjacent = dialect == Dialect::Pandoc
+            let adjacent = dialect.is_pandoc()
                 && last_end + 1 == node.data.borrow().sourcepos.start.line
                 && matches!(out.last(), Some(Block::Para(_) | Block::Plain(_)));
             // A quote is the other construct that cannot interrupt a
@@ -1422,14 +1455,14 @@ fn blocks<'a>(
                         out.push(Block::Para(merged));
                     }
                 }
-                (_, block) if dialect == Dialect::Pandoc => split_leading_html(block, &mut out),
+                (_, block) if dialect.is_pandoc() => split_leading_html(block, &mut out),
                 (_, block) => out.push(block),
             }
         }
         last_end = node.data.borrow().sourcepos.end.line;
         absorbed = false;
     }
-    if dialect == Dialect::Pandoc { native_divs(out, 0) } else { out }
+    if dialect.is_pandoc() { native_divs(out, 0) } else { out }
 }
 
 /// Map one comrak list, splitting it wherever a task item meets a plain
@@ -1489,6 +1522,20 @@ fn lists<'a>(
                 .collect();
             match nl.list_type {
                 ListType::Bullet => Block::BulletList(items),
+                // **`fancy_lists` is off in `markdown_github`**, and a
+                // list with no fancy marker carries no style or delimiter
+                // at all: `1.` is `DefaultStyle`/`DefaultDelim` there and
+                // `Decimal`/`Period` in the other two, so the HTML writer
+                // gives it a bare `<ol>`. Not reachable as an extension —
+                // `gfm-fancy_lists` still says `Decimal`.
+                ListType::Ordered if dialect == Dialect::MarkdownGithub => Block::OrderedList(
+                    ListAttributes {
+                        start: i64::try_from(nl.start).unwrap_or(i64::MAX),
+                        style: ListNumberStyle::DefaultStyle,
+                        delim: ListNumberDelim::DefaultDelim,
+                    },
+                    items,
+                ),
                 ListType::Ordered => Block::OrderedList(
                     ListAttributes {
                         start: i64::try_from(nl.start).unwrap_or(i64::MAX),
@@ -1545,11 +1592,23 @@ fn paragraph<'a>(
     {
         return Block::HorizontalRule;
     }
+    // `implicit_figures` is off in `markdown_github`, so a lone image is
+    // a paragraph there and a `Figure` under `-f markdown`. Measured.
     if dialect == Dialect::Pandoc
         && let [Inline::Image(attr, alt, target)] = content.as_slice()
         && !alt.is_empty()
     {
         return implicit_figure(attr, alt, target);
+    }
+    // A paragraph whose second line is a delimiter row is a table pandoc
+    // reads and comrak refuses — see [`pipe_table`].
+    if dialect.is_pandoc() {
+        let lines: Vec<&str> = (data.sourcepos.start.line..=data.sourcepos.end.line)
+            .map(|number| src.line(number))
+            .collect();
+        if let Some(table) = pipe_table(&lines, defs, dialect) {
+            return Block::Table(Box::new(table));
+        }
     }
     // Pandoc's `para` falls back to `plain` when no blank line follows,
     // and that is a rule about *every* paragraph, not only the ones
@@ -1564,7 +1623,7 @@ fn paragraph<'a>(
     // directly inside a **list item** is left alone: the list's own
     // tightness decides there, and reading the next source line instead
     // made every item but the last of a loose list a `Plain`.
-    if dialect == Dialect::Pandoc && !in_item(node) {
+    if dialect.is_pandoc() && !in_item(node) {
         let next = src.line(data.sourcepos.end.line + 1).trim();
         let fence = next.starts_with("```") || next.starts_with("~~~");
         // A `</div>` is not left on the next line: `native_divs` takes
@@ -1736,10 +1795,10 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
             // the block to the end of its container. Measured at the top
             // level, inside a block quote and inside a list item, closed
             // and unclosed.
-            if dialect == Dialect::Pandoc && cb.fenced && !cb.closed {
+            if dialect.is_pandoc() && cb.fenced && !cb.closed {
                 return Some(unclosed_fence(&cb.literal, src, &data));
             }
-            if dialect == Dialect::Pandoc && rejected_fence(cb, &data) {
+            if dialect.is_pandoc() && rejected_fence(cb, &data) {
                 return Some(Block::Para(vec![rejected_fence_code(cb)]));
             }
             let keep_literal = cb.fenced
@@ -1767,7 +1826,7 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
                         .split_whitespace()
                         .next()
                         .map(|lang| {
-                            vec![if dialect == Dialect::Pandoc {
+                            vec![if dialect.is_pandoc() {
                                 lang.to_lowercase()
                             } else {
                                 lang.to_owned()
@@ -1867,7 +1926,7 @@ fn task_marker(
     //
     // For pandoc's dialect the emptiness decides on its own — `1. [ ]`
     // with nothing after it is literal in both.
-    let boxed = if dialect == Dialect::Pandoc {
+    let boxed = if dialect.is_pandoc() {
         !empty
     } else {
         list_type == ListType::Bullet
@@ -1935,6 +1994,12 @@ fn pandoc_row_cells(line: &str) -> Option<Vec<String>> {
     if !line.contains('`') {
         return None;
     }
+    Some(split_row(line))
+}
+
+/// The split itself, which [`pipe_table`] needs for every row rather than
+/// only the ones holding a backtick.
+fn split_row(line: &str) -> Vec<String> {
     let mut cells = Vec::new();
     let mut current = String::new();
     let mut chars = line.chars().peekable();
@@ -1980,7 +2045,92 @@ fn pandoc_row_cells(line: &str) -> Option<Vec<String>> {
     if cells.last().is_some_and(|c| c.trim().is_empty()) {
         cells.pop();
     }
-    Some(cells)
+    cells
+}
+
+/// The alignment a delimiter cell asks for, or `None` where the cell is
+/// not a delimiter at all — which is what decides whether a paragraph is
+/// really a table.
+fn delimiter_alignment(cell: &str) -> Option<Alignment> {
+    let cell = cell.trim();
+    let left = cell.starts_with(':');
+    let right = cell.ends_with(':') && cell.len() > 1;
+    let dashes = &cell[usize::from(left)..cell.len() - usize::from(right)];
+    if dashes.is_empty() || !dashes.bytes().all(|b| b == b'-') {
+        return None;
+    }
+    Some(match (left, right) {
+        (true, true) => Alignment::AlignCenter,
+        (true, false) => Alignment::AlignLeft,
+        (false, true) => Alignment::AlignRight,
+        (false, false) => Alignment::AlignDefault,
+    })
+}
+
+/// A pipe table pandoc reads and comrak does not.
+///
+/// **The delimiter row decides the column count**, and the header is cut
+/// or padded to it: `| a | b |` over `| - |` is a one-column table
+/// holding `a`, and `| a |` over `| - | - |` is a two-column one whose
+/// second cell is empty. GFM requires the two rows to agree, comrak
+/// implements that, and the whole thing stays a paragraph — which is what
+/// `dropin-043` differed on.
+///
+/// Only ever reached for a paragraph, so a table comrak *did* build is
+/// untouched.
+fn pipe_table(lines: &[&str], defs: &Notes, dialect: Dialect) -> Option<Table> {
+    let [header, delimiter, rest @ ..] = lines else { return None };
+    if !header.contains('|') {
+        return None;
+    }
+    let aligns: Vec<Alignment> =
+        split_row(delimiter).iter().map(|c| delimiter_alignment(c)).collect::<Option<_>>()?;
+    if aligns.is_empty() {
+        return None;
+    }
+    let row = |line: &str| {
+        let mut texts = split_row(line);
+        texts.resize(aligns.len(), String::new());
+        Row {
+            attr: Attr::default(),
+            cells: texts
+                .iter()
+                .map(|text| {
+                    let content = match fragment(text.trim(), defs, dialect).as_slice() {
+                        [Block::Plain(inlines) | Block::Para(inlines)] => inlines.clone(),
+                        _ => Vec::new(),
+                    };
+                    Cell {
+                        attr: Attr::default(),
+                        alignment: Alignment::AlignDefault,
+                        row_span: 1,
+                        col_span: 1,
+                        blocks: if content.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![Block::Plain(content)]
+                        },
+                    }
+                })
+                .collect(),
+        }
+    };
+    Some(Table {
+        attr: Attr::default(),
+        caption: Caption::default(),
+        colspecs: aligns
+            .iter()
+            .map(|a| ColSpec { alignment: *a, width: ColWidth::ColWidthDefault })
+            .collect(),
+        head: TableHead { attr: Attr::default(), rows: vec![row(header)] },
+        bodies: vec![TableBody {
+            attr: Attr::default(),
+            row_head_columns: 0,
+            head: Vec::new(),
+            body: rest.iter().map(|line| row(line)).collect(),
+        }],
+        foot: TableFoot::default(),
+    })
 }
 
 fn table<'a>(
@@ -2001,7 +2151,7 @@ fn table<'a>(
         // Pandoc's own split where the row holds a backtick, comrak's
         // otherwise — and comrak's is right for `gfm`, which is why this
         // asks the dialect rather than replacing the cells outright.
-        let repartition = (dialect == Dialect::Pandoc)
+        let repartition = (dialect.is_pandoc())
             .then(|| pandoc_row_cells(src.line(n.data.borrow().sourcepos.start.line)))
             .flatten();
         let cells = match repartition {
@@ -2010,6 +2160,18 @@ fn table<'a>(
                 .map(|text| {
                     let content = match fragment(text.trim(), defs, dialect).as_slice() {
                         [Block::Plain(inlines) | Block::Para(inlines)] => inlines.clone(),
+                        // **A cell is not a figure.** A paragraph that is
+                        // nothing but an image becomes one in this
+                        // dialect, and `fragment` builds paragraphs — so
+                        // `![i](p)` in a cell came back empty. The reader
+                        // already knows a cell is exempt: the transform
+                        // happens where a paragraph is built, and a cell
+                        // never goes through one. Undone here rather than
+                        // reached around.
+                        [Block::Figure(_, _, inner)] => match inner.as_slice() {
+                            [Block::Plain(inlines) | Block::Para(inlines)] => inlines.clone(),
+                            _ => Vec::new(),
+                        },
                         _ => Vec::new(),
                     };
                     cell_of(content)
@@ -2117,7 +2279,7 @@ impl Identifiers {
 /// counts, not just the ASCII space — pandoc slugs a heading holding a
 /// non-breaking space as `a-b`, not `ab`.
 pub(crate) fn slug(text: &str, dialect: Dialect) -> String {
-    if dialect != Dialect::Pandoc {
+    if !dialect.is_pandoc() {
         let mut out = String::with_capacity(text.len());
         for ch in text.chars() {
             if ch.is_whitespace() {
@@ -2200,7 +2362,7 @@ fn inlines<'a>(nodes: impl Iterator<Item = &'a AstNode<'a>>, defs: &Notes, diale
         inline(node, &mut out, defs, dialect);
     }
     let out = merge_adjacent_emphasis(out);
-    if dialect == Dialect::Pandoc { pandoc_inlines(out) } else { out }
+    if dialect.is_pandoc() { pandoc_inlines(out) } else { out }
 }
 
 /// The three pairings pandoc's dialect makes over one sibling list.
@@ -2389,7 +2551,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
             // there and ` a` here, and `` ` ` `` is empty. **ASCII
             // whitespace only** — a non-breaking space is content, and
             // trimming it took spec example 333 with it.
-            let literal = if dialect == Dialect::Pandoc {
+            let literal = if dialect.is_pandoc() {
                 c.literal.trim_matches(|c: char| c.is_ascii_whitespace()).to_owned()
             } else {
                 c.literal.clone()
@@ -2401,7 +2563,7 @@ fn inline<'a>(node: &'a AstNode<'a>, out: &mut Vec<Inline>, defs: &Notes, dialec
             // literal text they are written with in pandoc's markdown,
             // not raw HTML. Measured: of the `<!` forms only a comment
             // is raw, and `CommonMark` takes all of them.
-            if dialect == Dialect::Pandoc && h.starts_with("<!") && !h.starts_with("<!--") {
+            if dialect.is_pandoc() && h.starts_with("<!") && !h.starts_with("<!--") {
                 let mut first = true;
                 for line in h.split('\n') {
                     if !first {
