@@ -567,12 +567,29 @@ fn label_to(identifier: &str, out: &mut String) {
 /// this is the difference between a round trip and a divergence, not a
 /// matter of spacing. An empty list is not tight — pandoc emits nothing.
 fn tightlist(items: &[Vec<Block>], out: &mut String) {
-    let tight = !items.is_empty()
-        && items
-            .iter()
-            .all(|item| matches!(item.first(), Some(Block::Plain(_))));
-    if tight {
+    if !items.is_empty() && items.iter().all(|item| item_is_tight(item)) {
         out.push_str("\\tightlist\n");
+    }
+}
+
+/// Whether one list item is tight.
+///
+/// A first block that is `Plain` is the ordinary case. **An item that is
+/// nothing but a nested list is tight when that list is** — pandoc marks
+/// the outer `itemize` of `bullets([bullets([plain, plain])])` and this
+/// did not, because it only ever looked at the first block's type.
+///
+/// The recursion is narrow on purpose, and the shapes either side of it
+/// were measured: `[list, Plain]` is **not** tight even though the list
+/// is, and neither is `[Para, list]` or a lone list of `Para`s.
+fn item_is_tight(item: &[Block]) -> bool {
+    match item {
+        [Block::Plain(_), ..] => true,
+        [Block::BulletList(inner)] => !inner.is_empty() && inner.iter().all(|i| item_is_tight(i)),
+        [Block::OrderedList(_, inner)] => {
+            !inner.is_empty() && inner.iter().all(|i| item_is_tight(i))
+        }
+        _ => false,
     }
 }
 
@@ -954,6 +971,56 @@ fn inlines(list: &[Inline], colour: bool, out: &mut String) {
     }
 }
 
+/// A `\\footnote{…}`, its content laid out as blocks.
+///
+/// Lifted out of [`inline_to`] when that function passed clippy's
+/// hundred lines — by exact replacement, because counting braces to
+/// find an arm's end ate the rest of a `match` earlier in the day.
+fn note_to(blocks_in_note: &[Block], colour: bool, out: &mut String) {
+
+            out.push_str("\\footnote{");
+            out.push(IN);
+            let mut text = String::new();
+            blocks(blocks_in_note, 0, colour, &mut text);
+            // Every line but the first is indented two, the way an
+            // `\item`'s content is: a footnote of more than one block is
+            // laid out as a block, not run together.
+            // **A literal environment is flush left here too**, for the
+            // reason it is inside an `\item`: `Highlighting` is
+            // `fancyvrb`'s `Verbatim` and two spaces of indentation are
+            // two spaces of code. The rule was written for list items and
+            // a footnote holding a code block needed it just as much.
+            let mut literal = false;
+            for (index, line) in text.trim().lines().enumerate() {
+                if line == "\\begin{verbatim}" || line == "\\begin{Shaded}" {
+                    literal = true;
+                }
+                if index > 0 {
+                    out.push('\n');
+                    if !line.is_empty() && !literal {
+                        out.push_str("  ");
+                    }
+                }
+                out.push_str(line);
+                if line == "\\end{verbatim}" || line == "\\end{Shaded}" {
+                    literal = false;
+                }
+            }
+            // **The closing environment's own newline survives the trim**:
+            // pandoc writes `\\end{Shaded}` and then the brace on its own
+            // line. Asked of the *last* line rather than latched during
+            // the loop, which added the newline to a footnote whose code
+            // block was followed by a paragraph.
+            if matches!(
+                text.trim().lines().last(),
+                Some("\\end{verbatim}" | "\\end{Shaded}")
+            ) {
+                out.push('\n');
+            }
+            out.push(OUT);
+            out.push('}');
+}
+
 fn inline_to(inline: &Inline, colour: bool, out: &mut String) {
     let wrap = |name: &str, inner: &[Inline], out: &mut String| {
         let _ = write!(out, "\\{name}{{");
@@ -1069,26 +1136,7 @@ fn inline_to(inline: &Inline, colour: bool, out: &mut String) {
                 escape_url(&target.url)
             );
         }
-        Inline::Note(blocks_in_note) => {
-            out.push_str("\\footnote{");
-            out.push(IN);
-            let mut text = String::new();
-            blocks(blocks_in_note, 0, colour, &mut text);
-            // Every line but the first is indented two, the way an
-            // `\item`'s content is: a footnote of more than one block is
-            // laid out as a block, not run together.
-            for (index, line) in text.trim().lines().enumerate() {
-                if index > 0 {
-                    out.push('\n');
-                    if !line.is_empty() {
-                        out.push_str("  ");
-                    }
-                }
-                out.push_str(line);
-            }
-            out.push(OUT);
-            out.push('}');
-        }
+        Inline::Note(blocks_in_note) => note_to(blocks_in_note, colour, out),
     }
 }
 
