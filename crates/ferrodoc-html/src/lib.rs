@@ -1470,7 +1470,13 @@ fn write_inline(out: &mut String, inline: &Inline) {
             }
             write_attr(out, attr);
             out.push('>');
-            write_inlines(out, inner);
+            // **A link inside a link is a `<span>`.** Nested anchors are
+            // not HTML, and pandoc writes the inner one's attributes on a
+            // span and drops its href. The AST can hold the shape even
+            // though no markdown grammar writes it — `gfm` reading an
+            // autolink inside link text is where it comes from — so the
+            // writer has to answer for it rather than emit `<a>` twice.
+            write_inlines(out, &unlink(inner));
             out.push_str("</a>");
         }
         Inline::Image(attr, alt, target) => {
@@ -1598,6 +1604,18 @@ fn write_kv(out: &mut String, key: &str, value: &str) {
     out.push_str("=\"");
     escape_attribute(out, value);
     out.push('"');
+}
+
+/// Every `Link` in these inlines turned into a `Span` of the same
+/// attributes, however deep. Only called from inside a link.
+fn unlink(inlines: &[Inline]) -> Vec<Inline> {
+    inlines
+        .iter()
+        .map(|inline| match inline {
+            Inline::Link(attr, inner, _) => Inline::Span(attr.clone(), unlink(inner)),
+            other => other.clone(),
+        })
+        .collect()
 }
 
 /// Render attributes as ` id=".." class=".." k="v"`, pandoc's order —
