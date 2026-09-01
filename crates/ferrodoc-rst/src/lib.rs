@@ -208,6 +208,10 @@ struct Defs {
     next_note: usize,
     /// Whether a note's body is being rendered right now.
     in_note: bool,
+    /// Whether the blocks being written are **inside** something — a
+    /// quote, a container, a list item, a cell, a footnote. RST has no
+    /// nested section headings, so a `Header` there is a `rubric`.
+    nested: bool,
     /// How many names have been invented, so the next is `imageN`. One
     /// counter for both cases pandoc invents a name for: an image with no
     /// alt text, and one whose alt text is already taken by another URL.
@@ -235,7 +239,7 @@ impl Defs {
             let queued = std::mem::take(&mut self.pending[index]);
             let mut text = String::new();
             let outer = std::mem::replace(&mut self.in_note, true);
-            blocks(&queued, &mut text, self);
+            nested_blocks(&queued, &mut text, self);
             self.in_note = outer;
             self.notes.push(trimmed(&text).to_owned());
             index += 1;
@@ -304,6 +308,18 @@ const UNDERLINES: &[char] = &['=', '-', '~', '^', '"', '\''];
 /// How far a nested block is indented. Three spaces is RST's convention
 /// for directive and quote content.
 const INDENT: &str = "   ";
+
+/// [`blocks`] for content **inside** a container.
+///
+/// One helper rather than a flag set at each of the six call sites,
+/// because a flag that has to be set in six places is a flag that will
+/// be missed in one — which is how a `Flavour` variant once cost the
+/// notebook round trip five of sixteen documents.
+fn nested_blocks(list: &[Block], out: &mut String, def: &mut Defs) {
+    let was = std::mem::replace(&mut def.nested, true);
+    blocks(list, out, def);
+    def.nested = was;
+}
 
 fn blocks(list: &[Block], out: &mut String, def: &mut Defs) {
     let mut previous: Option<&Block> = None;
@@ -382,7 +398,7 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
         }
         Block::BlockQuote(inner) => {
             let mut text = String::new();
-            blocks(inner, &mut text, def);
+            nested_blocks(inner, &mut text, def);
             out.push_str(&indent(&text));
         }
         Block::OrderedList(attrs, items) => {
@@ -422,7 +438,7 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
                 let _ = writeln!(out, "{}", text.trim_end());
                 for definition in definitions {
                     let mut body = String::new();
-                    blocks(definition, &mut body, def);
+                    nested_blocks(definition, &mut body, def);
                     out.push_str(&indent(&body));
                 }
             }
@@ -441,6 +457,15 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             // `.. _a-heading:` above every heading in the document.
             if !attr.identifier.is_empty() && attr.identifier != slug(&stringify(list)) {
                 let _ = writeln!(out, ".. _{}:\n", attr.identifier);
+            }
+            // **RST has no nested section heading**, so a heading that is
+            // not at the top level is the `rubric` directive — inside a
+            // quote, a container, a list item, a definition, a cell or a
+            // footnote alike. An underline there would be read as a
+            // *document* section, which is not what the block says.
+            if def.nested {
+                let _ = writeln!(out, ".. rubric:: {text}");
+                return;
             }
             let index = usize::try_from(*level).unwrap_or(1).saturating_sub(1);
             let underline = UNDERLINES.get(index).copied().unwrap_or('\'');
@@ -570,10 +595,10 @@ fn figure_to(
                 _ => None,
             };
             let Some((alt, target)) = lone_image else {
-                blocks(inner, out, def);
+                nested_blocks(inner, out, def);
                 if !caption.blocks.is_empty() {
                     let mut text = String::new();
-                    blocks(&caption.blocks, &mut text, def);
+                    nested_blocks(&caption.blocks, &mut text, def);
                     out.push_str(&indent(&text));
                 }
                 return;
@@ -587,7 +612,7 @@ fn figure_to(
             if !caption.blocks.is_empty() {
                 out.push('\n');
                 let mut text = String::new();
-                blocks(&caption.blocks, &mut text, def);
+                nested_blocks(&caption.blocks, &mut text, def);
                 out.push_str(&indent(&text));
             }
 }
@@ -604,7 +629,7 @@ fn container_to(attr: &ferrodoc_ast::Attr, inner: &[Block], out: &mut String, de
             }
             out.push('\n');
             let mut body = String::new();
-            blocks(inner, &mut body, def);
+            nested_blocks(inner, &mut body, def);
             for line in body.trim_end().lines() {
                 if line.is_empty() {
                     out.push('\n');
@@ -641,16 +666,36 @@ fn tight(items: &[Vec<Block>]) -> bool {
 
 fn item_to(item: &[Block], marker: &str, tight: bool, out: &mut String, def: &mut Defs) {
     let mut text = String::new();
-    blocks(item, &mut text, def);
+    nested_blocks(item, &mut text, def);
     let pad = " ".repeat(marker.chars().count() + 1);
-    // A **directive** cannot start on the marker's own line: `1. .. raw::
-    // html` is read as a paragraph beginning with two dots. Pandoc writes
-    // the marker, a blank line, and the content indented under it. A
-    // literal block's `::` is fine where it stands, so the test is what
-    // the content starts with rather than what kind of block it is.
-    let own_line = text.starts_with(".. ");
+    // **What may share the marker's line, and what may not.** A
+    // paragraph, a literal block's `::`, a line block and a one-line
+    // directive all sit there; a construct that has to begin its own —
+    // another list, a table, a rule, a quote — takes the marker alone and
+    // a blank line, with the content indented under it.
+    //
+    // A *multi-line* directive is the same case: `1. .. raw:: html` is
+    // read as a paragraph beginning with two dots, because the body under
+    // it lands at the wrong indent. A one-line one has no body to
+    // misplace, which is why `- .. rubric:: H` is what pandoc writes and
+    // testing only for `.. ` sent the rubric to its own line.
+    let quoted = matches!(item.first(), Some(Block::BlockQuote(_)));
+    let own_line = quoted
+        || matches!(
+            item.first(),
+            Some(
+                Block::BulletList(_)
+                    | Block::OrderedList(..)
+                    | Block::DefinitionList(_)
+                    | Block::Table(_)
+                    | Block::HorizontalRule
+            )
+        )
+        || (text.starts_with(".. ") && text.trim_end().lines().count() > 1);
     if own_line {
-        let _ = writeln!(out, "{marker} \n");
+        // A quote needs an **empty comment** on the marker's line, or its
+        // indented body reads as the item's own continuation.
+        let _ = writeln!(out, "{marker} {}\n", if quoted { ".." } else { "" });
     }
     for (index, line) in text.trim_end().lines().enumerate() {
         if index == 0 && !own_line {
@@ -691,7 +736,7 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
     // without one the caption simply vanished.
     if !table.caption.blocks.is_empty() {
         let mut caption = String::new();
-        blocks(&table.caption.blocks, &mut caption, def);
+        nested_blocks(&table.caption.blocks, &mut caption, def);
         let _ = writeln!(out, ".. table:: {}\n", trimmed(&caption.replace('\n', " ")));
         let mut body = String::new();
         let bare = Table { caption: ferrodoc_ast::Caption::default(), ..table.clone() };
