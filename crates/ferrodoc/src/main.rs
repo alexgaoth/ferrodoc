@@ -634,7 +634,10 @@ fn parse_args(args: &[String]) -> Result<Option<Options>, String> {
         input: out.input,
         standalone: out.framing.standalone,
         page: out.page,
-        shaping: out.shaping,
+        shaping: Shaping {
+            github_input: out.deprecated.first().is_some_and(|name| !name.is_empty()),
+            ..out.shaping
+        },
         resource_path: out.resource_path,
         reference: out.reference,
         extract_media: out.extract_media,
@@ -696,6 +699,9 @@ a heading in the body",
         .unwrap_or_else(|| std::path::Path::new("."))
         .to_owned();
     let (mut doc, embedded) = read_document(&bytes, from, to, extract_media.is_some())?;
+    if shaping.github_input {
+        ungithub_lists(&mut doc.blocks);
+    }
     if let Some(dir) = extract_media.as_deref() {
         extract(&mut doc, &embedded, dir)?;
     }
@@ -1067,6 +1073,50 @@ fn widened(wrap: Wrap, columns: usize) -> Wrap {
 /// A document's images can be far larger than its text, and reading them
 /// to throw them away is how a `docx -> markdown` conversion runs a
 /// machine out of memory.
+/// Give every ordered list the default marker, which is what pandoc's
+/// `markdown_github` reader produces.
+///
+/// **The alias is not `gfm`, whatever pandoc's own warning says.** It
+/// prints "Deprecated: `markdown_github`. Use gfm instead." and then reads
+/// the document differently: `1.` comes back `DefaultStyle`/`DefaultDelim`
+/// rather than `Decimal`/`Period`, so the HTML writer emits a bare `<ol>`
+/// where `gfm` gets `<ol type="1">`. It is not reachable as an extension
+/// either — `gfm-fancy_lists` still gives `Decimal`.
+///
+/// This reads the alias as `gfm` and then takes the markers off, which is
+/// the whole of the difference for an ordered list. The other differences
+/// between the two readers are recorded in `COMPATIBILITY.md` rather than
+/// emulated: a third dialect maintained for a spelling pandoc has
+/// deprecated is not worth its own reader.
+fn ungithub_lists(blocks: &mut [ferrodoc::ast::Block]) {
+    use ferrodoc::ast::Block;
+    for block in blocks {
+        match block {
+            Block::OrderedList(attrs, items) => {
+                attrs.style = ferrodoc::ast::ListNumberStyle::DefaultStyle;
+                attrs.delim = ferrodoc::ast::ListNumberDelim::DefaultDelim;
+                for item in items {
+                    ungithub_lists(item);
+                }
+            }
+            Block::BulletList(items) => {
+                for item in items {
+                    ungithub_lists(item);
+                }
+            }
+            Block::BlockQuote(inner) | Block::Div(_, inner) => ungithub_lists(inner),
+            Block::DefinitionList(entries) => {
+                for (_, defs) in entries {
+                    for def in defs {
+                        ungithub_lists(def);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn read_document(
     bytes: &[u8],
     from: Format,
@@ -1093,6 +1143,12 @@ struct Shaping {
     eol: Option<&'static str>,
     /// `--ascii`, which this build has for HTML alone.
     ascii: bool,
+    /// Whether the **input** was spelled `markdown_github`. Pandoc's own
+    /// deprecation notice says to use `gfm` and this maps it there — but
+    /// pandoc does not, and numbers an ordered list differently for the
+    /// alias. See [`ungithub_lists`]. It sits here rather than beside
+    /// `from`, because what it does is reshape the document.
+    github_input: bool,
 }
 
 fn shaping_option(name: &str, given: &str, shaping: &mut Shaping) -> Result<(), String> {
