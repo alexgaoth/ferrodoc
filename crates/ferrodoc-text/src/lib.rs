@@ -358,8 +358,25 @@ impl Writer {
             }
             self.reserved = reserved;
             let body = inner.join(if loose { "\n\n" } else { "\n" });
+            // **A table and a rule take the marker's line to themselves**,
+            // the same rule the RST writer follows and for the same
+            // reason: both are laid out in columns of their own, and
+            // starting one beside `- ` shifts every line of it. A
+            // paragraph, a code block and a nested list all sit at the
+            // marker as before.
+            let alone = matches!(item.first(), Some(Block::Table(_) | Block::HorizontalRule));
             let mut lines = body.split('\n');
-            let mut text = format!("{}{}", head, lines.next().unwrap_or_default());
+            let mut text = if alone {
+                // The marker keeps its trailing space — `- `, not `-` —
+                // and every line of the block takes the continuation. A
+                // **rule** additionally takes a blank line above it,
+                // which a table does not: `- ` then nothing then the
+                // dashes. The same is true of one opening a quote.
+                let gap = matches!(item.first(), Some(Block::HorizontalRule));
+                if gap { format!("{head}\n") } else { head.clone() }
+            } else {
+                format!("{}{}", head, lines.next().unwrap_or_default())
+            };
             for line in lines {
                 text.push('\n');
                 if !line.is_empty() {
