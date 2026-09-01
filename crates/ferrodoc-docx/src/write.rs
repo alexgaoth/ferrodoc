@@ -58,6 +58,17 @@ pub fn write_docx_with_media(
 /// nothing declares. Both are ways to write a `.docx` Word repairs on
 /// open, and the styles are what the flag is for.
 ///
+/// **Both are merged rather than swapped in**, which they were not until
+/// 2026-08-31. A reference is somebody's house style, not a complete
+/// stylesheet: pandoc's own default defines `VerbatimChar` and not
+/// `SourceCode`, and brings one `w:numId` where this writer's document
+/// refers to three. Taking either part whole left the document pointing
+/// at definitions the package no longer held — every code block and
+/// every list quietly lost, and `readme-style.md` reading back as 21
+/// blocks where it has 15. It now reads back **identical to pandoc's own
+/// output for the same command**. See [`merge_styles`] and
+/// [`merge_numbering`].
+///
 /// # Errors
 ///
 /// A reference that is not a zip, or has no `word/styles.xml` — named,
@@ -93,7 +104,89 @@ fn reference_parts(bytes: &[u8]) -> Result<(String, Option<String>), Error> {
         Error::Zip("the reference document has no word/styles.xml".to_owned())
     })?;
     let numbering = read(&mut archive, "word/numbering.xml");
-    Ok((styles, numbering))
+    Ok((merge_styles(&styles), numbering))
+}
+
+/// The reference's numbering, plus any list this writer needs that it
+/// does not define.
+///
+/// **The same failure as the styles, one part over.** A reference brings
+/// its own `w:numId`s — pandoc's default brings exactly one, `1000` —
+/// and this writer's document refers to `1001` upwards, so taking the
+/// reference's `numbering.xml` whole left every list pointing at a
+/// definition the package did not contain. Word renders those unnumbered
+/// and pandoc reads them back as ordinary paragraphs: `readme-style.md`
+/// lost every bullet list in it.
+///
+/// Order matters in this part — each `<w:abstractNum>` must precede every
+/// `<w:num>` — so the two are spliced at different points rather than
+/// appended together.
+fn merge_numbering(reference: &str, generated: &str) -> String {
+    let defined = |needle: &str, id: &str| reference.contains(&format!("{needle}=\"{id}\""));
+    let pick = |tag: &str, attribute: &str| {
+        let mut out = String::new();
+        for element in generated.split_inclusive(&format!("</{tag}>")) {
+            let Some(at) = element.find(&format!("<{tag} {attribute}=\"")) else { continue };
+            let rest = &element[at + tag.len() + attribute.len() + 4..];
+            let Some(end) = rest.find('"') else { continue };
+            if !defined(attribute, &rest[..end]) {
+                out.push_str(&element[at..]);
+            }
+        }
+        out
+    };
+    let abstracts = pick("w:abstractNum", "w:abstractNumId");
+    let nums = pick("w:num", "w:numId");
+    if abstracts.is_empty() && nums.is_empty() {
+        return reference.to_owned();
+    }
+    let mut out = reference.to_owned();
+    if let Some(at) = out.rfind("</w:numbering>") {
+        out.insert_str(at, &nums);
+    }
+    // Before the first `<w:num ` if there is one, and before the closing
+    // tag otherwise.
+    let at = out.find("<w:num w:numId=").or_else(|| out.rfind("</w:numbering>"));
+    if let Some(at) = at {
+        out.insert_str(at, &abstracts);
+    }
+    out
+}
+
+/// The reference's styles, plus any this writer needs that it does not
+/// define.
+///
+/// **A reference is somebody's house style, not a complete stylesheet.**
+/// `dropin/assets/reference.docx` — pandoc's own default, which is as
+/// representative as a reference gets — defines `VerbatimChar` and not
+/// `SourceCode`, so swapping its `word/styles.xml` in wholesale left
+/// every code block pointing at a paragraph style the package no longer
+/// had. Word falls back to Normal there and pandoc reads the result as an
+/// ordinary paragraph: `readme-style.md` came back with **0 code blocks
+/// where it has 2**, and 21 blocks where it has 15.
+///
+/// Matched on `w:styleId`, and the reference always wins — the point of
+/// the flag is that its styles are the ones that apply.
+fn merge_styles(reference: &str) -> String {
+    let mut missing = String::new();
+    for element in STYLES.split_inclusive("</w:style>") {
+        let Some(at) = element.find("w:styleId=\"") else { continue };
+        let rest = &element[at + 11..];
+        let Some(end) = rest.find('"') else { continue };
+        if !reference.contains(&format!("w:styleId=\"{}\"", &rest[..end])) {
+            // From `<w:style` so the leading `<w:styles …>` header of the
+            // first chunk is not carried in with it.
+            if let Some(start) = element.find("<w:style ") {
+                missing.push_str(&element[start..]);
+            }
+        }
+    }
+    match reference.rfind("</w:styles>") {
+        Some(at) if !missing.is_empty() => {
+            format!("{}{}{}", &reference[..at], missing, &reference[at..])
+        }
+        _ => reference.to_owned(),
+    }
 }
 
 fn write_package(
@@ -137,7 +230,8 @@ fn write_package(
     // does not, because a `.docx` whose numbering part is missing renders
     // every list unnumbered.
     let generated = w.numbering();
-    part("word/numbering.xml", numbering.unwrap_or(&generated))?;
+    let merged = numbering.map(|reference| merge_numbering(reference, &generated));
+    part("word/numbering.xml", merged.as_deref().unwrap_or(&generated))?;
     part("word/footnotes.xml", &w.footnotes_part())?;
     part("word/_rels/footnotes.xml.rels", &w.footnotes_rels())?;
     // `part` borrows the zip; the media parts are written directly.
@@ -1215,7 +1309,7 @@ mod tests {
     /// switch converters, and what it has to do is exact: the styles in
     /// the output are the reference's, byte for byte.
     #[test]
-    fn a_reference_document_supplies_the_styles_and_nothing_else() {
+    fn a_reference_document_supplies_its_styles_and_keeps_the_ones_it_lacks() {
         let doc = Pandoc::new(vec![Block::Para(vec![Inline::Str("x".into())])]);
         let plain = write_docx(&doc).expect("a package");
 
@@ -1229,8 +1323,20 @@ mod tests {
             zip.finish().expect("a zip");
         }
         let with = write_docx_with_reference(&doc, &|_| None, Some(&altered)).expect("a package");
-        assert_eq!(part_of(&with, "word/styles.xml"), "<w:styles>house</w:styles>");
-        // ...and nothing else came across: the document is still ours.
+        let styles = part_of(&with, "word/styles.xml");
+        // The reference's own content is kept and comes first: its styles
+        // are the ones that apply, which is the point of the flag.
+        assert!(styles.starts_with("<w:styles>house"), "{styles}");
+        // **And the ones it does not define are added**, which the
+        // assertion here used to forbid. Pandoc's own default reference
+        // defines `VerbatimChar` and not `SourceCode`, so taking its
+        // styles whole left every code block pointing at a paragraph
+        // style the package no longer had: `readme-style.md` came back
+        // from a round trip with 0 code blocks where it has 2, and 21
+        // blocks where it has 15.
+        assert!(styles.contains(r#"w:styleId="SourceCode""#), "{styles}");
+        assert!(styles.ends_with("</w:styles>"), "{styles}");
+        // ...and the document itself is still ours.
         assert_eq!(part_of(&with, "word/document.xml"), part_of(&plain, "word/document.xml"));
         // A reference with no numbering keeps this writer's, or every
         // list in the output renders unnumbered.
