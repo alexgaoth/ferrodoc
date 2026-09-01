@@ -1841,7 +1841,7 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
             }
             Some(Block::DefinitionList(items))
         }
-        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments, defs, dialect)))),
+        NodeValue::Table(t) => Some(Block::Table(Box::new(table(node, &t.alignments, src, defs, dialect)))),
         // Only core-CommonMark nodes occur with default comrak options, and
         // the GFM extensions add exactly the ones handled above; the
         // differential harness would surface anything dropped here.
@@ -1919,26 +1919,105 @@ fn prepend(item: &mut Vec<Block>, mut prefix: Vec<Inline>, tight: bool) {
 /// Map a GFM pipe table. comrak has already padded short rows and dropped
 /// cells past the column count, which is what pandoc does too, so the grid
 /// arrives rectangular.
-fn table<'a>(node: &'a AstNode<'a>, alignments: &[TableAlignment], defs: &Notes, dialect: Dialect) -> Table {
-    let row = |n: &'a AstNode<'a>| Row {
-        attr: Attr::default(),
-        cells: n
-            .children()
-            .map(|c| {
-                let content = inlines(c.children(), defs, dialect);
-                Cell {
-                    attr: Attr::default(),
-                    alignment: Alignment::AlignDefault,
-                    row_span: 1,
-                    col_span: 1,
-                    blocks: if content.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![Block::Plain(content)]
-                    },
+/// Split a pipe-table row the way pandoc's markdown does: **a `|` inside
+/// a code span does not end a cell.**
+///
+/// GitHub's rule is the other one — a pipe splits wherever it stands
+/// unless it is backslash-escaped — and comrak implements GitHub's,
+/// correctly: `pandoc -f gfm` splits `` `x|y` `` into two cells and so
+/// does this. Only pandoc's *markdown* keeps the span whole, and this is
+/// the dialect that has to.
+///
+/// `None` where there is no backtick on the line, which is nearly every
+/// row: the comrak cells are then already right and re-reading them would
+/// risk a difference for nothing.
+fn pandoc_row_cells(line: &str) -> Option<Vec<String>> {
+    if !line.contains('`') {
+        return None;
+    }
+    let mut cells = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars().peekable();
+    // The length of the run that opened the code span, or 0 outside one.
+    // A span closes on a run of the **same** length, which is what makes
+    // `` ` `` inside `` `` … `` `` ordinary text.
+    let mut open = 0;
+    while let Some(ch) = chars.next() {
+        match ch {
+            // An escape is two characters and neither of them is
+            // structure — `\|` is a literal pipe and does not split.
+            '\\' => {
+                current.push(ch);
+                if let Some(next) = chars.next() {
+                    current.push(next);
                 }
-            })
-            .collect(),
+            }
+            '`' => {
+                let mut run = 1;
+                while chars.peek() == Some(&'`') {
+                    chars.next();
+                    run += 1;
+                }
+                if open == 0 {
+                    open = run;
+                } else if open == run {
+                    open = 0;
+                }
+                for _ in 0..run {
+                    current.push('`');
+                }
+            }
+            '|' if open == 0 => cells.push(std::mem::take(&mut current)),
+            _ => current.push(ch),
+        }
+    }
+    cells.push(current);
+    // A row is written `| a | b |`, so the pipes at either end leave an
+    // empty piece that is not a cell.
+    if cells.first().is_some_and(|c| c.trim().is_empty()) {
+        cells.remove(0);
+    }
+    if cells.last().is_some_and(|c| c.trim().is_empty()) {
+        cells.pop();
+    }
+    Some(cells)
+}
+
+fn table<'a>(
+    node: &'a AstNode<'a>,
+    alignments: &[TableAlignment],
+    src: &Src,
+    defs: &Notes,
+    dialect: Dialect,
+) -> Table {
+    let cell_of = |content: Vec<Inline>| Cell {
+        attr: Attr::default(),
+        alignment: Alignment::AlignDefault,
+        row_span: 1,
+        col_span: 1,
+        blocks: if content.is_empty() { Vec::new() } else { vec![Block::Plain(content)] },
+    };
+    let row = |n: &'a AstNode<'a>| {
+        // Pandoc's own split where the row holds a backtick, comrak's
+        // otherwise — and comrak's is right for `gfm`, which is why this
+        // asks the dialect rather than replacing the cells outright.
+        let repartition = (dialect == Dialect::Pandoc)
+            .then(|| pandoc_row_cells(src.line(n.data.borrow().sourcepos.start.line)))
+            .flatten();
+        let cells = match repartition {
+            Some(texts) => texts
+                .iter()
+                .map(|text| {
+                    let content = match fragment(text.trim(), defs, dialect).as_slice() {
+                        [Block::Plain(inlines) | Block::Para(inlines)] => inlines.clone(),
+                        _ => Vec::new(),
+                    };
+                    cell_of(content)
+                })
+                .collect(),
+            None => n.children().map(|c| cell_of(inlines(c.children(), defs, dialect))).collect(),
+        };
+        Row { attr: Attr::default(), cells }
     };
     let mut head = Vec::new();
     let mut body = Vec::new();
