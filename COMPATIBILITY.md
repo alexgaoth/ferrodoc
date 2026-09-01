@@ -2650,6 +2650,22 @@ two blocks. This escapes it and keeps the paragraph.
 `===` is the same rule reached from the setext end and is escaped with
 them, on the reasoning already recorded for a dash run.
 
+**A horizontal rule opening a list item, in the two `CommonMark`
+dialects.** Pandoc writes a rule under a blank line of its own. Where the
+rule is the first block of an item that puts the blank line *inside* the
+item, and CommonMark reads an item beginning with a blank line as an
+empty one — so pandoc's own bytes lose the rule out of the list:
+
+    ./scripts/probe.sh -t gfm -f gfm 'bullets([[rule]])'
+    ./scripts/probe.sh -t gfm -f gfm 'ordered([[rule]])'
+
+Both binaries' output comes back as an empty item and a rule beside the
+list, and under an ordered marker the rule comes back as a **code
+block**. `- ***` survives both readers, so the two dialects that cannot
+carry the blank line keep the block instead. Pandoc's own markdown, where
+the shape does round-trip, is written pandoc's way — 72 dashes under a
+blank line, in a quote, a fenced div, a definition and a list item alike.
+
 **A `LineBreak` inside an inline container.** Markdown has no spelling
 for a hard break inside emphasis, a heading, a link, a quote, a
 definition term or a table cell, and pandoc's attempt does not survive
@@ -2673,12 +2689,11 @@ back, so nothing is measurable except what survives to a reader that is
 not pandoc.
 
 **The rest are gaps, not decisions**, and are counted as such: the sweep
-still names 162 divergences that are neither fixed nor listed. The
-largest groups are pandoc's TeX-to-Unicode math rendering (this writes
-the `$x^2$` fallback where pandoc writes `x²`), grid tables in the
-`plain` and `rst` writers, and a set of small LaTeX spellings —
-`\item ~`, `\tightlist` placement, `\VERB|…|` and
-`\phantomsection\label{}`.
+still names 69 divergences that are neither fixed nor listed. The largest
+groups are pandoc's TeX-to-Unicode math rendering — 24 of them, where
+this writes the `$x^2$` fallback and pandoc writes `x²` — a GFM table
+whose cell holds a block, which pandoc degrades to raw HTML, and a hard
+break inside an inline container in AsciiDoc.
 
 ## How to check any of this yourself
 

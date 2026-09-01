@@ -196,7 +196,6 @@ struct Mark {
     bullet: char,
     alternate: bool,
     at: Standing,
-    depth: usize,
 }
 
 /// The two places the writer's position changes what it must escape.
@@ -215,6 +214,10 @@ struct Standing {
     /// `## 0. Before anything` and `**1. The two gates**` where this
     /// wrote `## 0\.` and `**1\.`.
     preceded: bool,
+    /// Set by a container that renders its content with neither a prefix
+    /// nor a marker of its own, for the block that opens it. Spent by
+    /// [`Writer::blocks`] on that first block.
+    opening: Opening,
 }
 
 #[derive(Default)]
@@ -251,10 +254,6 @@ struct Writer {
     /// from it even with `--wrap=preserve`, where `columns` above is
     /// `None` because nothing is filled.
     layout: usize,
-    /// How many **list items** deep the block being written is. A
-    /// blockquote does not count: its `> ` prefix makes four more spaces
-    /// unambiguous, where a list item's own indentation does not.
-    depth: usize,
 }
 
 /// Marks a space a line may be broken at. Chosen because no reader here
@@ -263,6 +262,31 @@ struct Writer {
 /// outright. Every one is either broken at or turned back into a space
 /// before the string leaves [`push_wrapped`].
 const BREAK: char = '\0';
+
+/// Whether a block opens its container, and what the container has
+/// already written on the line it starts on.
+///
+/// Pandoc writes a horizontal rule with a blank line above it. Between
+/// two blocks that blank line is the separator they already have;
+/// opening a container it has to be written out — and a container that
+/// has *begun* the line contributes a line of its own above the blank,
+/// which is why a quote holding nothing but a rule is `> `, `>`,
+/// `> ---` and a list item is `- `, blank, `  ---`.
+///
+/// A quote's prefix and a list item's marker are already carried by
+/// `first_in_container` and `first_in_item`; this says it for the two
+/// containers neither covers.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Opening {
+    /// Not the first block of a container.
+    #[default]
+    No,
+    /// First, on a line the container has begun: a definition's `:   `.
+    Line,
+    /// First, on a line of its own: a fenced div, and the paragraph a
+    /// `CommonMark` definition list degrades to.
+    Fresh,
+}
 
 /// Where in the document a block sits, for the two spellings that depend
 /// on it. An indented code block is four spaces from the *line*: after a
@@ -279,6 +303,9 @@ struct Position {
     /// pandoc writes one, prefix and all: `> ` before the header row.
     /// At the top of a document it writes nothing.
     first_in_container: bool,
+    /// What the container this block opens has already put on its line,
+    /// where the prefix and the marker do not say it.
+    opening: Opening,
 }
 
 impl Writer {
@@ -356,8 +383,10 @@ impl Writer {
                 ),
                 first_in_item: self.at.item_start,
                 first_in_container: previous.is_none() && !prefix.is_empty(),
+                opening: self.at.opening,
             };
             self.at.item_start = false;
+            self.at.opening = Opening::No;
             self.block(out, block, prefix, at);
             previous = Some(block);
         }
@@ -397,12 +426,17 @@ impl Writer {
                     push_line(out, prefix, "");
                 }
                 let mut body = String::new();
+                self.at.opening = Opening::Line;
                 self.blocks(&mut body, definition, "");
                 // `:` then three spaces, and the continuation
                 // lines under four — pandoc's own shape, probed.
+                //
+                // **The marker goes down even where the line is empty**,
+                // which is what a definition holding a rule or a table
+                // opens with: `:   ` alone, then the block below it.
                 for (index, line) in body.trim_end().split('\n').enumerate() {
                     let marker = if index == 0 { ":   " } else { INDENT };
-                    let text = if line.is_empty() {
+                    let text = if line.is_empty() && index > 0 {
                         String::new()
                     } else {
                         format!("{marker}{line}")
@@ -649,6 +683,7 @@ impl Writer {
                     let mut text = self.inlines(term);
                     if let Some(definition) = definitions.first() {
                         let mut body = String::new();
+                        self.at.opening = Opening::Fresh;
                         self.blocks(&mut body, definition, "");
                         text.push_str("  \n");
                         text.push_str(body.trim_end_matches('\n'));
@@ -660,17 +695,7 @@ impl Writer {
                     }
                 }
             }
-            // `***`, not `---`: inside a list item `- ---` is itself a
-            // thematic break, so the item disappears.
-            // Pandoc's rule is 72 dashes, and it is only safe at the top
-            // level: inside a list item a run of dashes is read as the
-            // *next item's* setext underline, and `CommonMark` example 61
-            // (`- Foo\n- * * *`) loses its rule. `***` reads back the same
-            // either way, so the container keeps it.
-            Block::HorizontalRule => {
-                let rule = if self.depth == 0 { "-".repeat(72) } else { "***".to_owned() };
-                push_line(out, prefix, &rule);
-            }
+            Block::HorizontalRule => self.horizontal_rule(out, prefix, at),
             Block::LineBlock(lines) => {
                 // Hard breaks preserve the line structure.
                 let mut text = String::new();
@@ -840,6 +865,7 @@ impl Writer {
     /// flavours do not — they fall through to a raw `<div>`.
     fn fenced_div(&mut self, out: &mut String, attr: &ferrodoc_ast::Attr, blocks: &[Block], prefix: &str) {
         push_line(out, prefix, &format!("::: {}", fence_attributes(attr)));
+        self.at.opening = Opening::Fresh;
         self.blocks(out, blocks, prefix);
         push_line(out, prefix, ":::");
     }
@@ -874,7 +900,6 @@ impl Writer {
             bullet: self.bullet,
             alternate: self.alternate,
             at: self.at,
-            depth: self.depth,
         }
     }
 
@@ -884,7 +909,6 @@ impl Writer {
         self.bullet = mark.bullet;
         self.alternate = mark.alternate;
         self.at = mark.at;
-        self.depth = mark.depth;
     }
 
     /// One row's cells, each laid out as its own lines — filled to
@@ -1210,7 +1234,7 @@ impl Writer {
     /// multiline table); [`simple_table_applies`] refuses both, and they
     /// keep the raw-HTML fallback until those writers exist.
     fn simple_table(&mut self, out: &mut String, table: &Table, prefix: &str, at: Position) {
-        if at.first_in_container {
+        if at.first_in_container || at.opening == Opening::Line {
             // A simple table needs a blank line in front of it, and when
             // it opens a container there is none to reuse. The prefix
             // goes down **untrimmed** — `> `, not the `>` that separates
@@ -1656,6 +1680,46 @@ impl Writer {
         }
     }
 
+    /// **72 dashes, wherever it sits, under a blank line.**
+    ///
+    /// Between two blocks that blank line is the separator they already
+    /// have; opening a container it has to be written out — and a
+    /// container that has *begun* the line contributes a line of its own
+    /// above the blank, which is why a quote holding nothing but a rule
+    /// is `> `, `>`, `> ---` and a list item is `- `, blank, `  ---`.
+    ///
+    /// `***` was written inside a container because `- ---` is itself a
+    /// thematic break and the item would disappear — true only while the
+    /// dashes were written *beside* the marker, which the blank line
+    /// stops. The workaround had been standing in for the missing line.
+    fn horizontal_rule(&self, out: &mut String, prefix: &str, at: Position) {
+        // **In the two `CommonMark` dialects a rule that opens a list
+        // item keeps `***`.** The blank line above it makes the item
+        // start with one, which CommonMark reads as an *empty* item:
+        // pandoc's own bytes come back as an empty item and a rule beside
+        // the list, and under an ordered marker as a **code block**.
+        // Probed with `-f gfm`, both binaries' output and both readers.
+        // `- ***` survives, so the dialect that can keep the block keeps
+        // it — and pandoc's own, where the blank line does round-trip,
+        // writes what pandoc writes.
+        if !self.pandoc() && at.first_in_item {
+            push_line(out, prefix, "***");
+            return;
+        }
+        let opens_line =
+            at.first_in_container || at.first_in_item || at.opening == Opening::Line;
+        if opens_line {
+            // The container's own line, prefix and all — `> `, not the
+            // `>` that separates two blocks.
+            out.push_str(prefix);
+            out.push('\n');
+        }
+        if opens_line || at.opening == Opening::Fresh {
+            push_line(out, prefix, "");
+        }
+        push_line(out, prefix, &"-".repeat(72));
+    }
+
     /// Write list items, each first line carrying `marker(index)` and the
     /// rest indented to line up under it.
     fn list(
@@ -1666,10 +1730,18 @@ impl Writer {
         marker: impl Fn(usize) -> String,
     ) {
         // A list whose items are all `Plain` is tight: no blank lines.
-        // A pipe table needs one anyway — it cannot interrupt a paragraph.
-        let tight = items
-            .iter()
-            .all(|item| item.iter().all(|b| !matches!(b, Block::Para(_) | Block::Table(_))));
+        // A pipe table needs one anyway — it cannot interrupt a paragraph,
+        // and neither can a rule written under a blank line of its own.
+        // Where the rule is `***` on the marker's line there is no blank
+        // line to make the list loose.
+        let pandoc = self.pandoc();
+        let tight = items.iter().all(|item| {
+            item.iter().all(|block| match block {
+                Block::Para(_) | Block::Table(_) => false,
+                Block::HorizontalRule => !pandoc,
+                _ => true,
+            })
+        });
         for (index, item) in items.iter().enumerate() {
             if index > 0 && !tight {
                 push_line(out, prefix, "");
@@ -1705,7 +1777,6 @@ impl Writer {
             let nested_prefix = format!("{prefix}{indent}");
             let inner = if self.columns.is_some() { nested_prefix.as_str() } else { "" };
             let mut body = String::new();
-            self.depth += 1;
             // A code block cannot open a list item as four spaces,
             // whatever else the item holds: the marker is padded to its
             // own column (`3.  `), and four spaces past a padded marker
@@ -1733,6 +1804,7 @@ impl Writer {
                         // indent are added afterwards, so there is no
                         // container here to open with a blank line.
                         first_in_container: false,
+                        opening: Opening::No,
                     };
                     self.at.item_start = false;
                     self.block(&mut body, block, inner, at);
@@ -1742,7 +1814,6 @@ impl Writer {
                 self.blocks(&mut body, item, inner);
             }
             self.at.item_start = false;
-            self.depth -= 1;
             let mut lines = body.trim_end_matches('\n').split('\n');
             if let Some(first) = lines.next() {
                 let first = first.strip_prefix(inner).unwrap_or(first);

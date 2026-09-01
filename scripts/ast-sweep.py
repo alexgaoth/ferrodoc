@@ -386,6 +386,20 @@ DELIBERATE = {
           ("gfm", ("Emph", "Link", "Header", "Quoted", "Term", "Cell")),
       )
       for holder in holders],
+    # **A horizontal rule opening a list item, in the two `CommonMark`
+    # dialects.** Pandoc writes the rule under a blank line of its own,
+    # which makes the item start with one — and CommonMark reads an item
+    # that starts with a blank line as an *empty* item. Pandoc's own
+    # bytes come back as an empty item and a rule beside the list, and
+    # under an ordered marker the rule comes back as a **code block**.
+    # `- ***` survives both readers, so the dialects that cannot keep the
+    # blank line keep the block instead. Pandoc's own markdown, where the
+    # shape does round-trip, is written pandoc's way.
+    #
+    #     ./scripts/probe.sh -t gfm -f gfm 'bullets([[rule]])'
+    *[(flavour, f"in/{holder}<HorizontalRule")
+      for flavour in ("commonmark", "gfm")
+      for holder in ("Bullet", "Ordered")],
     # **A footnote of more than one block in AsciiDoc.** The syntax is
     # `footnote:[...]`, an inline macro, and a block cannot go in one —
     # pandoc gives up and writes `[multiblock footnote omitted]`, losing
@@ -409,7 +423,7 @@ def group_of(name):
 
 FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
           "latex": 160, "rst": 160, "asciidoc": 160, "plain": 158}
-COMPOSITION = {"markdown": 120, "commonmark": 116, "gfm": 114, "html": 119,
+COMPOSITION = {"markdown": 126, "commonmark": 120, "gfm": 118, "html": 119,
                "latex": 122, "rst": 114, "asciidoc": 109, "plain": 118}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
