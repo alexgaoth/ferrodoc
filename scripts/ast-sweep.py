@@ -355,6 +355,40 @@ DELIBERATE = {
     # a line of **spaces**, which is not an underline: its own reader
     # gives the heading back as a paragraph. Five quotes survive.
     ("rst", "block/Header6"),
+    # **A list marker on the line after a two-space hard break.** Pandoc
+    # writes it bare and its own reader then takes it as a list: `a  \n- x`
+    # comes back a `Para` *and* a `BulletList`, and `1.` the same way. The
+    # escape here keeps the one paragraph the document is. `===` is the
+    # same rule seen from the setext end and is escaped with them.
+    #
+    #     printf 'a  \n- x\n' | pandoc -f commonmark -t json
+    *[(flavour, f"escape/continuation {lead!r}")
+      for flavour in ("commonmark", "gfm")
+      for lead in ("-", "+", "1.", "1)", "2.", "===")],
+    # **A `LineBreak` inside an inline container.** Markdown has no
+    # spelling for one, and pandoc's attempt does not survive its own
+    # reader: `*\*` comes back as the `Str` `"**"` for the dialect, and a
+    # nested `BulletList` for the other two. What this writes round-trips
+    # exactly in the dialect and comes back as literal asterisks with the
+    # break intact in the other two — less lost, either way.
+    #
+    #     ./scripts/probe.sh -t markdown -f markdown 'para(emph(linebreak))'
+    *[(flavour, f"in/{holder}<LineBreak")
+      for flavour, holders in (
+          ("markdown", ("Emph", "Header", "Term", "Cell")),
+          ("commonmark", ("Emph", "Link", "Header", "Quoted", "Term")),
+          ("gfm", ("Emph", "Link", "Header", "Quoted", "Term", "Cell")),
+      )
+      for holder in holders],
+    # **A footnote of more than one block in AsciiDoc.** The syntax is
+    # `footnote:[...]`, an inline macro, and a block cannot go in one —
+    # pandoc gives up and writes `[multiblock footnote omitted]`, losing
+    # the content outright. This writes the blocks into the macro, which
+    # AsciiDoctor renders and pandoc does not read back either way.
+    # Already recorded before the sweep saw it; see COMPATIBILITY.md.
+    *[("asciidoc", f"in/Note<{inner}")
+      for inner in ("CodeBlock", "BulletList", "Table", "BlockQuote",
+                    "Header", "HorizontalRule", "LineBlock", "Para.two")],
 }
 
 # **Two axes, two floors, because one scalar over both gates neither.**
@@ -367,10 +401,10 @@ DELIBERATE = {
 def group_of(name):
     return "composition" if name.startswith("in/") else "flat"
 
-FLOORS = {"markdown": 159, "commonmark": 152, "gfm": 154, "html": 158,
+FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
           "latex": 157, "rst": 160, "asciidoc": 160, "plain": 158}
-COMPOSITION = {"markdown": 116, "commonmark": 111, "gfm": 108, "html": 118,
-               "latex": 100, "rst": 83, "asciidoc": 95, "plain": 102}
+COMPOSITION = {"markdown": 120, "commonmark": 116, "gfm": 114, "html": 118,
+               "latex": 100, "rst": 83, "asciidoc": 103, "plain": 102}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"

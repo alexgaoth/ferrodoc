@@ -2631,6 +2631,55 @@ whatever the features forgot.
   cannot turn `data-onclick` into an event handler that runs. Pandoc's
   writer does the same.
 
+## What the composition sweep records
+
+`./scripts/ast-sweep.sh` walks each AST variant alone (the *flat* axis)
+and then crosses container against content (the *composition* axis). A
+divergence it names is either fixed or listed in its `DELIBERATE` set,
+and each entry there points here. Three are recorded so far, each
+measured rather than argued:
+
+**A list marker on the line after a two-space hard break.** `commonmark`
+and `gfm` only. Pandoc writes the marker bare and **its own reader then
+takes it as a list**, so the one paragraph the document is comes back as
+two blocks. This escapes it and keeps the paragraph.
+
+    printf 'a  \n- x\n' | pandoc -f commonmark -t json   # Para AND BulletList
+    printf 'a  \n1. x\n' | pandoc -f commonmark -t json  # Para AND OrderedList
+
+`===` is the same rule reached from the setext end and is escaped with
+them, on the reasoning already recorded for a dash run.
+
+**A `LineBreak` inside an inline container.** Markdown has no spelling
+for a hard break inside emphasis, a heading, a link, a quote, a
+definition term or a table cell, and pandoc's attempt does not survive
+its own reader:
+
+    ./scripts/probe.sh -t markdown   -f markdown   'para(emph(linebreak))'
+    ./scripts/probe.sh -t commonmark -f commonmark 'para(emph(linebreak))'
+
+The dialect's `*\*` comes back as the `Str` `"**"` — the emphasis and the
+break both gone — and `commonmark`'s `*  *` comes back as a **nested
+`BulletList`**. What this writes round-trips exactly in the dialect, and
+in the other two comes back as literal asterisks with the break intact.
+Less is lost either way, which is the whole reason the bytes are not
+copied.
+
+**A footnote of more than one block in AsciiDoc.** `footnote:[…]` is an
+inline macro and a block cannot go inside one. Pandoc gives up and writes
+`[multiblock footnote omitted]`, losing the content; this writes the
+blocks into the macro, which AsciiDoctor renders. Pandoc reads neither
+back, so nothing is measurable except what survives to a reader that is
+not pandoc.
+
+**The rest are gaps, not decisions**, and are counted as such: the sweep
+still names 162 divergences that are neither fixed nor listed. The
+largest groups are pandoc's TeX-to-Unicode math rendering (this writes
+the `$x^2$` fallback where pandoc writes `x²`), grid tables in the
+`plain` and `rst` writers, and a set of small LaTeX spellings —
+`\item ~`, `\tightlist` placement, `\VERB|…|` and
+`\phantomsection\label{}`.
+
 ## How to check any of this yourself
 
 Everything above is reproducible from a clone with pandoc 3.8.2.1 on the
