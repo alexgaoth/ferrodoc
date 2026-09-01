@@ -603,7 +603,36 @@ fn item_is_tight(item: &[Block]) -> bool {
 ///
 /// `verbatim` rather than `lstlisting`: it needs no package, so the
 /// output compiles on a minimal TeX installation.
+/// `\VERB|…|` for an inline code span that names a class.
+///
+/// `None` where there is no class, which is the ordinary `\texttt` case,
+/// and where the build has no highlighter.
+#[cfg(feature = "highlight")]
+fn verb(attr: &ferrodoc_ast::Attr, code: &str, colour: bool) -> Option<String> {
+    use ferrodoc_html::highlight;
+    if !colour || attr.classes.is_empty() {
+        return None;
+    }
+    let language = attr.classes.iter().find(|class| highlight::known(class));
+    let mut state = highlight::State::default();
+    let pieces = match language {
+        Some(language) => highlight::line(code, highlight::canonical(language), &mut state),
+        None => vec![(highlight::Class::Normal, code.to_owned())],
+    };
+    Some(format!("\\VERB|{}|", highlight::latex_line(&pieces)))
+}
+
+#[cfg(not(feature = "highlight"))]
+fn verb(_attr: &ferrodoc_ast::Attr, _code: &str, _colour: bool) -> Option<String> {
+    None
+}
+
 fn code_block_to(attr: &ferrodoc_ast::Attr, code: &str, colour: bool, out: &mut String) {
+    // An identifier is a `\label`, and it goes *before* the environment
+    // with a comment character eating the newline it would otherwise add.
+    if !attr.identifier.is_empty() {
+        let _ = writeln!(out, "\\protect\\phantomsection\\label{{{}}}%", attr.identifier);
+    }
     if let Some(text) = colour.then(|| highlighted(attr, code)).flatten() {
         out.push_str(&text);
     } else {
@@ -1065,7 +1094,14 @@ fn inline_to(inline: &Inline, colour: bool, out: &mut String) {
         // A citation is its content: LaTeX has no form that survives
         // pandoc's reader.
         Inline::Cite(_, inner) => inlines(inner, colour, out),
-        Inline::Code(_, code) => out.push_str(&verbatim(code)),
+        // **A class turns an inline code span into `\\VERB`**, whose
+        // content is highlighted the way a block's is. An *identifier*
+        // alone does not — `code("x", attr("i"))` stays `\\texttt{x}` in
+        // both binaries, and only a class moves it. Probed either side.
+        Inline::Code(attr, code) => match verb(attr, code, colour) {
+            Some(text) => out.push_str(&text),
+            None => out.push_str(&verbatim(code)),
+        },
         Inline::Math(kind, math) => {
             let (open, close) = match kind {
                 ferrodoc_ast::MathType::InlineMath => ("\\(", "\\)"),

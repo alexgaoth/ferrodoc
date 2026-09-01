@@ -164,6 +164,9 @@ pub fn latex_line(pieces: &[(Class, String)]) -> String {
             match ch {
                 '\\' => out.push_str("\\textbackslash{}"),
                 '~' => out.push_str("\\textasciitilde{}"),
+                // A backtick is `commandchars`-safe but pandoc spells it
+                // out anyway, and the bytes are the test.
+                '`' => out.push_str("\\textasciigrave{}"),
                 '^' => out.push_str("\\^{}"),
                 '{' | '}' | '#' | '%' | '&' | '_' => {
                     out.push('\\');

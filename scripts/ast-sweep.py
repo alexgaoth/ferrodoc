@@ -408,7 +408,7 @@ def group_of(name):
     return "composition" if name.startswith("in/") else "flat"
 
 FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
-          "latex": 157, "rst": 160, "asciidoc": 160, "plain": 158}
+          "latex": 160, "rst": 160, "asciidoc": 160, "plain": 158}
 COMPOSITION = {"markdown": 120, "commonmark": 116, "gfm": 114, "html": 118,
                "latex": 114, "rst": 91, "asciidoc": 108, "plain": 110}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
