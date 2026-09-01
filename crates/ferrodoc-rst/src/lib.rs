@@ -449,7 +449,12 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             // **A heading is never filled.** Pandoc keeps one on a
             // single line however narrow the column — and an underline
             // as long as the title is what makes it a heading at all.
-            let text = trimmed(&text).replace([BREAK, SOFT], " ");
+            // Trailing only: pandoc keeps the space its footnote
+            // reference is written with, so a heading that is nothing but
+            // one is ` [1]_` under five dashes and not four.
+            let text = text
+                .trim_end_matches(|c: char| c.is_whitespace() || c == BREAK || c == SOFT)
+                .replace([BREAK, SOFT], " ");
             // An explicit target above the heading is how RST names one —
             // but a heading is **already** a target under the name its own
             // text makes, so pandoc writes one only where the identifier
@@ -472,7 +477,11 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
             // Character *width*, not byte length: an underline shorter
             // than the title is a warning in every RST tool, and a heading
             // with an accent in it is one byte longer than it looks.
-            let width = text.chars().count().max(1);
+            //
+            // The widest **line**, and not the whole string: a heading
+            // holding a hard break is written on two lines, and counting
+            // the characters of both underlined `a\nb` with three dashes.
+            let width = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
             let _ = writeln!(out, "{text}\n{}", underline.to_string().repeat(width));
         }
         // Fourteen dashes, which is what pandoc writes. Four is a valid

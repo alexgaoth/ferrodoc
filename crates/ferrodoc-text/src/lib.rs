@@ -11,7 +11,7 @@
 //! Unicode (`$x^2$` becomes `x²`) where this writes the TeX, and it fills
 //! to `--columns` where this never wraps.
 
-use ferrodoc_ast::{Alignment, Block, Inline, ListNumberDelim, Pandoc};
+use ferrodoc_ast::{Alignment, Block, Inline, ListNumberDelim, Pandoc, Table};
 use std::fmt::Write as _;
 
 /// The column a `HorizontalRule` fills and pandoc's default `--columns`.
@@ -61,6 +61,9 @@ fn render(doc: &Pandoc, columns: Option<usize>, preserve: bool) -> String {
 }
 
 #[derive(Default)]
+// Four independent facts about where the block being written sits, none
+// of which is a state the others follow from.
+#[allow(clippy::struct_excessive_bools)]
 struct Writer {
     /// Footnote bodies in label order, filled after the main pass.
     notes: Vec<String>,
@@ -93,12 +96,18 @@ struct Writer {
     /// `[N] ` label, which shifts the body's first line and nothing
     /// after it. The first line laid out consumes it.
     hanging: usize,
-    /// How many list items deep the block being written is. A list item
-    /// renders its content with an **empty** prefix and adds the
-    /// continuation indent afterwards, so the prefix cannot say whether
-    /// the block is nested — and a code block four spaces in is markup at
-    /// the top level and four stray spaces inside an item.
-    nested: usize,
+    /// Whether the block being written is the **first** one inside a
+    /// container that indents — a quote, a list item, a definition body.
+    /// A list item renders its content with an **empty** prefix and adds
+    /// the continuation indent afterwards, so the prefix cannot say it,
+    /// and a code block four spaces in is markup at the top level and
+    /// four stray spaces inside an item.
+    ///
+    /// It has to be a property of *that one block* rather than a depth:
+    /// as a counter it stayed set for a quote's later blocks and for
+    /// everything inside a `Div`, so `> <div>a\n\ncode` lost the code
+    /// block's four spaces that pandoc writes.
+    opening: bool,
 }
 
 impl Writer {
@@ -152,8 +161,14 @@ impl Writer {
         out
     }
 
+    /// Only the first block of a sequence can be the one that opens a
+    /// container, so the flag is spent here — which is what carries it
+    /// through a `Div`, whose blocks are the container's own.
     fn blocks(&mut self, blocks: &[Block], out: &mut Vec<String>, prefix: &str) {
-        for block in blocks {
+        for (index, block) in blocks.iter().enumerate() {
+            if index > 0 {
+                self.opening = false;
+            }
             self.block(block, out, prefix);
         }
     }
@@ -166,9 +181,12 @@ impl Writer {
             }
             // **A heading is never filled.** Pandoc keeps one on a single
             // line however long it is and however narrow the column; a
-            // heading broken in two reads as two headings.
+            // heading broken in two reads as two headings — and a *hard*
+            // break in one is a space for the same reason, which the two
+            // soft marks alone did not cover: `LineBreak` is written as a
+            // real newline here and survived the replacement.
             Block::Header(_, _, inlines) => {
-                let text = self.inlines(inlines).replace([BREAK, SOFT], " ");
+                let text = self.inlines(inlines).replace(['\n', BREAK, SOFT], " ");
                 out.push(indent(&text, prefix));
             }
             // Four spaces, which is what makes it read as code at all,
@@ -179,31 +197,25 @@ impl Writer {
             // has a `sh` block inside a blockquote, and it came out level
             // with the prose around it.
             //
-            // The **first block of a container** is the exception, and
-            // `nested` is what says so: a quote or an item that opens
-            // with code gets the container's indent and nothing more —
-            // `> ```{.sh}` is 2 where the same block one paragraph later
-            // is 6. A list item renders that first block with an empty
-            // prefix and adds its continuation indent afterwards, so the
-            // prefix cannot be read for it either.
+            // The **first line of a container's first block** is the
+            // exception, and `opening` is what says so: it is written on
+            // a line the container has already begun, so the four spaces
+            // are missing *there* and present on every line below —
+            // `> ```{.sh}` is 2 and the code under it is 6. A list item
+            // renders that first block with an empty prefix and adds its
+            // continuation afterwards, so the prefix cannot be read for
+            // it either.
             Block::CodeBlock(_, text) => {
-                let inner = if self.nested == 0 {
-                    format!("{prefix}    ")
-                } else {
-                    prefix.to_owned()
-                };
-                out.push(indent(text.trim_end_matches('\n'), &inner));
+                let body = indent(text.trim_end_matches('\n'), &format!("{prefix}    "));
+                out.push(if self.opening { open_line(&body, prefix, 4) } else { body });
             }
             // Two more spaces per level, so nesting is visible.
             Block::BlockQuote(inner) => {
                 let inner_prefix = format!("{prefix}  ");
                 let before = out.len();
-                if let Some((first, rest)) = inner.split_first() {
-                    self.nested += 1;
-                    self.block(first, out, &inner_prefix);
-                    self.nested -= 1;
-                    self.blocks(rest, out, &inner_prefix);
-                }
+                let opening = std::mem::replace(&mut self.opening, true);
+                self.blocks(inner, out, &inner_prefix);
+                self.opening = opening;
                 // A quote whose content renders to nothing — a raw block
                 // in another format is one — is still a quote, and pandoc
                 // writes its indentation on a line of its own.
@@ -258,7 +270,9 @@ impl Writer {
                         .all(|d| matches!(d.first(), Some(Block::Plain(_))));
                     let mut bodies = Vec::new();
                     for definition in definitions {
+                        let opening = std::mem::replace(&mut self.opening, true);
                         self.blocks(definition, &mut bodies, &format!("{prefix}    "));
+                        self.opening = opening;
                     }
                     if tight {
                         out.push(std::iter::once(term).chain(bodies).collect::<Vec<_>>().join("\n"));
@@ -277,35 +291,69 @@ impl Writer {
                     .collect();
                 out.push(indent(&text.join("\n"), prefix));
             }
-            Block::Table(table) => {
-                let rendered = self.table(table);
-                if !rendered.is_empty() {
-                    // A table opens with a blank line of its own, which
-                    // is invisible at the top level and is the
-                    // container's indentation inside one. Probed: a quote
-                    // holding a table starts with a line of just the
-                    // quote's two spaces.
-                    let mut text = indent(&rendered, prefix);
-                    if !prefix.is_empty() {
-                        text.insert_str(0, &format!("{prefix}\n"));
-                    }
-                    out.push(text);
-                }
-                // **A caption is `: text`**, indented with the table —
-                // written as an ordinary paragraph it read as prose that
-                // had nothing to do with the table above it.
-                if !table.caption.blocks.is_empty() {
-                    let mut caption = Vec::new();
-                    self.blocks(&table.caption.blocks, &mut caption, "");
-                    let text = caption.join("\n");
-                    out.push(indent(&format!("  : {}", text.trim()), prefix));
-                }
-            }
+            Block::Table(table) => self.table_block(table, out, prefix),
             // The rule fills the column count asked for, not a fixed 72.
+            //
+            // Opening a container it takes a line of the container's own
+            // indentation above it, then a blank one: a quote holding
+            // nothing but a rule is `'  \n\n  ---'`. A *table* there
+            // takes the same line without the blank (below), and a rule
+            // one paragraph further down takes neither — both probed.
             Block::HorizontalRule => {
-                out.push(indent(&"-".repeat(self.columns.unwrap_or(COLUMNS)), prefix));
+                let mut text = indent(&"-".repeat(self.columns.unwrap_or(COLUMNS)), prefix);
+                if self.opening && !prefix.is_empty() {
+                    text.insert_str(0, &format!("{prefix}\n\n"));
+                }
+                out.push(text);
             }
             Block::RawBlock(..) => {}
+        }
+    }
+
+    /// A table and its caption, which are **one block**: pushed
+    /// separately, the caption followed the table directly inside a
+    /// *tight* list item, whose blocks are joined by one newline.
+    fn table_block(&mut self, table: &Table, out: &mut Vec<String>, prefix: &str) {
+        let rendered = self.table(table);
+        let mut text = String::new();
+        if !rendered.is_empty() {
+            // A table opens with a blank line of its own, which is invisible
+            // at the top level and is the container's indentation inside one.
+            // Probed: a quote holding a table starts with a line of just the
+            // quote's two spaces.
+            //
+            // **Only a table that opens with a header does.** One that opens
+            // with a border — a multiline or grid table, and a simple table
+            // with no header row — carries no blank line, and that border is
+            // what sits beside a list marker: `- +----+`, not `- ` and the
+            // border below it.
+            text = indent(&rendered, prefix);
+            if opens_with_border(&rendered) {
+                // A multiline table is written two columns in, and those two
+                // are the block's own margin: gone from a line its container
+                // has already begun.
+                if self.opening {
+                    let margin = rendered.chars().take_while(|c| *c == ' ').count();
+                    text = open_line(&text, prefix, margin);
+                }
+            } else if !prefix.is_empty() {
+                text.insert_str(0, &format!("{prefix}\n"));
+            }
+        }
+        // **A caption is `: text`**, indented with the table — written as an
+        // ordinary paragraph it read as prose that had nothing to do with the
+        // table above it.
+        if !table.caption.blocks.is_empty() {
+            let mut caption = Vec::new();
+            self.blocks(&table.caption.blocks, &mut caption, "");
+            let joined = caption.join("\n");
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            text.push_str(&indent(&format!("  : {}", joined.trim()), prefix));
+        }
+        if !text.is_empty() {
+            out.push(text);
         }
     }
 
@@ -350,12 +398,9 @@ impl Writer {
             // so a list inside a quote fills to less than a list at the
             // top level by exactly the quote's two columns.
             self.reserved += continuation.chars().count() + prefix.chars().count();
-            if let Some((first, rest)) = item.split_first() {
-                self.nested += 1;
-                self.block(first, &mut inner, "");
-                self.nested -= 1;
-                self.blocks(rest, &mut inner, "");
-            }
+            let opening = std::mem::replace(&mut self.opening, true);
+            self.blocks(item, &mut inner, "");
+            self.opening = opening;
             self.reserved = reserved;
             let body = inner.join(if loose { "\n\n" } else { "\n" });
             // **A table and a rule take the marker's line to themselves**,
@@ -364,7 +409,14 @@ impl Writer {
             // starting one beside `- ` shifts every line of it. A
             // paragraph, a code block and a nested list all sit at the
             // marker as before.
-            let alone = matches!(item.first(), Some(Block::Table(_) | Block::HorizontalRule));
+            // A table that opens with a border does not: that border is
+            // the line the marker keeps, exactly as a paragraph's first
+            // line would be.
+            let alone = match item.first() {
+                Some(Block::Table(_)) => !opens_with_border(&body),
+                Some(Block::HorizontalRule) => true,
+                _ => false,
+            };
             let mut lines = body.split('\n');
             let mut text = if alone {
                 // The marker keeps its trailing space — `- `, not `-` —
@@ -837,6 +889,28 @@ fn fill(line: &str, first: usize, rest: usize, out: &mut String) {
         }
         out.push_str(word);
     }
+}
+
+/// Drop `margin` columns from the **first line only**, leaving the rest of
+/// the block indented as it was: the block's own indentation is never
+/// written on a line its container has already begun.
+fn open_line(text: &str, prefix: &str, margin: usize) -> String {
+    let cut = prefix.len();
+    if text[cut..].chars().take(margin).any(|c| c != ' ') {
+        return text.to_owned();
+    }
+    format!("{}{}", &text[..cut], &text[cut + margin..])
+}
+
+/// Whether a rendered table starts with a rule rather than a header row —
+/// `-----` for a multiline one, `+----+` for a grid.
+///
+/// Read from the line and not from the table: a multiline table is written
+/// two columns in, so testing the first *character* for a dash said no to
+/// every one of them.
+fn opens_with_border(rendered: &str) -> bool {
+    let first = rendered.lines().next().unwrap_or_default();
+    !first.trim().is_empty() && first.chars().all(|c| matches!(c, ' ' | '-' | '+'))
 }
 
 fn indent(text: &str, prefix: &str) -> String {

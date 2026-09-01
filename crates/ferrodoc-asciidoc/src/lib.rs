@@ -504,7 +504,10 @@ fn header_to(level: i64, attr: &ferrodoc_ast::Attr, list: &[Inline], out: &mut S
             // **A heading is never filled.** Pandoc keeps one on a single
             // line however narrow the column; a heading broken in two
             // reads as a heading and a paragraph.
-            let _ = writeln!(out, "{marks} {}", text.trim().replace([BREAK, SOFT], " "));
+            // Trailing only: a heading that *opens* with a hard break
+            // opens with the space that break is written as, and `trim`
+            // took it — `==  +` came out `== +`.
+            let _ = writeln!(out, "{marks} {}", text.trim_end().replace([BREAK, SOFT], " "));
 }
 
 /// `[#id .class]#text#`, the attribute-carrying span.
