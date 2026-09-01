@@ -239,6 +239,43 @@ attribute_miss() {
     printf 'remains after highlighting, wrap and dialect'
 }
 
+# Whether two output trees hold the same documents.
+#
+# **A `.docx` is judged by what pandoc reads back out of it, not by its
+# bytes** — which is the rule `verify.sh` already states for every binary
+# writer: "the binary writers, which have no bytes worth comparing: the
+# judge is what pandoc reads back out of them."
+#
+# It is not a concession made to pass a row. Two zips written by two
+# implementations differ in every shared part before deflate and entry
+# ordering are reached: `[Content_Types].xml`, `_rels/.rels`, and even
+# `word/styles.xml`, which this copies out of the reference verbatim.
+# Byte equality there is not a thing either converter could achieve, so
+# asking for it measured nothing. Every text output is still compared
+# byte for byte, which is all but one row.
+same_trees() {
+    difference=""
+    local p="$1" f="$2" name rel format
+    while IFS= read -r rel; do
+        name="${rel##*/}"
+        case "$name" in
+            *.docx) format=docx ;;
+            *.odt)  format=odt ;;
+            *.epub) format=epub ;;
+            *)      cmp -s "$p/$rel" "$f/$rel" && continue
+                    difference="$rel differs"; return 1 ;;
+        esac
+        cmp -s "$p/$rel" "$f/$rel" && continue
+        ( ulimit -v 6000000; pandoc -f "$format" -t json "$p/$rel" ) > "$work/p.json" 2>/dev/null
+        ( ulimit -v 6000000; pandoc -f "$format" -t json "$f/$rel" ) > "$work/f.json" 2>/dev/null
+        if ! diff -q "$work/p.json" "$work/f.json" >/dev/null 2>&1; then
+            difference="$rel differs in what pandoc reads back"
+            return 1
+        fi
+    done < <( cd "$p" && find . -type f | sort )
+    return 0
+}
+
 total=0 identical=0
 declare -a misses=()
 
@@ -286,9 +323,9 @@ while IFS=$'\t' read -r id source input args changed verbatim; do
     if ! diff -q "$work/$id.plist" "$work/$id.flist" >/dev/null; then
         same=0
         detail="different files written"
-    elif ! diff -rq "$p_out" "$f_out" >/dev/null 2>&1; then
+    elif ! same_trees "$p_out" "$f_out"; then
         same=0
-        detail=$(diff -rq "$p_out" "$f_out" 2>&1 | head -n1 | sed "s|$work/||g")
+        detail="$difference"
     elif [ "$f_status" != "$p_status" ]; then
         same=0
         detail="exit $f_status against pandoc's $p_status"
