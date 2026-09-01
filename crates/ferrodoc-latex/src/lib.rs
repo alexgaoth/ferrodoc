@@ -814,6 +814,17 @@ fn table_to(table: &Table, colour: bool, out: &mut String) {
         .colspecs
         .iter()
         .any(|colspec| colspec.width != ferrodoc_ast::ColWidth::ColWidthDefault);
+    // **A cell holding anything but one paragraph makes every column a
+    // `p{…}` too**, whether or not the table states a width: an `l`
+    // column is one line and cannot hold a list, a code block or two
+    // paragraphs. Where nothing is stated pandoc divides the width
+    // equally. Probed on both sides — one `Para` in a cell is still `l`,
+    // two are `p{(\linewidth - 0\tabcolsep) * \real{1.0000}}`.
+    let blocky = rows_of(table).any(|row| {
+        row.cells.iter().any(|cell| {
+            !matches!(cell.blocks.as_slice(), [] | [Block::Plain(_) | Block::Para(_)])
+        })
+    });
     let letter = |alignment| match alignment {
         ferrodoc_ast::Alignment::AlignRight => 'r',
         ferrodoc_ast::Alignment::AlignCenter => 'c',
@@ -826,12 +837,17 @@ fn table_to(table: &Table, colour: bool, out: &mut String) {
     };
     let spec: String = if table.colspecs.is_empty() {
         "l".repeat(columns)
-    } else if sized {
+    } else if sized || blocky {
         let gaps = 2 * columns.saturating_sub(1);
         let mut lines = String::from("\n");
         for colspec in &table.colspecs {
             let fraction = match colspec.width {
                 ferrodoc_ast::ColWidth::ColWidth(fraction) => fraction,
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "a column count is small"
+                )]
+                ferrodoc_ast::ColWidth::ColWidthDefault if !sized => 1.0 / columns as f64,
                 ferrodoc_ast::ColWidth::ColWidthDefault => 0.0,
             };
             let _ = writeln!(
@@ -875,7 +891,7 @@ fn table_to(table: &Table, colour: bool, out: &mut String) {
         if sized {
             row_to_boxed(row, columns, &aligns, colour, &mut head);
         } else {
-            row_to(row, columns, colour, &mut head);
+            row_to(row, columns, colour, blocky, &mut head);
         }
     }
     if !table.head.rows.is_empty() {
@@ -894,11 +910,11 @@ fn table_to(table: &Table, colour: bool, out: &mut String) {
     out.push_str("\\endhead\n\\bottomrule\\noalign{}\n\\endlastfoot\n");
     for body in &table.bodies {
         for row in body.head.iter().chain(&body.body) {
-            row_to(row, columns, colour, out);
+            row_to(row, columns, colour, blocky, out);
         }
     }
     for row in &table.foot.rows {
-        row_to(row, columns, colour, out);
+        row_to(row, columns, colour, blocky, out);
     }
     out.push_str("\\end{longtable}\n");
     if !captioned {
@@ -916,7 +932,7 @@ fn row_to_boxed(row: &Row, columns: usize, aligns: &[&str], colour: bool, out: &
         .iter()
         .enumerate()
         .map(|(index, cell)| {
-            let text = cell_text(cell, colour);
+            let text = cell_text(cell, colour, false);
             let ragged = aligns.get(index).copied().unwrap_or("\\raggedright");
             format!("\\begin{{minipage}}[b]{{\\linewidth}}{ragged}\n{text}\n\\end{{minipage}}")
         })
@@ -927,9 +943,17 @@ fn row_to_boxed(row: &Row, columns: usize, aligns: &[&str], colour: bool, out: &
     let _ = writeln!(out, "{row} \\\\");
 }
 
-fn row_to(row: &Row, columns: usize, colour: bool, out: &mut String) {
-    let mut cells: Vec<String> = row.cells.iter().map(|c| cell_text(c, colour)).collect();
+fn row_to(row: &Row, columns: usize, colour: bool, blocky: bool, out: &mut String) {
+    let mut cells: Vec<String> =
+        row.cells.iter().map(|c| cell_text(c, colour, blocky)).collect();
     cells.resize(columns, String::new());
+    // **A `p{…}` row keeps its lines**, and is joined and ended without
+    // the trim a one-line row takes: the newline `\end{Shaded}` must have
+    // is inside the cell, and trimming the row would take it back off.
+    if blocky {
+        let _ = writeln!(out, "{} \\\\", cells.join(" & "));
+        return;
+    }
     // `\\` and not `\tabularnewline`: both end a row, and pandoc writes
     // the short one. The row is trimmed first, so an empty cell at either
     // end leaves one space before the `\\` rather than two.
@@ -938,7 +962,18 @@ fn row_to(row: &Row, columns: usize, colour: bool, out: &mut String) {
     let _ = writeln!(out, "{} \\\\", row.trim_matches(|c: char| c.is_whitespace() || c == BREAK));
 }
 
-fn cell_text(cell: &Cell, colour: bool) -> String {
+fn cell_text(cell: &Cell, colour: bool, blocky: bool) -> String {
+    // A `p{…}` cell is a document and keeps every line it has — a list
+    // stays a list and two paragraphs stay two, with the blank line
+    // between them that makes them two. Only the newline a *literal*
+    // environment must have survives the trim, which is the rule a
+    // footnote holding a code block already follows.
+    if blocky {
+        let mut out = String::new();
+        blocks(&cell.blocks, 0, colour, &mut out);
+        let text = out.trim();
+        return if ends_literal(text) { format!("{text}\n") } else { text.to_owned() };
+    }
     let mut out = String::new();
     for block in &cell.blocks {
         match block {
@@ -946,10 +981,28 @@ fn cell_text(cell: &Cell, colour: bool) -> String {
             other => block_to(other, 0, colour, &mut out),
         }
     }
-    // A cell is one line: a newline inside `&`-separated content ends the
-    // row early and the table stops making sense. It becomes a break mark
-    // rather than a space, because pandoc **does** fill a table row.
+    // A cell of an `l` column is one line: a newline inside
+    // `&`-separated content ends the row early and the table stops making
+    // sense. It becomes a break mark rather than a space, because pandoc
+    // **does** fill a table row.
     out.replace('\n', &BREAK.to_string()).trim().to_owned()
+}
+
+/// Whether the text ends inside a literal environment's closing line,
+/// which must have the newline pandoc writes after it: `\end{Shaded} \\`
+/// on one line is a LaTeX error, not a row.
+fn ends_literal(text: &str) -> bool {
+    matches!(text.lines().last(), Some("\\end{verbatim}" | "\\end{Shaded}"))
+}
+
+/// Every row of a table, head, bodies and foot alike.
+fn rows_of(table: &Table) -> impl Iterator<Item = &Row> {
+    table
+        .head
+        .rows
+        .iter()
+        .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+        .chain(table.foot.rows.iter())
 }
 
 fn caption_text(caption: &Caption, colour: bool, out: &mut String) {
@@ -1040,10 +1093,7 @@ fn note_to(blocks_in_note: &[Block], colour: bool, out: &mut String) {
             // line. Asked of the *last* line rather than latched during
             // the loop, which added the newline to a footnote whose code
             // block was followed by a paragraph.
-            if matches!(
-                text.trim().lines().last(),
-                Some("\\end{verbatim}" | "\\end{Shaded}")
-            ) {
+            if ends_literal(text.trim()) {
                 out.push('\n');
             }
             out.push(OUT);

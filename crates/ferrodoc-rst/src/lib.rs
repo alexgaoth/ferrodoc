@@ -769,7 +769,7 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
         .iter()
         .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
         .chain(table.foot.rows.iter())
-        .map(|row| row_cells(row, table.colspecs.len(), def))
+        .map(|row| grid_cells(row, table.colspecs.len(), def))
         .collect();
     if rows.is_empty() {
         return;
@@ -792,7 +792,7 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
             let widest = rows
                 .iter()
                 .filter_map(|row| row.get(column))
-                .map(|cell| cell.chars().count())
+                .map(|cell| widest_line(cell))
                 .max()
                 .unwrap_or(1)
                 .max(1);
@@ -870,22 +870,42 @@ fn table_to(table: &Table, out: &mut String, def: &mut Defs) {
 /// where every line starts at the same column.
 fn wrap_cell(text: &str, width: usize) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
-    let mut line = String::new();
-    for word in text.split([' ', BREAK, SOFT]).filter(|w| !w.is_empty()) {
-        if line.is_empty() {
-            line.push_str(word);
-        } else if line.chars().count() + 1 + word.chars().count() <= width {
-            line.push(' ');
-            line.push_str(word);
-        } else {
-            lines.push(std::mem::take(&mut line));
-            line.push_str(word);
+    // **The lines the cell already has are lines**, and only one too wide
+    // for its column is broken: a cell holding blocks is laid out before
+    // it gets here, and re-flowing it would run its list items together.
+    // A line that fits is kept as it stands, indentation and all — the
+    // three columns that make a quote a quote are inside the cell.
+    for source in text.split('\n') {
+        let source = source.replace([BREAK, SOFT], " ");
+        if source.chars().count() <= width {
+            lines.push(source.trim_end().to_owned());
+            continue;
+        }
+        let mut line = String::new();
+        for word in source.split(' ').filter(|w| !w.is_empty()) {
+            if line.is_empty() {
+                line.push_str(word);
+            } else if line.chars().count() + 1 + word.chars().count() <= width {
+                line.push(' ');
+                line.push_str(word);
+            } else {
+                lines.push(std::mem::take(&mut line));
+                line.push_str(word);
+            }
+        }
+        if !line.is_empty() {
+            lines.push(line);
         }
     }
-    if !line.is_empty() || lines.is_empty() {
-        lines.push(line);
+    if lines.is_empty() {
+        lines.push(String::new());
     }
     lines
+}
+
+/// The width of a cell: its widest line, not the length of the whole text.
+fn widest_line(text: &str) -> usize {
+    text.lines().map(|line| line.chars().count()).max().unwrap_or(0)
 }
 
 /// Pandoc's default `--columns`, which a grid table's proportions are
@@ -993,6 +1013,28 @@ fn row_cells(row: &Row, columns: usize, def: &mut Defs) -> Vec<String> {
     let mut cells: Vec<String> = row.cells.iter().map(|cell| cell_text(cell, def)).collect();
     cells.resize(columns.max(cells.len()), String::new());
     cells
+}
+
+/// The same for a **grid** table, whose cells keep their blocks.
+///
+/// A grid cell is a document of its own — RST's only table form that can
+/// hold one — and flattening it to a line was the largest single cause of
+/// divergence left in this writer: a list, a code block, a nested table,
+/// two paragraphs and a quote all came out as one run-on line.
+fn grid_cells(row: &Row, columns: usize, def: &mut Defs) -> Vec<String> {
+    let mut cells: Vec<String> = row.cells.iter().map(|cell| cell_blocks(cell, def)).collect();
+    cells.resize(columns.max(cells.len()), String::new());
+    cells
+}
+
+fn cell_blocks(cell: &Cell, def: &mut Defs) -> String {
+    let mut out = String::new();
+    // Nested: a heading in a cell is a `rubric`, for the reason a heading
+    // in any other container is.
+    nested_blocks(&cell.blocks, &mut out, def);
+    // Trailing only. The space pandoc writes a footnote reference with is
+    // the cell's first character where the cell is nothing but one.
+    out.trim_end().to_owned()
 }
 
 /// One simple-table row's cells, with the marker an empty leading cell
