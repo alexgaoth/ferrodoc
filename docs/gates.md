@@ -37,7 +37,7 @@ security certificate. These limits are deliberate and must stay visible:
   pandoc 3.8.2.1 on Linux. The project also builds and tests on macOS and
   Windows, but it does not publish a cross-version or cross-platform pandoc
   equivalence claim.
-- **The real-CLI floor is the score.** The corpus measures 41/48 identical
+- **The real-CLI floor is the score.** The corpus measures 43/48 identical
   commands and the threshold is 33, so every one of them is the supported
   contract and a single row going backwards fails the run. It sat at 11
   while the score climbed 26 -> 33, which had left 22 passing commands free

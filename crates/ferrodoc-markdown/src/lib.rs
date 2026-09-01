@@ -1337,6 +1337,9 @@ fn blocks<'a>(
     dialect: Dialect,
 ) -> Vec<Block> {
     let mut out = Vec::new();
+    // The line the previous node ended on, so that a rejected fence can
+    // tell whether it continues the paragraph above it or starts its own.
+    let mut last_end = 0;
     for node in nodes {
         // A list is the one node that can map to more than one block:
         // pandoc's gfm reader treats task items as a different kind of
@@ -1359,12 +1362,28 @@ fn blocks<'a>(
         } else if let Some(literal) = html {
             out.extend(html_run(&literal, defs, dialect));
         } else if let Some(block) = block(node, src, in_quote, defs, dialect) {
-            if dialect == Dialect::Pandoc {
-                split_leading_html(block, &mut out);
-            } else {
-                out.push(block);
+            // **A rejected fence with no blank line above it belongs to
+            // the paragraph above it.** It is not a block, so it cannot
+            // interrupt one: `para` then ```` ```rust ignore ```` is a
+            // single paragraph with the code span in it, joined by a soft
+            // break, and pandoc writes it that way.
+            let continues = dialect == Dialect::Pandoc
+                && last_end + 1 == node.data.borrow().sourcepos.start.line
+                && matches!(node.data.borrow().value,
+                            NodeValue::CodeBlock(ref cb) if rejected_fence(cb, &node.data.borrow()))
+                && matches!(out.last(), Some(Block::Para(_)));
+            match (continues, block) {
+                (true, Block::Para(inlines)) => {
+                    if let Some(Block::Para(above)) = out.last_mut() {
+                        above.push(Inline::SoftBreak);
+                        above.extend(inlines);
+                    }
+                }
+                (_, block) if dialect == Dialect::Pandoc => split_leading_html(block, &mut out),
+                (_, block) => out.push(block),
             }
         }
+        last_end = node.data.borrow().sourcepos.end.line;
     }
     if dialect == Dialect::Pandoc { native_divs(out, 0) } else { out }
 }
@@ -1520,6 +1539,36 @@ fn paragraph<'a>(
 /// says the block starts in, so a `> ` or a `3. ` in front of it is not
 /// part of the text; the lines under it come from the literal, which
 /// comrak has already dedented.
+/// Whether this fence is not a fence at all in pandoc's markdown.
+///
+/// **An info string of two bare words rejects the fence.** `` ```rust ``
+/// is a code block classed `rust`, `` ```{.rust .ignore} `` is one
+/// carrying both classes, and `` ```rust ignore `` is neither: the
+/// backticks open an inline **code span** and the block is a paragraph.
+/// `CommonMark` and `gfm` both read the code block, so this is the
+/// dialect's alone — and it is not exotic, since `` ```rust ignore `` and
+/// `` ```rust no_run `` are how Rust's own documentation is written.
+///
+/// Restricted to the case that comes out as a single `Code`: the span has
+/// to close, and a **blank line ends the paragraph** before it can, which
+/// leaves the backticks literal and spread over two paragraphs. Those are
+/// left as code blocks rather than guessed at — measured, one shape at a
+/// time.
+fn rejected_fence(cb: &comrak::nodes::NodeCodeBlock, data: &comrak::nodes::Ast) -> bool {
+    cb.fenced
+        && cb.closed
+        && data.attrs.is_none()
+        && cb.info.split_whitespace().count() > 1
+        && !cb.literal.lines().any(|line| line.trim().is_empty())
+}
+
+/// What that fence is instead: one code span holding the info string and
+/// the content, newlines become spaces, exactly as an inline span does.
+fn rejected_fence_code(cb: &comrak::nodes::NodeCodeBlock) -> Inline {
+    let text = format!("{} {}", cb.info.trim(), cb.literal);
+    Inline::Code(Box::default(), text.replace('\n', " ").trim_end().to_owned())
+}
+
 fn unclosed_fence(literal: &str, src: &Src, data: &comrak::nodes::Ast) -> Block {
     let line = src.line(data.sourcepos.start.line);
     let opener = line.get(data.sourcepos.start.column.saturating_sub(1)..).unwrap_or(line);
@@ -1589,6 +1638,9 @@ fn block<'a>(node: &'a AstNode<'a>, src: &Src, in_quote: bool, defs: &Notes, dia
             // and unclosed.
             if dialect == Dialect::Pandoc && cb.fenced && !cb.closed {
                 return Some(unclosed_fence(&cb.literal, src, &data));
+            }
+            if dialect == Dialect::Pandoc && rejected_fence(cb, &data) {
+                return Some(Block::Para(vec![rejected_fence_code(cb)]));
             }
             let keep_literal = cb.fenced
                 && !cb.closed

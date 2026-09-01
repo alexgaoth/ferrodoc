@@ -265,7 +265,7 @@ if [ "$want_gates" = 1 ]; then
     # rather than a flake to tolerate. The 15 rows that differ are 8
     # deliberate and 7 open, each named by the script.
     # See dropin/README.md.
-    gate "real command lines" ./scripts/dropin.sh --fail-under 41
+    gate "real command lines" ./scripts/dropin.sh --fail-under 43
 
     # Every flag that shapes output, against pandoc, over every document
     # in `corpus/`. A **gate at 100**, not a floor: a flag's whole job is
