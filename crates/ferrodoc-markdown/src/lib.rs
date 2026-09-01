@@ -1340,6 +1340,11 @@ fn blocks<'a>(
     // The line the previous node ended on, so that a rejected fence can
     // tell whether it continues the paragraph above it or starts its own.
     let mut last_end = 0;
+    // Whether the block just pushed swallowed a lazy quote. The
+    // paragraph under one is a lazy continuation of the *same*
+    // paragraph — `> outer` / `> > inner` / `> back to outer` is one —
+    // and comrak only split it because it saw the quote as a block.
+    let mut absorbed = false;
     for node in nodes {
         // A list is the one node that can map to more than one block:
         // pandoc's gfm reader treats task items as a different kind of
@@ -1367,16 +1372,54 @@ fn blocks<'a>(
             // interrupt one: `para` then ```` ```rust ignore ```` is a
             // single paragraph with the code span in it, joined by a soft
             // break, and pandoc writes it that way.
-            let continues = dialect == Dialect::Pandoc
+            // **`Plain` counts as much as `Para` here.** A paragraph with
+            // no blank line after it is a `Plain` in this dialect, and a
+            // lazy quote is exactly the thing that follows without one —
+            // so the block to continue is nearly always a `Plain`, and
+            // requiring `Para` meant the rule below never fired once.
+            // What comes out is a `Para`, because the paragraph now runs
+            // to the blank line past the quote.
+            let adjacent = dialect == Dialect::Pandoc
                 && last_end + 1 == node.data.borrow().sourcepos.start.line
+                && matches!(out.last(), Some(Block::Para(_) | Block::Plain(_)));
+            // A quote is the other construct that cannot interrupt a
+            // paragraph here, and it needs its lines read back rather
+            // than its blocks reused — see [`lazy_quote_inlines`].
+            if adjacent && matches!(node.data.borrow().value, NodeValue::BlockQuote) {
+                if let Some(inlines) = lazy_quote_inlines(node, src, defs, dialect) {
+                    if let Some(Block::Para(above) | Block::Plain(above)) = out.pop().as_mut() {
+                        let mut merged = std::mem::take(above);
+                        merged.push(Inline::SoftBreak);
+                        merged.extend(inlines);
+                        out.push(Block::Para(merged));
+                    }
+                    last_end = node.data.borrow().sourcepos.end.line;
+                    absorbed = true;
+                    continue;
+                }
+            }
+            if adjacent
+                && absorbed
+                && matches!(node.data.borrow().value, NodeValue::Paragraph)
+                && let Block::Para(inlines) | Block::Plain(inlines) = block
+            {
+                if let Some(Block::Para(above)) = out.last_mut() {
+                    above.push(Inline::SoftBreak);
+                    above.extend(inlines);
+                }
+                last_end = node.data.borrow().sourcepos.end.line;
+                continue;
+            }
+            let continues = adjacent
                 && matches!(node.data.borrow().value,
-                            NodeValue::CodeBlock(ref cb) if rejected_fence(cb, &node.data.borrow()))
-                && matches!(out.last(), Some(Block::Para(_)));
+                            NodeValue::CodeBlock(ref cb) if rejected_fence(cb, &node.data.borrow()));
             match (continues, block) {
                 (true, Block::Para(inlines)) => {
-                    if let Some(Block::Para(above)) = out.last_mut() {
-                        above.push(Inline::SoftBreak);
-                        above.extend(inlines);
+                    if let Some(Block::Para(above) | Block::Plain(above)) = out.pop().as_mut() {
+                        let mut merged = std::mem::take(above);
+                        merged.push(Inline::SoftBreak);
+                        merged.extend(inlines);
+                        out.push(Block::Para(merged));
                     }
                 }
                 (_, block) if dialect == Dialect::Pandoc => split_leading_html(block, &mut out),
@@ -1384,6 +1427,7 @@ fn blocks<'a>(
             }
         }
         last_end = node.data.borrow().sourcepos.end.line;
+        absorbed = false;
     }
     if dialect == Dialect::Pandoc { native_divs(out, 0) } else { out }
 }
@@ -1539,6 +1583,62 @@ fn paragraph<'a>(
 /// says the block starts in, so a `> ` or a `3. ` in front of it is not
 /// part of the text; the lines under it come from the literal, which
 /// comrak has already dedented.
+/// A blockquote that lazily continues the paragraph above it, read the
+/// way pandoc reads it: as more of that paragraph.
+///
+/// **A blockquote cannot interrupt a paragraph in pandoc's markdown.**
+/// `outer` with `> inner` on the next line and no blank between them is
+/// one paragraph, the `>` ordinary text; `CommonMark` makes it a
+/// paragraph and a quote. A blank line before the `>` gives a real quote
+/// in both, and that case is untouched.
+///
+/// The marker is escaped rather than stripped, and the lines re-read.
+/// Stripping it would lose it — pandoc keeps it, and keeps it *attached*
+/// where no space follows, so `>a` is the single `Str` `">a"` while
+/// `> a` is `">"`, a space, and `"a"`. Escaping reproduces both without
+/// a rule of its own, and leaves the rest of the line to be parsed as
+/// the markdown it is: `*emph*` still comes back an `Emph`.
+///
+/// `None` where the re-read is not a single paragraph — a quote holding
+/// a list or a heading — rather than guess at a shape that was not
+/// measured.
+fn lazy_quote_inlines(
+    node: &AstNode<'_>,
+    src: &Src,
+    defs: &Notes,
+    dialect: Dialect,
+) -> Option<Vec<Inline>> {
+    let span = node.data.borrow().sourcepos;
+    let mut text = String::new();
+    for number in span.start.line..=span.end.line {
+        // **From this quote's own column, not the start of the line.**
+        // A quote inside a quote is written `> > inner`, and taking the
+        // whole line escaped the *outer* marker — which is not content
+        // at all, since these inlines are merged into a paragraph that
+        // already sits inside it. `> >` came out `&gt; &gt;`.
+        let whole = src.line(number);
+        let line = whole.get(span.start.column.saturating_sub(1)..).unwrap_or(whole);
+        // A line inside the quote may carry no marker of its own — it is
+        // a lazy continuation of the quote, and `outer` / `> a` / `more`
+        // is one paragraph of all three. Only a `>` with nothing but
+        // whitespace in front of it is a marker; anywhere else it is the
+        // greater-than sign it looks like.
+        match line.find('>') {
+            Some(at) if line[..at].chars().all(char::is_whitespace) => {
+                text.push_str(&line[..at]);
+                text.push_str("\\>");
+                text.push_str(&line[at + 1..]);
+            }
+            _ => text.push_str(line),
+        }
+        text.push('\n');
+    }
+    match fragment(&text, defs, dialect).as_slice() {
+        [Block::Para(inlines)] => Some(inlines.clone()),
+        _ => None,
+    }
+}
+
 /// Whether this fence is not a fence at all in pandoc's markdown.
 ///
 /// **An info string of two bare words rejects the fence.** `` ```rust ``

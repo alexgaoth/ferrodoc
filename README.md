@@ -18,7 +18,7 @@ Any other language with an FFI links the C ABI in
 > **It is not a drop-in `pandoc`, and the number is in the repository.**
 > `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
 > from public Makefiles and CI files — through both binaries and compares
-> every byte: **43/48 identical**, with 0 refused for a missing flag. The
+> every byte: **44/48 identical**, with 0 refused for a missing flag. The
 > remaining 15 rows are classified by the gate: **8 are deliberate and 7
 > are implementation work**. Seven of the eight are one thing — a
 > standalone page's highlighting stylesheet, which pandoc takes from
@@ -148,7 +148,7 @@ nothing is trusted because it looks right.
 | `ferrodoc-ast` | any `pandoc -t json` document round-trips to an equal value |
 | `ferrodoc-markdown` | **652/652** CommonMark spec examples produce identical ASTs |
 | `ferrodoc-markdown` GFM reader | **655/656** documents produce identical ASTs |
-| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **15/20** over every markdown document in `corpus/`, and **502/652** over the CommonMark spec; `-f markdown` uses this dialect, while `-f commonmark` selects CommonMark |
+| `ferrodoc-markdown` pandoc-markdown reader | **3/3** on the fixtures written for it, **16/20** over every markdown document in `corpus/`, and **504/652** over the CommonMark spec; `-f markdown` uses this dialect, while `-f commonmark` selects CommonMark |
 | `ferrodoc-html` | **652/652** spec examples produce identical HTML |
 | `ferrodoc-docx` reader | **37/37** corpus documents produce identical ASTs, and **7/8** documents written by LibreOffice rather than pandoc |
 | `ferrodoc-docx` writer | **646/652** spec examples survive a DOCX round trip identically, with embedded images and document metadata |
@@ -283,8 +283,8 @@ same set, plus `latex`, `rst`, `asciidoc` and `plain`; `markdown` and
 > `-f commonmark` when that stricter dialect is intended. The explicit
 > `pandoc_markdown` name is available on both sides. `-t markdown` also
 > writes Pandoc Markdown; use `-t commonmark` for strict CommonMark. The
-> Pandoc Markdown reader is not complete: it agrees on **15 of 20** markdown documents in `corpus/` and
-> **502 of 652** CommonMark-spec examples. Its remaining gaps are
+> Pandoc Markdown reader is not complete: it agrees on **16 of 20** markdown documents in `corpus/` and
+> **504 of 652** CommonMark-spec examples. Its remaining gaps are
 > parser-level, not missing extensions: of the 150 spec examples it still
 > reads differently, **40 are emphasis** and **25 are links**. Pandoc's
 > markdown does not apply CommonMark's flanking rules, so `*foo bar *`
@@ -329,7 +329,7 @@ at a time is what let the default flip.
 The gap is counted rather than described: `./scripts/dropin.sh` runs 48
 real pandoc command lines — collected from public Makefiles, CI files and
 scripts — through both binaries and compares every byte either wrote,
-stdout, output files and stderr. **43/48 command lines identical**, with
+stdout, output files and stderr. **44/48 command lines identical**, with
 **0 refused** for a flag ferrodoc does not have.
 
 `--attribute` turns that into work: it retries each miss with one of

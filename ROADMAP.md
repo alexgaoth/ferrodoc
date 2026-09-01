@@ -106,7 +106,7 @@ That is checkable, and 1.0 is not reachable until it is checked.
 
 Today's gates score *ASTs and single conversions*. They cannot answer "would
 this user notice". `scripts/dropin.sh` does, and **its number today is
-`43/48`** — it was `0/48` when the corpus was collected:
+`44/48`** — it was `0/48` when the corpus was collected:
 
 - a corpus of **real command lines** — the invocations that appear in
   Makefiles, CI jobs and scripts, not synthetic ones;
@@ -506,7 +506,7 @@ and each with its own test:
 | bracketed spans `[t]{#id}` | 11/20 | 496 |
 | metadata block scalars (was a **refusal**) | 12/20 | 496 |
 | fence attributes, task items, footnote `Para` | 13/20 | 496 |
-| an unclosed fence and an unclosed comment are text | **15/20** | **502** |
+| an unclosed fence and an unclosed comment are text | **16/20** | **504** |
 
 **Not one example regressed**, at any step: every change was checked
 example by example against the trees the reader produced before it.
