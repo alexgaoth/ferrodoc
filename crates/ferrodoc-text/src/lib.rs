@@ -403,6 +403,13 @@ impl Writer {
         if columns == 0 {
             return String::new();
         }
+        // **A cell holding more than a paragraph gets a grid table**, the
+        // same shape the markdown writer emits. Flattened into a simple
+        // table instead, a code block in a cell came out as one run-on
+        // line and its block structure was gone.
+        if !table.colspecs.is_empty() && !Self::cells_are_simple(table) {
+            return self.grid(table);
+        }
         let sized = table
             .colspecs
             .iter()
@@ -524,6 +531,115 @@ impl Writer {
                 if self.columns.is_some() { base } else { base.max(widest(c) + 2) }
             })
             .collect()
+    }
+
+    /// Whether every cell holds at most one `Plain` or `Para` and spans
+    /// one row and one column — what the simple and multiline shapes
+    /// need, and what sends anything else to a grid.
+    fn cells_are_simple(table: &ferrodoc_ast::Table) -> bool {
+        table
+            .head
+            .rows
+            .iter()
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows)
+            .flat_map(|row| &row.cells)
+            .all(|cell| {
+                cell.col_span.max(1) == 1
+                    && cell.row_span.max(1) == 1
+                    && cell.blocks.len() <= 1
+                    && cell.blocks.iter().all(|b| matches!(b, Block::Plain(_) | Block::Para(_)))
+            })
+    }
+
+    /// One cell's blocks as lines, filled to `width` where there is one.
+    ///
+    /// The writer's own state is put back afterwards — a footnote in a
+    /// cell would otherwise be queued by the measuring pass and again by
+    /// the laying-out one, and every later note would be numbered high.
+    fn grid_cell(&mut self, blocks: &[Block], width: Option<usize>) -> Vec<String> {
+        let columns = std::mem::replace(&mut self.columns, width);
+        let in_cell = std::mem::replace(&mut self.in_cell, true);
+        let hanging = std::mem::take(&mut self.hanging);
+        let queued = self.pending.len();
+        let numbered = self.next_note;
+        let mut out = Vec::new();
+        self.blocks(blocks, &mut out, "");
+        self.pending.truncate(queued);
+        self.next_note = numbered;
+        self.hanging = hanging;
+        self.in_cell = in_cell;
+        self.columns = columns;
+        out.join("\n\n").split('\n').map(str::to_owned).collect()
+    }
+
+    /// Pandoc's **grid table**, for a cell holding anything a simple or
+    /// multiline table cannot: a code block, two paragraphs, a list.
+    ///
+    /// The same shape and the same arithmetic as the markdown writer's,
+    /// measured against `pandoc -t plain` the same way: a stated width
+    /// takes `floor(fraction × (columns − count))` with the **last**
+    /// column taking the remainder; without one a column is as wide as
+    /// its content plus two, and where they do not all fit the ones that
+    /// do keep their width while the rest divide what is left.
+    fn grid(&mut self, table: &ferrodoc_ast::Table) -> String {
+        let count = table.colspecs.len();
+        let header: Vec<&ferrodoc_ast::Row> = table
+            .head
+            .rows
+            .iter()
+            .filter(|row| row.cells.iter().any(|cell| !cell.blocks.is_empty()))
+            .collect();
+        let body: Vec<&ferrodoc_ast::Row> = table
+            .head
+            .rows
+            .iter()
+            .skip(header.len())
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows)
+            .collect();
+        let measure = |writer: &mut Self, row: &ferrodoc_ast::Row| -> Vec<Vec<String>> {
+            row.cells.iter().map(|c| writer.grid_cell(&c.blocks, None)).collect()
+        };
+        let measured: Vec<Vec<Vec<String>>> =
+            header.iter().chain(&body).map(|row| measure(self, row)).collect();
+        let wanted: Vec<usize> = (0..count)
+            .map(|index| {
+                measured
+                    .iter()
+                    .filter_map(|row| row.get(index))
+                    .flat_map(|lines| lines.iter())
+                    .map(|line| line.chars().count())
+                    .max()
+                    .unwrap_or(0)
+                    + 2
+            })
+            .collect();
+        let widths = grid_widths(table, &wanted, self.columns.unwrap_or(COLUMNS), self.columns.is_some());
+        let aligns: Vec<Alignment> = table.colspecs.iter().map(|s| s.alignment).collect();
+        let mut out = Vec::new();
+        if header.is_empty() {
+            out.push(grid_rule(&widths, '-', Some(&aligns)));
+        } else {
+            out.push(grid_rule(&widths, '-', None));
+            for row in &header {
+                let cells: Vec<Vec<String>> =
+                    row.cells.iter().enumerate()
+                        .map(|(i, c)| self.grid_cell(&c.blocks, widths.get(i).map(|w| w.saturating_sub(2).max(1))))
+                        .collect();
+                out.extend(grid_row(&cells, &widths));
+            }
+            out.push(grid_rule(&widths, '=', Some(&aligns)));
+        }
+        for row in &body {
+            let cells: Vec<Vec<String>> =
+                row.cells.iter().enumerate()
+                    .map(|(i, c)| self.grid_cell(&c.blocks, widths.get(i).map(|w| w.saturating_sub(2).max(1))))
+                    .collect();
+            out.extend(grid_row(&cells, &widths));
+            out.push(grid_rule(&widths, '-', None));
+        }
+        out.join("\n")
     }
 
     fn rows(&mut self, rows: &[ferrodoc_ast::Row]) -> Vec<Vec<String>> {
@@ -714,6 +830,164 @@ fn indent(text: &str, prefix: &str) -> String {
         .map(|line| if line.is_empty() { String::new() } else { format!("{prefix}{line}") })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+// ---- grid table geometry -------------------------------------------------
+//
+// **Duplicated from `ferrodoc-markdown`, deliberately.** The two writers
+// emit the same grid, and the arithmetic below was measured once against
+// `pandoc -t markdown` and again against `pandoc -t plain` — but sharing
+// it would mean this crate depending on `ferrodoc-markdown`, and that
+// pulls comrak into a writer that has no parser in it. `ferrodoc-rst`
+// carries its own for the same reason. Change one, check the others.
+
+/// The inner width of each column: everything between two `+`, the
+/// single space of padding at each side included.
+fn grid_widths(table: &ferrodoc_ast::Table, wanted: &[usize], layout: usize, fills: bool) -> Vec<usize> {
+    let count = table.colspecs.len();
+    let stated: Vec<Option<f64>> = table
+        .colspecs
+        .iter()
+        .map(|spec| match spec.width {
+            ferrodoc_ast::ColWidth::ColWidth(fraction) => Some(fraction),
+            ferrodoc_ast::ColWidth::ColWidthDefault => None,
+        })
+        .collect();
+
+    if stated.iter().any(Option::is_some) {
+        // The cells share `columns - count` and the separators are
+        // `count + 1`, so a row of stated widths comes out one column
+        // **wider** than `--columns`. That is pandoc's arithmetic as
+        // measured, not a rounding of ours.
+        let available = layout.saturating_sub(count);
+        let mut widths: Vec<usize> = stated
+            .iter()
+            .map(|fraction| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    clippy::cast_precision_loss,
+                    reason = "a column width is small, never negative, and \
+                              well inside f64's mantissa"
+                )]
+                fraction.map_or(0, |fraction| (fraction * available as f64).floor() as usize)
+            })
+            .collect();
+        // **The last column takes the remainder**, so three columns of a
+        // quarter, a quarter and a half come out 9, 9 and 19 of 37 —
+        // where flooring the last would give 18 and leave the row short.
+        let used: usize = widths.iter().take(count.saturating_sub(1)).sum();
+        if let Some(last) = widths.last_mut() {
+            *last = available.saturating_sub(used);
+        }
+        if !fills {
+            for (width, want) in widths.iter_mut().zip(wanted) {
+                *width = (*width).max(*want);
+            }
+        }
+        return widths;
+    }
+
+    if !fills {
+        return wanted.to_vec();
+    }
+    fair_share(wanted, layout.saturating_sub(count + 1))
+}
+
+/// Divide `available` among columns that each *want* a width: everyone
+/// asking for no more than an equal share gets exactly what they asked
+/// for, and what they leave behind is shared out again among the rest.
+///
+/// Two columns wanting 32 and 7 of 27 come out 20 and 7 — the small one
+/// is satisfied and the large one takes the rest — and three wanting 4,
+/// 5 and 38 of 26 come out 4, 5 and 17. Both measured.
+fn fair_share(wanted: &[usize], available: usize) -> Vec<usize> {
+    let mut widths = vec![0_usize; wanted.len()];
+    let mut settled = vec![false; wanted.len()];
+    let mut left = available;
+    let mut open = wanted.len();
+    while open > 0 {
+        let share = left / open;
+        let mut moved = false;
+        for (index, want) in wanted.iter().enumerate() {
+            if !settled[index] && *want <= share {
+                widths[index] = *want;
+                settled[index] = true;
+                left -= *want;
+                open -= 1;
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    if let Some(share) = left.checked_div(open) {
+        let mut last = None;
+        for index in 0..wanted.len() {
+            if !settled[index] {
+                widths[index] = share;
+                last = Some(index);
+            }
+        }
+        // The last unsettled column absorbs the division's remainder, so
+        // the row is exactly as wide as it was told to be.
+        let used: usize = widths.iter().sum();
+        if let Some(index) = last {
+            widths[index] += available.saturating_sub(used);
+        }
+    }
+    widths
+}
+
+/// A `+---+` rule, or the `+===+` that closes a header — carrying the
+/// alignment markers where they belong.
+fn grid_rule(widths: &[usize], fill: char, aligns: Option<&[Alignment]>) -> String {
+    let mut out = String::from("+");
+    for (index, width) in widths.iter().enumerate() {
+        let alignment =
+            aligns.and_then(|aligns| aligns.get(index)).copied().unwrap_or(Alignment::AlignDefault);
+        let (left, right) = match alignment {
+            Alignment::AlignLeft => (true, false),
+            Alignment::AlignRight => (false, true),
+            Alignment::AlignCenter => (true, true),
+            Alignment::AlignDefault => (false, false),
+        };
+        let marks = usize::from(left) + usize::from(right);
+        if left {
+            out.push(':');
+        }
+        for _ in 0..width.saturating_sub(marks) {
+            out.push(fill);
+        }
+        if right {
+            out.push(':');
+        }
+        out.push('+');
+    }
+    out
+}
+
+/// One row laid out: as tall as its tallest cell, every cell padded to
+/// its column and held between pipes.
+fn grid_row(cells: &[Vec<String>], widths: &[usize]) -> Vec<String> {
+    let height = cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
+    (0..height)
+        .map(|line| {
+            let mut text = String::from("|");
+            for (index, width) in widths.iter().enumerate() {
+                let piece =
+                    cells.get(index).and_then(|lines| lines.get(line)).map_or("", String::as_str);
+                text.push(' ');
+                text.push_str(piece);
+                for _ in piece.chars().count()..width.saturating_sub(2) {
+                    text.push(' ');
+                }
+                text.push_str(" |");
+            }
+            text
+        })
+        .collect()
 }
 
 #[cfg(test)]
