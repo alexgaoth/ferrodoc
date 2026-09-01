@@ -614,6 +614,26 @@ fn table_to(table: &Table, out: &mut String) {
         .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
         .chain(table.foot.rows.iter())
     {
+        // **`a|` is the cell that can hold blocks**, and it is the only
+        // way AsciiDoc has of putting one in a table: the content goes on
+        // the lines after it and a blank line closes it. Flattened into a
+        // plain `|` cell instead, a code block came out
+        // `|[source,bash] ---- x ----` — one line of the markers that were
+        // supposed to be a block.
+        if row.cells.iter().any(|cell| !cell_is_simple(cell)) {
+            for cell in &row.cells {
+                if cell_is_simple(cell) {
+                    let _ = writeln!(out, "|{}", cell_text(cell));
+                } else {
+                    out.push_str("a|\n");
+                    for block in &cell.blocks {
+                        block_to(block, out, Depth::default());
+                    }
+                    out.push('\n');
+                }
+            }
+            continue;
+        }
         // `|A |B` — the cells are joined by a space rather than each
         // carrying a trailing one, so the row does not end in whitespace.
         let cells: Vec<String> =
@@ -621,6 +641,15 @@ fn table_to(table: &Table, out: &mut String) {
         let _ = writeln!(out, "{}", cells.join(" "));
     }
     out.push_str("|===\n");
+}
+
+/// Whether a cell is one this writer can put after a plain `|`: at most
+/// one `Plain` or `Para`, and no span. Anything else needs `a|`.
+fn cell_is_simple(cell: &Cell) -> bool {
+    cell.col_span.max(1) == 1
+        && cell.row_span.max(1) == 1
+        && cell.blocks.len() <= 1
+        && cell.blocks.iter().all(|b| matches!(b, Block::Plain(_) | Block::Para(_)))
 }
 
 fn cell_text(cell: &Cell) -> String {
