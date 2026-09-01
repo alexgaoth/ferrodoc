@@ -925,9 +925,22 @@ fn caption_text(caption: &Caption, colour: bool, out: &mut String) {
 /// render does not clear it, so the two spaces around it meet.
 fn inlines(list: &[Inline], colour: bool, out: &mut String) {
     let mut after_break = false;
+    // **`\\` needs a line to break, and a run that opens with one has
+    // none** — `\emph{\\}` is a LaTeX error, so pandoc writes
+    // `\hfill\break` there. Not a rule about containers: `\emph{a\\` is
+    // what both write, and a break opening a *top-level* paragraph takes
+    // `\hfill\break` too. Decided here because `inline_to` renders each
+    // inline into a buffer of its own and cannot see what came before it.
+    let mut emitted = false;
     for inline in list {
         let breaking = matches!(inline, Inline::Space | Inline::SoftBreak);
         if breaking && after_break {
+            continue;
+        }
+        if matches!(inline, Inline::LineBreak) && !emitted {
+            out.push_str("\\hfill\\break\n");
+            emitted = true;
+            after_break = false;
             continue;
         }
         let mut piece = String::new();
@@ -936,6 +949,7 @@ fn inlines(list: &[Inline], colour: bool, out: &mut String) {
             continue;
         }
         out.push_str(&piece);
+        emitted = true;
         after_break = breaking;
     }
 }
