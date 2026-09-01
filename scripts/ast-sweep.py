@@ -227,7 +227,12 @@ INNER_INLINES = [
     ("Code", {"t": "Code", "c": [A, "a`b"]}),
     ("Math", {"t": "Math", "c": [{"t": "InlineMath"}, "x^2"]}),
     ("Link", {"t": "Link", "c": [A, inls("t"), ["u", ""]]}),
-    ("Image", {"t": "Image", "c": [A, inls("pic"), ["p", ""]]}),
+    # **A distinct alt text per container**, for the reason the flat axis
+    # already records: RST names a substitution after the alt text and
+    # uniquifies a repeat to `|image1|`. Seven containers sharing "pic"
+    # made six of them look like writer differences — `in/Header<Image`
+    # is byte-identical asked one case per invocation.
+    ("Image", lambda holder: {"t": "Image", "c": [A, inls(f"pic{holder}"), ["p", ""]]}),
     ("Note", {"t": "Note", "c": [para("n")]}),
     ("Strikeout", wrap("Strikeout", "s")),
     ("SmallCaps", wrap("SmallCaps", "s")),
@@ -238,7 +243,8 @@ INNER_INLINES = [
 
 for _outer, _build in INLINE_IN:
     for _inner, _node in INNER_INLINES:
-        case(f"in/{_outer}<{_inner}", _build(_node))
+        case(f"in/{_outer}<{_inner}",
+             _build(_node(_outer) if callable(_node) else _node))
 
 BLOCK_IN = [
     ("BlockQuote", lambda bs: {"t": "BlockQuote", "c": bs}),
@@ -404,7 +410,7 @@ def group_of(name):
 FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
           "latex": 157, "rst": 160, "asciidoc": 160, "plain": 158}
 COMPOSITION = {"markdown": 120, "commonmark": 116, "gfm": 114, "html": 118,
-               "latex": 106, "rst": 83, "asciidoc": 103, "plain": 102}
+               "latex": 106, "rst": 91, "asciidoc": 103, "plain": 102}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"

@@ -1078,8 +1078,18 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
                 QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
                 QuoteType::DoubleQuote => ('\u{201c}', '\u{201d}'),
             };
+            // **Into a fresh buffer**, so the quote this writes is not
+            // read as the neighbour of what it wraps. The escaped space
+            // before inline markup is decided by the *sibling inline*
+            // and never by the container's own marker — the rule this
+            // file already states for `**` — and rendering in place made
+            // `“:literal:`a`b`”` come out `“\ :literal:`a`b`”`.
+            // A quote written as literal text still separates: `“` in a
+            // `Str` beside a code span takes the escape from both.
+            let mut wrapped = String::new();
+            inlines(inner, &mut wrapped, def);
             out.push(open);
-            inlines(inner, out, def);
+            out.push_str(&wrapped);
             out.push(close);
         }
         // Double backticks, and no escaping inside them: that is what
