@@ -392,16 +392,7 @@ fn block_to(block: &Block, depth: usize, colour: bool, out: &mut String) {
                 .collect();
             let _ = writeln!(out, "{}\n", rendered.join("\\\\\n"));
         }
-        Block::CodeBlock(attr, code) => {
-            if let Some(text) = colour.then(|| highlighted(attr, code)).flatten() {
-                out.push_str(&text);
-            } else {
-                // `verbatim` rather than `lstlisting`: it needs no package,
-                // so the output compiles on a minimal TeX installation.
-                let _ =
-                    writeln!(out, "\\begin{{verbatim}}\n{}\n\\end{{verbatim}}", code.trim_end());
-            }
-        }
+        Block::CodeBlock(attr, code) => code_block_to(attr, code, colour, out),
         Block::BlockQuote(inner) => {
             out.push_str("\\begin{quote}\n");
             blocks(inner, depth, colour, out);
@@ -447,7 +438,11 @@ fn block_to(block: &Block, depth: usize, colour: bool, out: &mut String) {
                     .collect();
                 let mut short = String::new();
                 inlines(&kept, colour, &mut short);
-                let _ = write!(out, "\\{macro_name}[{short}]");
+                // **An empty one is written as none at all.** With any
+                // text beside the picture the argument stays, trailing
+                // space and all — `\\subsection[a ]`. Probed both ways.
+                let arg = if short.is_empty() { short } else { format!("[{short}]") };
+                let _ = write!(out, "\\{macro_name}{arg}");
             } else {
                 let _ = write!(out, "\\{macro_name}");
             }
@@ -535,7 +530,9 @@ fn definition_list_to(
             for (term, definitions) in entries {
                 out.push_str("\\item[");
                 inlines(term, colour, out);
-                out.push_str("]\n");
+                // The spaces either side of the tilde are pandoc's.
+                let filler = definitions.first().is_some_and(|d| definition_needs_filler(d));
+                out.push_str(if filler { "] ~ \n" } else { "]\n" });
                 // **A blank line between definitions.** Without it two
                 // definitions run into one paragraph.
                 for (index, definition) in definitions.iter().enumerate() {
@@ -584,12 +581,44 @@ fn tightlist(items: &[Vec<Block>], out: &mut String) {
 ///
 /// A blank line stays empty: indenting it would put trailing whitespace
 /// where pandoc has none, and the bytes are the test.
+/// A code block: highlighted where there is a language and a
+/// highlighter, and `verbatim` otherwise.
+///
+/// `verbatim` rather than `lstlisting`: it needs no package, so the
+/// output compiles on a minimal TeX installation.
+fn code_block_to(attr: &ferrodoc_ast::Attr, code: &str, colour: bool, out: &mut String) {
+    if let Some(text) = colour.then(|| highlighted(attr, code)).flatten() {
+        out.push_str(&text);
+    } else {
+        let _ = writeln!(out, "\\begin{{verbatim}}\n{}\n\\end{{verbatim}}", code.trim_end());
+    }
+}
+
+/// Whether `\item` needs a `~` before the block that follows it.
+///
+/// `\item` expects something on its own line and a **heading** puts a
+/// sectioning macro there instead, so pandoc writes `\item ~` and lets
+/// the heading start the next line. Probed one first-block at a time: a
+/// code block, a quote, a rule, a table and a line block all need
+/// nothing, and it is the heading alone.
+fn item_needs_filler(item: &[Block]) -> bool {
+    matches!(item.first(), Some(Block::Header(..)))
+}
+
+/// The same for a **definition**, where the set is not the same: a code
+/// block needs it there and does not in a list item. Both measured, not
+/// generalised from the one.
+fn definition_needs_filler(definition: &[Block]) -> bool {
+    matches!(definition.first(), Some(Block::Header(..) | Block::CodeBlock(..)))
+}
+
 fn item_to(item: &[Block], depth: usize, colour: bool, out: &mut String) {
     // A task item's box reaches this writer as the `☐`/`☒` the GFM reader
     // makes of it, and LaTeX's is the optional argument of `\item`.
     // Written as text it set as a missing glyph in most fonts.
     let (label, item) = task_box(item);
-    let _ = writeln!(out, "\\item{label}");
+    let filler = if item_needs_filler(&item) { " ~" } else { "" };
+    let _ = writeln!(out, "\\item{label}{filler}");
     let mut text = String::new();
     blocks(&item, depth, colour, &mut text);
     // A `verbatim` environment is flush left however deep it sits: its
