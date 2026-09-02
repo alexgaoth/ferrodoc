@@ -1922,6 +1922,15 @@ Math is matched too: `$x^2$` is `x²` here as it is in pandoc, and the
 TeX between dollars is what both write for the expressions neither
 renders. `scripts/math.sh` is the gate that says how many.
 
+**The EPUB spec monitor is not a claim.** `scripts/verify.sh` prints
+`11/22` for `corpus/epub-spec`, and the level is deliberately not
+published: those books are the CommonMark spec chunked into files, so
+what the number measures is the **HTML reader** compounding over 652
+examples rather than anything about EPUB. It is gated at 50 as a
+regression check — a *drop* is real even where the level is not a figure
+— and `corpus/epub-spec/generate.sh` says how the books are made. The
+EPUB reader's own figure is `11/12` on `corpus/epub`, above.
+
 **A picture that is not there is warned about, in pandoc's words.**
 The DOCX, ODT and EPUB writers embed their media, so a missing file
 changes the output, and saying nothing left a converted document with

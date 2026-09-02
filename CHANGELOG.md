@@ -8,6 +8,39 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
+## 1.0.0 — 2026-09-01
+
+### Indistinguishable, on a scope that is written down
+
+**The claim.** For the nine formats this supports, ferrodoc produces
+byte-identical output to pandoc 3.8.2.1 or fails loudly saying what it
+will not do. `README.md` names what it will not do, each entry with the
+workaround where there is one; **citations are the named exception**.
+
+Nothing in the public API changed. This release is the number behind the
+sentence:
+
+| what it says | where it is measured |
+|---|---|
+| every AST construct, in every writer | `scripts/ast-sweep.sh` — **286/286 on all eight**, flat and composed, with no divergence that is neither fixed nor recorded |
+| every TeX expression it renders | `scripts/math.sh` — **242/243**, and the one that differs is a recorded escaping decision |
+| real command lines from the wild | `dropin/` — **47/48**, none of them *fixable* |
+| the markdown, GFM and HTML writers | the CommonMark spec, **652/652** and **656/656** and **652/652** |
+| the resource bound | 80× input RSS, worst gated path 60× |
+
+### What changed since 0.8.0
+
+- **Math is rendered, not written.** `commonmark`, `html` and `plain`
+  convert a TeX expression to inlines the way pandoc does — `$x^2$` is
+  `x²` and `<em>x</em><sup>2</sup>` — and write the source between
+  dollars only for the expressions pandoc writes that way too.
+- **Every writer's composition axis is whole.** The sweep crosses
+  container against content, and all eight writers now match pandoc on
+  every pair: RST's inline nesting, AsciiDoc's containers, the markdown
+  rule, the plain writer's first lines, LaTeX and GFM table cells.
+- **`scripts/math.sh` is a new gate**, because the sweep asks about
+  `$x^2$` and nothing else.
+
 ## 0.8.0 — 2026-08-30
 
 ### `markdown` is Pandoc Markdown in both directions

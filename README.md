@@ -453,6 +453,26 @@ where the claim is that for the formats this supports, it produces
 byte-identical output to pandoc or fails loudly saying what it will not do —
 with a drop-in corpus of real command lines as the number that decides it.
 
+## What this does not do
+
+The list, with the workaround where there is one. Every flag below is
+**refused by name** — `ferrodoc: unknown option --citeproc` — rather than
+accepted and ignored, so a script that depends on one fails where it is
+called instead of producing a document that is quietly wrong.
+
+| not done | workaround |
+|---|---|
+| **Citations** — `--citeproc`, `--bibliography`, CSL | pandoc. This is the named exception to the 1.0 claim: CSL processing and five bibliography readers are the size of everything here, and shipping without them is what makes the rest checkable |
+| **Lua filters** — `--lua-filter` | the JSON AST, which is what most filters walk: `ferrodoc in.md -t json \| your-filter \| ferrodoc -f json -t html` |
+| **PDF output** — `-t pdf`, `--pdf-engine` | `-t latex` and then `latexmk`/`pdflatex`, which is what pandoc shells out to; CI compiles this writer's output on every push |
+| **Math output modes** — `--mathjax`, `--katex`, `--mathml` | none. Math is rendered the way pandoc's default does it: to Unicode where it can, and to the TeX source between dollars where it cannot |
+| **`--listings`** | the default highlighted `Shaded`/`Highlighting` environments, which is pandoc's default too |
+| **The other ~30 formats** | pandoc. The nine here are in the table above; anything else is refused by name at the command line |
+
+`--template` is supported, and so are `-V`, `--toc`, `-H`, `-B`, `-A`,
+`--css` and `--data-dir`: `-s` writes a complete page through pandoc's own
+default template, vendored here, byte-identical across all of them.
+
 ## Where pandoc is still ahead
 
 The table above is not the whole picture, and pretending otherwise would make

@@ -28,6 +28,14 @@ mod table;
 pub use attr::{Attr, Format, Target};
 pub use block::{Block, ListAttributes, ListNumberDelim, ListNumberStyle};
 pub use inline::{Citation, CitationMode, Inline, MathType, QuoteType};
+/// TeX rendered as inlines, exposed for the **three writers that render
+/// math** — `commonmark`, `html` and `plain`.
+///
+/// Not part of the supported surface — `#[doc(hidden)]`, like
+/// `ferrodoc-html`'s `highlight`, which the LaTeX writer is built on for
+/// the same reason: it is machinery two crates share, not a promise
+/// about this one's API.
+#[doc(hidden)]
 pub use math::tex_inlines;
 pub use meta::{Meta, MetaValue};
 pub use table::{

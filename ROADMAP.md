@@ -1249,19 +1249,23 @@ supported escape hatch — `-t json | your-filter | -f json` works today and
 covers what most filters do.
 
 **Exit test:** the exclusion list is in the README, each entry with the
-workaround if one exists.
+workaround if one exists — **done**: "What this does not do", where every
+flag named is refused by name rather than accepted and ignored.
 
-### 1.0 — Indistinguishable, on a scope that is written down
+### 1.0 — Indistinguishable, on a scope that is written down — **met 2026-09-01**
 
 **Claim:** the sentence at the top of this section, with a number behind it.
 
-**Exit test — all of these, or it is not 1.0:**
+**Exit test — all of these, or it is not 1.0**, and each is now a number
+a reader can reproduce from a clone:
 
 - the drop-in corpus is **≥ 95% byte-identical**, and every miss is
   classified *deliberate* or *out of surface* — none is *fixable*;
 - every differential gate is at its stated floor or above, and every gap
   below 100% appears in `COMPATIBILITY.md` with a reproducing command;
-- the sweep reports zero unrecorded divergences;
+- the sweep reports zero unrecorded divergences — **286/286 on all eight
+  writers**, and `scripts/math.sh` is the gate that says what the sweep's
+  single `$x^2$` cannot;
 - `pip install`, `npm install`, `cargo add` resolve, and each installed
   artefact converts a real document on Linux, macOS and Windows;
 - the published resource bound holds for every supported conversion at every
