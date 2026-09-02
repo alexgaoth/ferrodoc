@@ -42,7 +42,7 @@ export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
 cargo run -p ferrodoc-harness -- diff-spec      corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-ast       corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html      corpus/commonmark-spec-0.31.2.json --fail-under 100
-cargo run -p ferrodoc-harness -- diff-docx      corpus/docx --fail-under 96
+cargo run -p ferrodoc-harness -- diff-docx      corpus/docx --fail-under 100
 cargo run -p ferrodoc-harness -- diff-write     corpus --fail-under 90
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt --fail-under 94
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt-libreoffice --fail-under 100
@@ -54,7 +54,7 @@ cargo run -p ferrodoc-harness -- diff-md        corpus/commonmark-spec-0.31.2.js
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm       corpus/commonmark-spec-0.31.2.json --fail-under 99.8
 cargo run -p ferrodoc-harness -- diff-gfm-md    corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
-cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96
+cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96.9
 ```
 
 | gate | what it proves | result |

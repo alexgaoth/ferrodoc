@@ -44,9 +44,16 @@ security certificate. These limits are deliberate and must stay visible:
   to regress unread. The one row that differs, `dropin-006`, is a
   deliberate divergence.
 - **A sub-100 format floor is not completion.** It prevents a measured
-  baseline from falling; it does not turn a 96% reader or a 70% dialect
+  baseline from falling; it does not turn a 97% reader or an 85% dialect
   reader into general compatibility. Read the current score and each named
   divergence in `COMPATIBILITY.md` before relying on that path.
+- **Every floor is now within one document of its score**, swept
+  2026-09-02. Before that sweep five gates kept a margin wide enough for a
+  whole document to regress unread — the rule the drop-in gate had been
+  following since August was simply not applied to the others. What a
+  tight floor still does not say is that the *remaining* gap is small:
+  `diff-pandoc-md` is held at 85 because 85 is what it scores, not
+  because three missing documents out of twenty is close.
 - **The commands are representative, not literal substitution tests.** 27 of
   48 have a retargeted output format or local stand-in asset; they test the
   command and flag shape, not an unmodified external workflow. See
@@ -105,6 +112,7 @@ The gates, and what each one proves:
 | `diff-rst` | the RST writer round-trips the document, with pandoc's score on the same corpus printed beside it |
 | `diff-latex` | **printed, and cannot fail the run.** Pandoc round-trips 1/13 of this corpus — our number exactly — so any floor would be a number chosen after seeing the score. The LaTeX writer is decided by `pdflatex` in CI and by literal-output tests |
 | `math.sh` | every TeX expression this renders is rendered as pandoc renders it — and every one it *gives up on* is one pandoc gives up on too, since the sweep asks about `$x^2$` and nothing else |
+| `drift.sh` | **every threshold the prose asserts is a threshold a gate has** — it reads the numbers out of the four scripts that enforce them and fails when a doc names one no gate holds. `ROADMAP.md` and `CHANGELOG.md` are exempt, being history by their own reading discipline |
 | `hostile.sh` | **no reader crashes the process** on input written to break it — the one gate here with no pandoc in it, because the contract is that a conversion writes bytes or returns an error, never a signal, a panic or a hang |
 | `bench-rss` | no conversion path exceeds its published multiple of the input |
 

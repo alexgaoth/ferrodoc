@@ -153,11 +153,23 @@ fi
 
 if [ "$want_gates" = 1 ]; then
     echo "== differential gates vs pandoc $PANDOC_PINNED"
+    # **Every floor below is within one document of its score**, swept
+    # 2026-09-02. The rule was already written down for the drop-in gate
+    # — a floor is the score, not a margin under it — and five gates here
+    # were still keeping a margin wide enough for a whole document to go
+    # backwards unread: the HTML reader at 96 against 96.97,
+    # pandoc-markdown at 70 against 85 and at 76 against 77.3, the DOCX
+    # reader at 96 against a clean 37/37, and the RST writer at 18
+    # against 30.8. Losing one document scored 97.3, 80, 77.1, 97.3 and
+    # 23.1 respectively, and only the last of those would have failed.
+    #
+    # A floor is raised to the score *and no higher*, and a fix is not
+    # landed until its floor moves with it.
     SPEC=corpus/commonmark-spec-0.31.2.json
     gate "markdown reader"      $HARNESS diff-spec       $SPEC --fail-under 100
     gate "AST round trip"       $HARNESS diff-ast        corpus --fail-under 100
     gate "HTML writer"          $HARNESS diff-html       $SPEC --fail-under 100
-    gate "HTML reader"          $HARNESS diff-html-read  $SPEC corpus --fail-under 96
+    gate "HTML reader"          $HARNESS diff-html-read  $SPEC corpus --fail-under 96.9
     gate "markdown writer"      $HARNESS diff-md         $SPEC --fail-under 100
     gate "GFM reader (corpus)"  $HARNESS diff-gfm        corpus/gfm --fail-under 100
     gate "GFM reader (spec)"    $HARNESS diff-gfm        $SPEC --fail-under 99.8
@@ -168,12 +180,12 @@ if [ "$want_gates" = 1 ]; then
     # one's own constructs always reads; this is the number that says how
     # far pandoc's dialect actually is, and it is why `-f markdown` does
     # not alias it — see ROADMAP card D4.4.
-    gate "pandoc-markdown (all markdown)" $HARNESS diff-pandoc-md corpus --fail-under 70
+    gate "pandoc-markdown (all markdown)" $HARNESS diff-pandoc-md corpus --fail-under 85
     # And the same reader over the CommonMark spec, which is 652 examples
     # rather than twenty documents. Twenty cannot say how far a *dialect*
     # is — the corpus blind spot is the most expensive recurring defect
     # in this repository — and this run costs seven seconds.
-    gate "pandoc-markdown (spec)" $HARNESS diff-pandoc-md $SPEC --fail-under 76
+    gate "pandoc-markdown (spec)" $HARNESS diff-pandoc-md $SPEC --fail-under 77.2
     # `--toc` and `--number-sections` have no gate in the harness: the
     # rest of a standalone page is deliberately not pandoc's, so only
     # the `<nav>` block and the heading lines are comparable. The
@@ -181,7 +193,7 @@ if [ "$want_gates" = 1 ]; then
     # `COMPATIBILITY.md` publishes its 6/6 — a number nothing re-checks
     # is the defect `samples/` was added to fix.
     gate "toc and numbering"    ./scripts/compare-toc.sh
-    gate "DOCX reader"          $HARNESS diff-docx       corpus/docx --fail-under 96
+    gate "DOCX reader"          $HARNESS diff-docx       corpus/docx --fail-under 100
     gate "DOCX reader (LO)"     $HARNESS diff-docx       corpus/docx-libreoffice --fail-under 87
     gate "DOCX writer"          $HARNESS diff-write      corpus --fail-under 90
     gate "ODT reader"           $HARNESS diff-odt        corpus/odt --fail-under 94
@@ -242,7 +254,7 @@ if [ "$want_gates" = 1 ]; then
     # the ceiling is the format, not the writer. There is deliberately no
     # `diff-asciidoc` — pandoc writes AsciiDoc and cannot read it, so
     # there is no oracle; `asciidoctor` judges that one in CI.
-    gate "RST writer (fidelity)"       $HARNESS diff-rst corpus --fail-under 18
+    gate "RST writer (fidelity)"       $HARNESS diff-rst corpus --fail-under 30
 fi
 
 if [ "$want_gates" = 1 ]; then
@@ -329,6 +341,23 @@ if [ "$want_gates" = 1 ]; then
     # happened and `$SCORES` is what it printed.
     step "README and COMPATIBILITY still derive" ok \
         ./scripts/claims.sh --gates "$SCORES"
+    # And the sentences *about* the thresholds, which are the half that
+    # actually drifted. Every threshold in this project has always lived
+    # in this file and nowhere else — but on 2026-09-02 three separate
+    # files still explained the drop-in number as 33, which the gate had
+    # left behind two moves earlier on its way to 47. The floor was right
+    # and every description of it was stale, and no gate could see that,
+    # because a gate reads scores and never its own documentation.
+    #
+    # It earned itself immediately: the first draft of *this comment*
+    # named the stale figure in the asserting form and the check flagged
+    # it — twice, since the reword quoted the phrase as an example and a
+    # regex cannot tell a quotation from a claim. That is the right
+    # severity. A file stating current contracts is the last place a
+    # retired number should appear in the present tense, whoever wrote it
+    # and however they meant it; the history belongs in ROADMAP.md and
+    # CHANGELOG.md, which is why those two are exempt.
+    step "every stated threshold matches a gate" ok ./scripts/drift.sh --floors
 fi
 
 if [ "$want_samples" = 1 ]; then

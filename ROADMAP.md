@@ -1333,22 +1333,32 @@ collected documents.
   budget, or documenting the limit and leaving it to the caller) get
   written down before any of them is built. *Not this card:* the same
   question for DOCX or ODT.
-- **Card: the threshold drift check.** `verify.sh` is the single source
-  of every threshold, but the *prose explaining* them is hand-copied into
-  `docs/gates.md`, `COMPATIBILITY.md` and `dropin/README.md` — and on
-  2026-09-02 all three still explained a drop-in threshold of 33 that the
-  gate had left behind at 47. The floor was right; three descriptions of
-  it were two moves stale, and nothing could have caught that.
-  *Verify:* a check that extracts each `--fail-under N` from `verify.sh`
-  and fails when a doc names a different number for that gate.
-  *Done:* the check is in `verify.sh` and fails on a planted edit.
-- **Card: give `diff-pandoc-md` a floor, then move it.** At **504/652**
-  it is the largest measured gap in the project, it is a reader, and it
-  has **no floor at all** — so it is free to decay in both directions.
-  The floor comes first and is a separate card from the fix, because a
-  floor is what makes the fix durable. *Not this card:* the fix.
-- **Card: `diff-html-read` 641/661.** Twenty documents, already
-  enumerated.
+- **Card: the threshold drift check — met 2026-09-02.**
+  `scripts/drift.sh` reads the 22 thresholds out of the four scripts that
+  enforce them and fails when prose asserts one no gate has. 64 stated
+  thresholds, all matching. It fails on the exact sentence that stood in
+  three files, and it earned itself twice on its first run: once on the
+  comment introducing it, and again on the reword that quoted the stale
+  phrase as an example. `ROADMAP.md` and `CHANGELOG.md` are exempt,
+  because history is not a current claim and a check that forbade "it sat
+  at 11" would forbid explaining how a floor got where it is.
+- **Card: every floor within one document of its score — met
+  2026-09-02.** The card first written here said `diff-pandoc-md` had no
+  floor. **That was wrong** — it has three. The real defect was the one
+  this project had already named for the drop-in gate and then not
+  applied anywhere else: a floor kept as a *margin under* the score
+  leaves room for a whole document to regress unread. Five gates were
+  loose by that test — the HTML reader (96 against 96.97),
+  pandoc-markdown twice (70 against 85, 76 against 77.3), the DOCX reader
+  (96 against a clean 37/37) and the RST writer (18 against 30.8) — and
+  in four of the five, losing a document would still have passed. All
+  five now sit within one document of their score.
+- **Card: close the reader gaps the floors now hold.** `diff-pandoc-md`
+  at 504/652 over the spec and 17/20 over the corpus is the largest
+  measured gap in the project, and `diff-html-read` is 641/661 — twenty
+  documents, already enumerated. The floors above make a fix durable;
+  they do not make one. *Done:* a score moves and its floor moves with
+  it.
 
 **Not in 1.1:** the highlighting thermometer's bash row. It is a long
 tail where each failing script differs for several independent reasons,

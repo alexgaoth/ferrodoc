@@ -166,7 +166,7 @@ nothing is trusted because it looks right.
 cargo run -p ferrodoc-harness -- diff-spec  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
-cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 96
+cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx-libreoffice --fail-under 87
 cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
 cargo run -p ferrodoc-harness -- diff-odt   corpus/odt --fail-under 94
@@ -177,7 +177,7 @@ cargo run -p ferrodoc-harness -- diff-gfm    corpus/gfm --fail-under 100
 cargo run -p ferrodoc-harness -- diff-gfm    corpus/commonmark-spec-0.31.2.json --fail-under 99.8
 cargo run -p ferrodoc-harness -- diff-gfm-md corpus/gfm corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-pandoc-md corpus/pandoc-markdown --fail-under 100
-cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96
+cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.json corpus --fail-under 96.9
 ```
 
 **What these comparisons hand pandoc, and why.** Three of them pass a flag,
