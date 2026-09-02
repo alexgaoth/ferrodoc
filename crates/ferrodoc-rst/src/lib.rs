@@ -193,8 +193,9 @@ fn separate(out: &mut String) {
 /// item, no other position is.
 #[derive(Default)]
 struct Defs {
-    /// Substitution name to URL, in first-use order.
-    images: Vec<(String, String)>,
+    /// Substitution name, URL, and the link target the picture stands
+    /// for, in first-use order.
+    images: Vec<(String, String, Option<String>)>,
     /// Footnote bodies, in label order, filled after the main pass.
     notes: Vec<String>,
     /// The blocks of each **top-level** note, queued while the document is
@@ -208,6 +209,16 @@ struct Defs {
     next_note: usize,
     /// Whether a note's body is being rendered right now.
     in_note: bool,
+    /// Whether the inlines being written are inside RST **markup**,
+    /// which cannot nest. A nested emphasis, small caps, a superscript,
+    /// a strikeout or an image is written as its *text* there, and the
+    /// escaped space that separates markup from a word is written all
+    /// the same — `*a\\ e\\ b*` for emphasis inside emphasis. Measured
+    /// over every container-and-child pair pandoc can be asked about.
+    ///
+    /// A quote and a span are not markup and do not set it: an underline
+    /// inside one is still `*n*`.
+    flat: Flat,
     /// Whether the blocks being written are **inside** something — a
     /// quote, a container, a list item, a cell, a footnote. RST has no
     /// nested section headings, so a `Header` there is a `rubric`.
@@ -250,12 +261,12 @@ impl Defs {
     /// same alt text already names the same URL and uniquing it when it
     /// names a different one. Two definitions of one name is an error in
     /// docutils, not a last-one-wins.
-    fn image_name(&mut self, alt: &str, url: &str) -> String {
+    fn image_name(&mut self, alt: &str, url: &str, target: Option<&str>) -> String {
         if !alt.is_empty() {
-            match self.images.iter().find(|(name, _)| name == alt) {
-                Some((_, existing)) if existing == url => return alt.to_owned(),
+            match self.images.iter().find(|(name, _, _)| name == alt) {
+                Some((_, existing, _)) if existing == url => return alt.to_owned(),
                 None => {
-                    self.images.push((alt.to_owned(), url.to_owned()));
+                    self.images.push((alt.to_owned(), url.to_owned(), target.map(str::to_owned)));
                     return alt.to_owned();
                 }
                 Some(_) => {}
@@ -263,7 +274,7 @@ impl Defs {
         }
         self.generated += 1;
         let name = format!("image{}", self.generated);
-        self.images.push((name.clone(), url.to_owned()));
+        self.images.push((name.clone(), url.to_owned(), target.map(str::to_owned)));
         name
     }
 
@@ -290,8 +301,15 @@ impl Defs {
         // line and then writes them on consecutive lines.
         if !self.images.is_empty() {
             separate(out);
-            for (name, url) in &self.images {
+            for (name, url, target) in &self.images {
                 let _ = writeln!(out, ".. |{name}| image:: {url}");
+                // **A link whose text is only a picture is the picture's
+                // own target**: RST has no way to put a substitution
+                // inside a reference, and `:target:` is where pandoc puts
+                // the link instead.
+                if let Some(target) = target {
+                    let _ = writeln!(out, "   :target: {target}");
+                }
             }
         }
     }
@@ -315,6 +333,19 @@ const INDENT: &str = "   ";
 /// because a flag that has to be set in six places is a flag that will
 /// be missed in one — which is how a `Flavour` variant once cost the
 /// notebook round trip five of sixteen documents.
+/// The empty comment that goes above a quote **opening** an indented
+/// container.
+///
+/// A `container` directive's content and a definition's body are indented
+/// already, and a quote inside one is indented again — with nothing
+/// between them to say where the container's own indentation ends, so
+/// docutils reads the quote as more of the container. Pandoc writes `..`
+/// there, the same marker `blocks` writes between a block that closes
+/// indented and a quote that follows it.
+fn opening_comment(inner: &[Block]) -> &'static str {
+    if matches!(inner.first(), Some(Block::BlockQuote(_))) { "..\n\n" } else { "" }
+}
+
 fn nested_blocks(list: &[Block], out: &mut String, def: &mut Defs) {
     let was = std::mem::replace(&mut def.nested, true);
     blocks(list, out, def);
@@ -363,7 +394,8 @@ fn closes_indented(block: &Block) -> bool {
 
 fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
     match block {
-        Block::Plain(list) | Block::Para(list) => para_to(list, out, def),
+        Block::Plain(list) => para_to(list, true, out, def),
+        Block::Para(list) => para_to(list, false, out, def),
         Block::LineBlock(lines) => {
             for line in lines {
                 let mut text = String::new();
@@ -437,7 +469,7 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
                 inlines(term, &mut text, def);
                 let _ = writeln!(out, "{}", text.trim_end());
                 for definition in definitions {
-                    let mut body = String::new();
+                    let mut body = String::from(opening_comment(definition));
                     nested_blocks(definition, &mut body, def);
                     out.push_str(&indent(&body));
                 }
@@ -498,10 +530,19 @@ fn block_to(block: &Block, out: &mut String, def: &mut Defs) {
 /// break starts a new `| ` line and a soft break continues the one before
 /// it, indented two.
 fn hard_broken_para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
-    for segment in list.split(|inline| matches!(inline, Inline::LineBreak)) {
+    let segments: Vec<&[Inline]> =
+        list.split(|inline| matches!(inline, Inline::LineBreak)).collect();
+    for (index, segment) in segments.iter().enumerate() {
         let mut text = String::new();
         inlines(segment, &mut text, def);
-        let mut lines = text.trim_end().lines();
+        let text = text.trim_end();
+        // **A break at the very end starts no line.** Pandoc writes `| a`
+        // for a paragraph ending in one, not `| a` and a bare `|`: the
+        // break is between lines and there is no line after the last.
+        if text.is_empty() && index + 1 == segments.len() && index > 0 {
+            continue;
+        }
+        let mut lines = text.lines();
         let _ = writeln!(out, "| {}", lines.next().unwrap_or_default());
         for line in lines {
             let _ = writeln!(out, "  {line}");
@@ -559,13 +600,18 @@ fn literal_backticks(code: &str) -> String {
 }
 
 /// A paragraph, in whichever of the three shapes RST needs for it.
-fn para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
+fn para_to(list: &[Inline], plain: bool, out: &mut String, def: &mut Defs) {
             // **A hard break has no paragraph spelling in RST**, so a
             // paragraph holding one is written as a line block: each hard
             // break starts a new `| ` line and a soft break continues the
             // one before it, indented two. Written as plain text the
             // break simply vanished.
-            if list.iter().any(|inline| matches!(inline, Inline::LineBreak)) {
+            //
+            // **A `Plain` is not a paragraph** and takes no line block:
+            // pandoc writes the break as a bare newline there, which is
+            // what a table cell holding one is — and a cell holding
+            // nothing else is empty, not a `|` of its own.
+            if !plain && list.iter().any(|inline| matches!(inline, Inline::LineBreak)) {
                 hard_broken_para_to(list, out, def);
                 return;
             }
@@ -637,7 +683,7 @@ fn container_to(attr: &ferrodoc_ast::Attr, inner: &[Block], out: &mut String, de
                 let _ = writeln!(out, "{INDENT}:name: {}", attr.identifier);
             }
             out.push('\n');
-            let mut body = String::new();
+            let mut body = String::from(opening_comment(inner));
             nested_blocks(inner, &mut body, def);
             for line in body.trim_end().lines() {
                 if line.is_empty() {
@@ -1129,6 +1175,13 @@ fn produces_markup(inline: &Inline) -> bool {
             | Inline::Strikeout(_)
             | Inline::Superscript(_)
             | Inline::Subscript(_)
+            // Neither is written as markup here — small caps has no RST
+            // spelling and an underline borrows emphasis's — but pandoc
+            // writes the escaped space around both all the same. The
+            // separator is decided by the *inline*, not by what it
+            // renders to: `“a\\ c\\ b”` for small caps in a quote.
+            | Inline::SmallCaps(_)
+            | Inline::Underline(_)
             | Inline::Code(..)
             | Inline::Math(..)
             | Inline::Link(..)
@@ -1136,7 +1189,52 @@ fn produces_markup(inline: &Inline) -> bool {
     )
 }
 
+/// What a container does to the markup nested inside it, which RST
+/// cannot nest.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Flat {
+    /// Not inside markup at all: everything is written as it stands.
+    #[default]
+    No,
+    /// Inside markup: nested markup is its text and an image its alt.
+    Text,
+    /// Inside a **link's** text, where an image keeps its substitution —
+    /// pandoc writes `` `a |g| b <u>`__ `` and defines `|g|` — and
+    /// everything else flattens as it does anywhere else.
+    Link,
+}
+
+/// The content a nested inline is written as when RST cannot nest it.
+///
+/// `None` for the ones that nest perfectly well — code, math, a footnote
+/// reference, a quote, a span — and for a link, which is not flattened
+/// but **promoted**: it splits the marker it sits in. See [`nested`].
+fn flattens(inline: &Inline, flat: Flat) -> Option<&[Inline]> {
+    match inline {
+        Inline::Emph(inner)
+        | Inline::Strong(inner)
+        | Inline::Strikeout(inner)
+        | Inline::Superscript(inner)
+        | Inline::Subscript(inner)
+        | Inline::SmallCaps(inner)
+        | Inline::Underline(inner) => Some(inner),
+        Inline::Image(_, inner, _) if flat == Flat::Text => Some(inner),
+        _ => None,
+    }
+}
+
 fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
+    // **Inside markup, nested markup is its text.** `*emph *strong* in*`
+    // is not strong inside emphasis — docutils reads the inner asterisks
+    // as literal — and an image inside one is its alt text with no
+    // substitution to define. A link is the exception: it is promoted out
+    // of the marker rather than flattened into it, in [`nested`].
+    if def.flat != Flat::No
+        && let Some(inner) = flattens(inline, def.flat)
+    {
+        inlines(inner, out, def);
+        return;
+    }
     match inline {
         Inline::Str(text) => out.push_str(&escape(text)),
         Inline::Space => out.push(BREAK),
@@ -1148,27 +1246,49 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
         // **An underline is written as emphasis**, which is what pandoc
         // does: RST has no underline role, and dropping to bare content
         // lost the markup where `*x*` keeps something a reader sees.
-        Inline::Emph(inner) | Inline::Underline(inner) => wrap("*", inner, out, def),
+        Inline::Emph(inner) => {
+            nested(&Nest { open: "*", close: "*", promote_strong: true, spaces: false, flat: Flat::Text },
+                   inner, out, def);
+        }
+        Inline::Underline(inner) => {
+            nested(&Nest { open: "*", close: "*", promote_strong: false, spaces: false, flat: Flat::Text },
+                   inner, out, def);
+        }
         // RST has no small caps; it keeps its content rather than
         // inventing a role a toolchain would not have. A citation and a
         // span are their content for the same reason.
-        Inline::SmallCaps(inner)
-        | Inline::Cite(_, inner)
-        | Inline::Span(_, inner) => inlines(inner, out, def),
+        // A citation and a span are their content, and neither is
+        // markup: an underline inside one is still `*n*`.
+        Inline::Cite(_, inner) | Inline::Span(_, inner) => inlines(inner, out, def),
+        // Small caps *is* markup with nothing to write it with: its
+        // content is flattened and a link still splits it, so the two
+        // markers are simply empty.
+        Inline::SmallCaps(inner) => {
+            nested(&Nest { open: "", close: "", promote_strong: false, spaces: false, flat: Flat::Text },
+                   inner, out, def);
+        }
         // Strikeout has no RST markup either, and pandoc spells it
         // `[STRIKEOUT:…]` — a convention rather than a directive, but it
         // is what its own RST reader reads back.
         Inline::Strikeout(inner) => {
-            out.push_str("[STRIKEOUT:");
-            inlines(&flattened(inner), out, def);
-            out.push(']');
+            nested(&Nest { open: "[STRIKEOUT:", close: "]", promote_strong: false, spaces: false, flat: Flat::Text },
+                   inner, out, def);
         }
-        Inline::Strong(inner) => wrap("**", inner, out, def),
+        Inline::Strong(inner) => {
+            nested(&Nest { open: "**", close: "**", promote_strong: false, spaces: false, flat: Flat::Text },
+                   inner, out, def);
+        }
         // **`sup` and `sub`, not the long spellings.** Both are standard
         // roles and pandoc writes the short ones; docutils accepts
         // either, so nothing rendered wrongly and no gate could see it.
-        Inline::Superscript(inner) => role("sup", inner, out, def),
-        Inline::Subscript(inner) => role("sub", inner, out, def),
+        Inline::Superscript(inner) => {
+            nested(&Nest { open: ":sup:`", close: "`", promote_strong: false, spaces: true, flat: Flat::Text },
+                   inner, out, def);
+        }
+        Inline::Subscript(inner) => {
+            nested(&Nest { open: ":sub:`", close: "`", promote_strong: false, spaces: true, flat: Flat::Text },
+                   inner, out, def);
+        }
         Inline::Quoted(kind, inner) => {
             let (open, close) = match kind {
                 QuoteType::SingleQuote => ('\u{2018}', '\u{2019}'),
@@ -1219,33 +1339,11 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
                 let _ = write!(out, ":raw-latex:`{text}`");
             }
         }
-        Inline::Link(_, inner, target) => {
-            // **RST cannot nest inline markup**, so a link's text is
-            // plain: `\`link with *emph* inside <x>\`__` is not emphasis
-            // inside a link, it is a literal asterisk. Pandoc flattens it
-            // and so does this.
-            let mut text = String::new();
-            inlines(&flattened(inner), &mut text, def);
-            // A link whose text **is** its target needs no markup at all:
-            // RST linkifies a bare URL, and pandoc writes one. The angle
-            // form around the same string is what this wrote, and it is
-            // what made every README's autolinks differ.
-            let bare = trimmed(&text);
-            if bare == target.url || target.url.strip_prefix("mailto:") == Some(bare) {
-                out.push_str(bare);
-                return;
-            }
-            // An anonymous reference (two underscores) rather than a named
-            // one: a named target must be unique in the document, and two
-            // links with the same text are ordinary.
-            let _ = write!(out, "`{}<{}>`__", text.trim_end().to_owned() + " ", target.url);
-        }
-        // Only the reference is written here. The definition it names is a
-        // block, and `Defs` records why this is not a place one can go.
+        Inline::Link(_, inner, target) => link_to(inner, target, out, def),
         Inline::Image(_, alt, target) => {
             let mut text = String::new();
             inlines(alt, &mut text, def);
-            let name = def.image_name(trimmed(&text), &target.url);
+            let name = def.image_name(trimmed(&text), &target.url, None);
             let _ = write!(out, "|{name}|");
         }
         Inline::Note(blocks_in_note) => {
@@ -1261,25 +1359,6 @@ fn inline_to(inline: &Inline, out: &mut String, def: &mut Defs) {
             }
         }
     }
-}
-
-/// The same inlines with every emphasis-like wrapper removed, because
-/// RST has no way to nest them.
-fn flattened(inlines: &[Inline]) -> Vec<Inline> {
-    let mut out = Vec::with_capacity(inlines.len());
-    for inline in inlines {
-        match inline {
-            Inline::Emph(inner)
-            | Inline::Strong(inner)
-            | Inline::Underline(inner)
-            | Inline::Strikeout(inner)
-            | Inline::SmallCaps(inner)
-            | Inline::Span(_, inner)
-            | Inline::Cite(_, inner) => out.extend(flattened(inner)),
-            other => out.push(other.clone()),
-        }
-    }
-    out
 }
 
 /// The plain text of an inline run, as pandoc's `stringify` produces it
@@ -1329,75 +1408,210 @@ fn slug(text: &str) -> String {
     if joined.is_empty() { "section".to_owned() } else { joined }
 }
 
-fn wrap(marker: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
-    // **RST cannot nest inline markup.** `*emph *strong* text*` is not
-    // strong inside emphasis — docutils reads the inner asterisks as
-    // literal — so pandoc closes the outer marker, writes the inner one
-    // on its own, and opens the outer one again. Without this,
-    // `sphinx-build -W` rejected the document.
-    if inner.iter().any(|i| matches!(i, Inline::Emph(_) | Inline::Strong(_))) {
-        let mut pieces: Vec<String> = Vec::new();
-        let mut run: Vec<Inline> = Vec::new();
-        for item in inner {
-            if matches!(item, Inline::Emph(_) | Inline::Strong(_)) {
-                push_run(marker, &run, &mut pieces, def);
-                run.clear();
-                let mut text = String::new();
-                inline_to(item, &mut text, def);
-                let text = trimmed(&text);
-                if !text.is_empty() {
-                    pieces.push(text.to_owned());
-                }
+/// A link: an anonymous reference, a bare URL, or the picture it
+/// stands for.
+fn link_to(
+    inner: &[Inline],
+    target: &ferrodoc_ast::Target,
+    out: &mut String,
+    def: &mut Defs,
+) {
+        // **RST cannot nest inline markup**, so a link's text is
+        // plain: `\`link with *emph* inside <x>\`__` is not emphasis
+        // inside a link, it is a literal asterisk. Pandoc flattens it
+        // and so does this.
+        // **A link whose text is only a picture** is written as the
+        // picture, with the link as its `:target:`: a substitution
+        // reference cannot go inside a reference, and pandoc writes
+        // `|p|` and defines it with the target under it.
+        if let [Inline::Image(_, alt, picture)] = inner {
+            let mut text = String::new();
+            inlines(alt, &mut text, def);
+            let name = def.image_name(trimmed(&text), &picture.url, Some(&target.url));
+            let _ = write!(out, "|{name}|");
+            return;
+        }
+        // A link whose text **is** its target needs no markup at all:
+        // RST linkifies a bare URL, and pandoc writes one. The angle
+        // form around the same string is what this wrote, and it is
+        // what made every README's autolinks differ.
+        //
+        // Asked of the **rendered** text, not of what the inlines
+        // say: a link whose text is a code span reading `bindings/c`
+        // is not a bare URL — pandoc writes ```` ```bindings/c``
+        // <bindings/c>`__ ```` — and the plain text cannot tell the
+        // two apart. The render is rolled back, or the footnote it
+        // queues is queued a second time by the one below and every
+        // later note is numbered one too high.
+        let mut text = String::new();
+        let queued = (def.images.len(), def.pending.len(), def.next_note, def.generated);
+        let was = std::mem::replace(&mut def.flat, Flat::Link);
+        inlines(inner, &mut text, def);
+        def.flat = was;
+        def.images.truncate(queued.0);
+        def.pending.truncate(queued.1);
+        def.next_note = queued.2;
+        def.generated = queued.3;
+        let bare = trimmed(&text);
+        if bare == target.url || target.url.strip_prefix("mailto:") == Some(bare) {
+            out.push_str(bare);
+            return;
+        }
+        // An anonymous reference (two underscores) rather than a named
+        // one: a named target must be unique in the document, and two
+        // links with the same text are ordinary. A link inside a link
+        // splits the outer one, the way one inside emphasis does.
+        let close = format!(" <{}>`__", target.url);
+        nested(
+            &Nest {
+                open: "`",
+                close: &close,
+                promote_strong: false,
+                spaces: false,
+                // An image in a link's text keeps its substitution,
+                // where one in emphasis is written as its alt text.
+                flat: Flat::Link,
+            },
+            inner,
+            out,
+            def,
+        );
+}
+
+/// How one inline container is written: its markers, whether a `Strong`
+/// inside it is promoted, and whether the marks inside it become spaces.
+struct Nest<'a> {
+    open: &'a str,
+    close: &'a str,
+    /// Only `Emph` promotes a `Strong`: measured, `*a\\ *\\ **s**\\ *\\ b*`
+    /// for emphasis holding one and `**a\\ e\\ b**` — the emphasis
+    /// flattened — for the other way round.
+    promote_strong: bool,
+    /// A role's content is one line: `:sup:` cannot hold a break.
+    spaces: bool,
+    /// What the container does to markup nested inside it.
+    flat: Flat,
+}
+
+/// One run of a container's content, and what was trimmed off its edges.
+struct Run {
+    text: String,
+    /// Whether a break mark came off that side. It is the separator
+    /// pandoc writes there — a real space, where a run that ends in a
+    /// word takes the escaped one.
+    space_before: bool,
+    space_after: bool,
+}
+
+/// One inline container's content, written the way RST allows.
+///
+/// **RST cannot nest inline markup**, and pandoc's answer is not one
+/// answer but two. Nested markup is written as its **text** — emphasis
+/// inside emphasis is `*a\\ e\\ b*`, an image inside one is its alt text
+/// with no substitution defined — while a **link is promoted**: the
+/// marker closes before it and opens again after, so emphasis holding
+/// one is `*a\\ *\\ `t <u>`__\\ *\\ b*`.
+///
+/// The escaped space goes on the side of the marker that faces the
+/// promoted inline, unless the run already ends in a space there, in
+/// which case the space is the separator and no `\\ ` is written at all:
+/// `*a* `t <u>`__ *b*`. A run holding nothing is still written where it
+/// sits *between* two promoted inlines — pandoc's `*\\ *` — and not at
+/// all where it would lead or trail. Every container-and-child pair was
+/// measured against pandoc; the shapes here are its bytes.
+fn nested(nest: &Nest, inner: &[Inline], out: &mut String, def: &mut Defs) {
+    let promoted = |inline: &Inline| {
+        matches!(inline, Inline::Link(..))
+            || (nest.promote_strong && matches!(inline, Inline::Strong(_)))
+    };
+    if !inner.iter().any(promoted) {
+        let run = flat_run(inner, nest, def);
+        let _ = write!(out, "{}{}{}", nest.open, run.text, nest.close);
+        return;
+    }
+    // (text, a space stands on this side already) for each piece.
+    let mut pieces: Vec<(String, bool, bool)> = Vec::new();
+    let mut run: Vec<Inline> = Vec::new();
+    let mut after = false;
+    for item in inner {
+        if promoted(item) {
+            push_run(nest, &run, after, true, &mut pieces, def);
+            run.clear();
+            let mut text = String::new();
+            inline_to(item, &mut text, def);
+            pieces.push((text, false, false));
+            after = true;
+        } else {
+            run.push(item.clone());
+        }
+    }
+    push_run(nest, &run, true, false, &mut pieces, def);
+    for (index, (text, _, space_after)) in pieces.iter().enumerate() {
+        out.push_str(text);
+        if let Some((_, next_space_before, _)) = pieces.get(index + 1) {
+            // A space on either side of the join is the separator; where
+            // neither has one the escaped space stands in for it, which
+            // is nothing at all to a reader.
+            if *space_after || *next_space_before {
+                out.push(BREAK);
             } else {
-                run.push(item.clone());
+                out.push_str("\\ ");
             }
         }
-        push_run(marker, &run, &mut pieces, def);
-        // The gaps **between** the pieces are break opportunities even
-        // though the pieces themselves are not: pandoc breaks after
-        // `*emph in*` and never inside it.
-        out.push_str(&pieces.join(&BREAK.to_string()));
-        return;
     }
-    let mut text = String::new();
-    inlines(inner, &mut text, def);
-    if trimmed(&text).is_empty() {
-        out.push_str(&text);
-        return;
-    }
-    // **A span is not one word to the fill.** Docutils joins a
-    // paragraph's continuation lines before it reads the markup, so
-    // `**a long run**` may be broken anywhere inside it — and pandoc
-    // does, filling `**section` onto one line and `for this version**`
-    // onto the next. Treating the span as unbreakable pushed it whole
-    // onto a new line and overran the column instead. The gate could not
-    // see it: `writers.sh` compares at `--wrap=preserve`, where no fill
-    // runs at all.
-    //
-    // Neither mark is dropped here, then: `BREAK` is the fill's own
-    // opportunity and `SOFT` is a break the document wrote, and `lay_out`
-    // is where both are decided.
-    let _ = write!(out, "{marker}{}{marker}", trimmed(&text));
 }
 
-/// One run of un-nested inlines, wrapped in the marker its parent uses.
-fn push_run(marker: &str, run: &[Inline], pieces: &mut Vec<String>, def: &mut Defs) {
-    if run.is_empty() {
-        return;
-    }
+/// One run of inlines the marker can hold, flattened, with the marks off
+/// its edges recorded rather than lost.
+fn flat_run(run: &[Inline], nest: &Nest, def: &mut Defs) -> Run {
+    let was = std::mem::replace(&mut def.flat, nest.flat);
     let mut text = String::new();
     inlines(run, &mut text, def);
-    // Breakable, like the un-nested form above.
-    let text = trimmed(&text);
-    if !text.is_empty() {
-        pieces.push(format!("{marker}{text}{marker}"));
+    def.flat = was;
+    let spaces = nest.spaces;
+    // Only the **marks** come off: a break beside `*` is a space RST will
+    // not read as markup, while the space pandoc writes a footnote
+    // reference with is content — `* [1]_*` is its own byte.
+    let mark = |c: char| c == BREAK || c == SOFT;
+    let trimmed = text.trim_matches(mark);
+    Run {
+        space_before: text.starts_with(mark),
+        space_after: text.ends_with(mark) && !trimmed.is_empty(),
+        text: if spaces { trimmed.replace([BREAK, SOFT], " ") } else { trimmed.to_owned() },
     }
 }
 
-fn role(name: &str, inner: &[Inline], out: &mut String, def: &mut Defs) {
-    let mut text = String::new();
-    inlines(inner, &mut text, def);
-    let _ = write!(out, ":{name}:`{}`", trimmed(&text).replace([BREAK, SOFT], " "));
+/// One run between promoted inlines, wrapped in the container's markers.
+///
+/// `after` and `before` say which sides face a promoted inline. A run
+/// with nothing in it is written only when it faces one on **both**
+/// sides: that is the `*\\ *` pandoc writes between two of them, where a
+/// leading or trailing empty run is written not at all.
+fn push_run(
+    nest: &Nest,
+    run: &[Inline],
+    after: bool,
+    before: bool,
+    pieces: &mut Vec<(String, bool, bool)>,
+    def: &mut Defs,
+) {
+    let run = flat_run(run, nest, def);
+    if run.text.is_empty() {
+        if after && before && !run.space_before {
+            pieces.push((format!("{}\\ {}", nest.open, nest.close), false, false));
+        } else if run.space_before {
+            // The run was a space and nothing else: it is the separator.
+            pieces.push((String::new(), true, true));
+        }
+        return;
+    }
+    let lead = if after && !run.space_before { "\\ " } else { "" };
+    let tail = if before && !run.space_after { "\\ " } else { "" };
+    pieces.push((
+        format!("{}{lead}{}{tail}{}", nest.open, run.text, nest.close),
+        run.space_before,
+        run.space_after,
+    ));
 }
 
 /// Escape the characters RST gives a meaning to at the start of a word.

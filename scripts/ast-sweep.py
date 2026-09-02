@@ -433,7 +433,7 @@ def group_of(name):
 FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
           "latex": 160, "rst": 160, "asciidoc": 160, "plain": 158}
 COMPOSITION = {"markdown": 126, "commonmark": 120, "gfm": 118, "html": 119,
-               "latex": 122, "rst": 114, "asciidoc": 126, "plain": 118}
+               "latex": 122, "rst": 126, "asciidoc": 126, "plain": 118}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"

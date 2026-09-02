@@ -2702,11 +2702,12 @@ back, so nothing is measurable except what survives to a reader that is
 not pandoc.
 
 **The rest are gaps, not decisions**, and are counted as such: the sweep
-still names 52 divergences that are neither fixed nor listed. The largest
-groups are pandoc's TeX-to-Unicode math rendering — 24 of them, where
-this writes the `$x^2$` fallback and pandoc writes `x²` — a GFM table
-whose cell holds a block, which pandoc degrades to raw HTML, and what RST
-drops from an inline it has no nesting for.
+still names 40 divergences that are neither fixed nor listed. **Two
+thirds of them are one feature**: pandoc renders simple TeX to Unicode
+and this writes the `$x^2$` fallback, which is 24 of the 40 across the
+`commonmark`, `html` and `plain` writers. The rest are a GFM table whose
+cell holds a block, which pandoc degrades to raw HTML, and a handful of
+LaTeX and `plain` spellings.
 
 ## How to check any of this yourself
 
