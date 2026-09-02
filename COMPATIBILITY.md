@@ -2681,6 +2681,19 @@ in the other two comes back as literal asterisks with the break intact.
 Less is lost either way, which is the whole reason the bytes are not
 copied.
 
+**A hard break in an AsciiDoc definition term.** ` +` is a *line* break
+and has to end a line, so pandoc writes the term as ` +` and puts the
+`::` on the line below — and asciidoctor makes a **literal block** of the
+two lines, losing the definition list:
+
+    printf ' +\n::\n  d\n' | asciidoctor -s -o -   # <pre> +~::~  d</pre>
+    printf '+::\n  d\n'     | asciidoctor -s -o -   # <dl><dt>+</dt><dd>d</dd></dl>
+
+This writes `+::`, which keeps the list and loses the break. Every other
+inline container takes pandoc's spelling, which asciidoctor renders with
+the break intact — `_a +\nb_` is `<em>a<br>b</em>`, and a footnote and a
+table cell render identically either way.
+
 **A footnote of more than one block in AsciiDoc.** `footnote:[…]` is an
 inline macro and a block cannot go inside one. Pandoc gives up and writes
 `[multiblock footnote omitted]`, losing the content; this writes the
@@ -2689,11 +2702,11 @@ back, so nothing is measurable except what survives to a reader that is
 not pandoc.
 
 **The rest are gaps, not decisions**, and are counted as such: the sweep
-still names 69 divergences that are neither fixed nor listed. The largest
+still names 52 divergences that are neither fixed nor listed. The largest
 groups are pandoc's TeX-to-Unicode math rendering — 24 of them, where
 this writes the `$x^2$` fallback and pandoc writes `x²` — a GFM table
-whose cell holds a block, which pandoc degrades to raw HTML, and a hard
-break inside an inline container in AsciiDoc.
+whose cell holds a block, which pandoc degrades to raw HTML, and what RST
+drops from an inline it has no nesting for.
 
 ## How to check any of this yourself
 

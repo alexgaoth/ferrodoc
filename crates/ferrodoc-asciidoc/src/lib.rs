@@ -133,7 +133,7 @@ pub fn write_asciidoc(doc: &Pandoc) -> String {
 pub fn write_asciidoc_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
     let mut out = String::new();
     blocks(&doc.blocks, &mut out, Depth::default());
-    let text = lay_out(out.trim_end(), wrap);
+    let text = lay_out(out.trim_start_matches('\n').trim_end(), wrap);
     if text.is_empty() { text } else { text + "\n" }
 }
 
@@ -147,6 +147,11 @@ pub fn write_asciidoc_wrapped(doc: &Pandoc, wrap: Wrap) -> String {
 struct Depth {
     bullet: usize,
     ordered: usize,
+    /// Whether the block being written is inside a table cell. **A table
+    /// there is delimited with `!` rather than `|`** — the outer table's
+    /// pipes would end the cell it sits in — and its cells are separated
+    /// the same way: `!===`, `!h1 !h2`.
+    in_cell: bool,
 }
 
 fn blocks(list: &[Block], out: &mut String, depth: Depth) {
@@ -281,31 +286,23 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
                 item_to(item, &marker, out, depth);
             }
         }
-        Block::DefinitionList(entries) => {
-            for (term, definitions) in entries {
-                let mut text = String::new();
-                inlines(term, &mut text);
-                let _ = writeln!(out, "{}::", text.trim());
-                // **A `+` joins one definition to the next.** Without
-                // it the second is a new paragraph outside the term, and
-                // two definitions read as one.
-                for (index, definition) in definitions.iter().enumerate() {
-                    if index > 0 {
-                        let _ = writeln!(out, "  +");
-                    }
-                    let mut body = String::new();
-                    blocks(definition, &mut body, depth);
-                    for line in body.trim_end().lines() {
-                        let _ = writeln!(out, "  {line}");
-                    }
-                }
-            }
-        }
+        Block::DefinitionList(entries) => definitions_to(entries, out, depth),
         Block::Header(level, attr, list) => header_to(*level, attr, list, out),
-        // Five quotes        // Five quotes, which is what pandoc writes. Three is a valid
+        // Five quotes, which is what pandoc writes. Three is a valid
         // break too; the bytes are the test.
-        Block::HorizontalRule => out.push_str("'''''\n"),
-        Block::Table(table) => table_to(table, out),
+        //
+        // **Under a blank line.** Between two blocks that line is the
+        // separator they already have, so it was invisible; opening a
+        // quote, a list item's `+`, a definition or a cell it has to be
+        // written. The document's own leading one is trimmed with the
+        // rest, which is what makes the top level look like neither.
+        Block::HorizontalRule => {
+            if !out.ends_with("\n\n") {
+                out.push('\n');
+            }
+            out.push_str("'''''\n");
+        }
+        Block::Table(table) => table_to(table, out, depth),
         Block::Figure(_, caption, inner) => {
             if !caption.blocks.is_empty() {
                 let mut text = String::new();
@@ -336,6 +333,57 @@ fn block_to(block: &Block, out: &mut String, depth: Depth) {
     }
 }
 
+/// A definition list: the term, `::`, and the body indented under it.
+fn definitions_to(
+    entries: &[(Vec<Inline>, Vec<Vec<Block>>)],
+    out: &mut String,
+    depth: Depth,
+) {
+        for (term, definitions) in entries {
+            let mut text = String::new();
+            inlines(term, &mut text);
+            let _ = writeln!(out, "{}::", text.trim());
+            // **A `+` joins one definition to the next**, and one
+            // block of a definition to the next block of the same
+            // one. Without it the second is a new paragraph outside
+            // the term: `term::`, `  one`, a blank line and `  two`
+            // is a definition and then a paragraph, and the blank
+            // line this wrote carried the indent as trailing spaces.
+            let mut written = 0;
+            for definition in definitions {
+                for block in definition {
+                    let mut body = String::new();
+                    block_to(block, &mut body, depth);
+                    let body = body.trim_end();
+                    // A raw block in another format renders to
+                    // nothing and takes its continuation with it.
+                    if body.is_empty() {
+                        continue;
+                    }
+                    if written > 0 {
+                        let _ = writeln!(out, "  +");
+                    }
+                    written += 1;
+                    for line in body.lines() {
+                        if line.is_empty() {
+                            out.push('\n');
+                        } else if literal_line(body) {
+                            // **A literal block is flush left.**
+                            // Indentation is what *makes* a block
+                            // literal in AsciiDoc, so two spaces in
+                            // front of `[source,bash]` turn the
+                            // listing into a literal block that shows
+                            // its own markers.
+                            let _ = writeln!(out, "{line}");
+                        } else {
+                            let _ = writeln!(out, "  {line}");
+                        }
+                    }
+                }
+            }
+        }
+}
+
 /// One list item, with any further blocks attached by a `+` continuation.
 fn item_to(item: &[Block], marker: &str, out: &mut String, depth: Depth) {
     let (first, rest) = item.split_first().unwrap_or((&Block::HorizontalRule, &[]));
@@ -364,13 +412,22 @@ fn item_to(item: &[Block], marker: &str, out: &mut String, depth: Depth) {
             let mut body = String::new();
             block_to(other, &mut body, depth);
             let body = body.trim_end();
+            // **A nested list needs no `+`**, the same rule `attached_to`
+            // follows for one further down the item: its own marker is
+            // what attaches it, and the continuation would make it a
+            // block standing beside the item instead.
+            let plus = if matches!(other, Block::BulletList(_) | Block::OrderedList(..)) {
+                ""
+            } else {
+                "\n+"
+            };
             // A raw block in another format renders to nothing, and the
             // `+` still belongs to the item — but the empty line after it
             // does not.
             if body.is_empty() {
-                let _ = writeln!(out, "{marker} {{blank}}\n+");
+                let _ = writeln!(out, "{marker} {{blank}}{plus}");
             } else {
-                let _ = writeln!(out, "{marker} {{blank}}\n+\n{body}");
+                let _ = writeln!(out, "{marker} {{blank}}{plus}\n{body}");
             }
             for block in rest {
                 attached_to(block, out, depth);
@@ -400,6 +457,15 @@ fn attached_to(block: &Block, out: &mut String, depth: Depth) {
             let _ = writeln!(out, "+\n{}", body.trim_end());
         }
     }
+}
+
+/// Whether a rendered block is a **literal** one — a listing or a source
+/// block, which `AsciiDoc` marks by its delimiter and would mark by two
+/// spaces of indentation just as readily.
+fn literal_line(body: &str) -> bool {
+    body.lines().next().is_some_and(|first| {
+        first.starts_with("[source") || first.starts_with("----") || first.starts_with("....")
+    })
 }
 
 /// A delimiter run longer than any run of the same character inside the
@@ -555,8 +621,11 @@ fn code_block_to(attr: &ferrodoc_ast::Attr, code: &str, out: &mut String) {
             }
 }
 
-fn table_to(table: &Table, out: &mut String) {
+fn table_to(table: &Table, out: &mut String, depth: Depth) {
     let columns = table.colspecs.len().max(1);
+    // The delimiter and the cell mark, which a table inside a cell swaps
+    // for `!` so the outer table's pipes stay the outer table's.
+    let bar = if depth.in_cell { '!' } else { '|' };
     if !table.caption.blocks.is_empty() {
         let mut text = String::new();
         blocks(&table.caption.blocks, &mut text, Depth::default());
@@ -608,7 +677,7 @@ fn table_to(table: &Table, out: &mut String) {
         out.push_str("options=\"header\",");
     }
     out.push_str("]\n");
-    out.push_str("|===\n");
+    let _ = writeln!(out, "{bar}===");
     for row in table
         .head
         .rows
@@ -626,13 +695,17 @@ fn table_to(table: &Table, out: &mut String) {
         if row.cells.iter().any(|cell| !cell_is_simple(cell)) {
             for cell in &row.cells {
                 if cell_is_simple(cell) {
-                    let _ = writeln!(out, "|{}", cell_text(cell));
+                    let _ = writeln!(out, "{bar}{}", cell_text(cell));
                 } else {
-                    out.push_str("a|\n");
-                    for block in &cell.blocks {
-                        block_to(block, out, Depth::default());
+                    let _ = writeln!(out, "a{bar}");
+                    // Through `blocks`, for the blank line between two of
+                    // them: written one after another, two paragraphs in
+                    // a cell came out as one. It leaves the blank line
+                    // that ends the cell already written.
+                    blocks(&cell.blocks, out, Depth { in_cell: true, ..Depth::default() });
+                    if !out.ends_with("\n\n") {
+                        out.push('\n');
                     }
-                    out.push('\n');
                 }
             }
             continue;
@@ -640,10 +713,10 @@ fn table_to(table: &Table, out: &mut String) {
         // `|A |B` — the cells are joined by a space rather than each
         // carrying a trailing one, so the row does not end in whitespace.
         let cells: Vec<String> =
-            row.cells.iter().map(|cell| format!("|{}", cell_text(cell))).collect();
+            row.cells.iter().map(|cell| format!("{bar}{}", cell_text(cell))).collect();
         let _ = writeln!(out, "{}", cells.join(" "));
     }
-    out.push_str("|===\n");
+    let _ = writeln!(out, "{bar}===");
 }
 
 /// Whether a cell is one this writer can put after a plain `|`: at most
@@ -681,7 +754,23 @@ fn cell_text(cell: &Cell) -> String {
             ch => result.push(ch),
         }
     }
-    result.trim().to_owned()
+    // Trailing only: the space a hard break is written with is the first
+    // character of a cell that holds nothing else, and asciidoctor makes
+    // the same table of `| +` as of `|+`.
+    result.trim_end().to_owned()
+}
+
+/// Trim what separates blocks off the end, but keep the newline a hard
+/// break needs.
+///
+/// ` +` at the end of a line is `AsciiDoc`'s hard break, and it is not
+/// one without the line it ends — so the newline goes back on. Nothing
+/// is trimmed from the *start*: a break's own leading space is the only
+/// whitespace that reaches here, since an ordinary space is a break mark
+/// until the layout pass.
+fn keep_break(text: &str) -> String {
+    let trimmed = text.trim_end_matches('\n');
+    if trimmed.ends_with(" +") { format!("{trimmed}\n") } else { trimmed.to_owned() }
 }
 
 /// Render a run of inlines, collapsing the space a dropped inline leaves.
@@ -749,11 +838,12 @@ fn inline_to(inline: &Inline, out: &mut String) {
     let wrap = |open: &str, close: &str, inner: &[Inline], out: &mut String| {
         let mut text = String::new();
         inlines(inner, &mut text);
-        if text.trim().is_empty() {
-            out.push_str(&text);
-            return;
-        }
-        let _ = write!(out, "{open}{}{close}", text.trim());
+        // **Not trimmed.** A hard break is written ` +` and the newline
+        // that makes it one, and the trim took both: pandoc writes
+        // `_ +\n_` where this wrote `_+_`, which asciidoctor renders as a
+        // literal plus. An empty one is `__`, pandoc's spelling for
+        // emphasis whose content renders to nothing.
+        let _ = write!(out, "{open}{}{close}", keep_break(&text));
     };
     match inline {
         Inline::Str(text) => out.push_str(&escape(text)),
@@ -809,7 +899,8 @@ fn inline_to(inline: &Inline, out: &mut String) {
         Inline::Link(_, inner, target) => {
             let mut text = String::new();
             inlines(inner, &mut text);
-            let text = text.trim();
+            let text = keep_break(&text);
+            let text = text.as_str();
             // A link whose text **is** its target needs no markup at all:
             // AsciiDoc linkifies a bare URL and a bare address, and that
             // is what pandoc writes — but only when the text is *bare*.
@@ -870,11 +961,11 @@ fn inline_to(inline: &Inline, out: &mut String) {
             // Pandoc writes `[multiblock footnote omitted]` here and
             // loses the body. Joining keeps it, and the note still
             // renders; a placeholder is content deleted for a byte.
-            let body = text.trim();
+            let body = keep_break(&text);
             let body = if body.contains("\n\n") {
                 body.split_whitespace().collect::<Vec<_>>().join(" ")
             } else {
-                body.to_owned()
+                body.clone()
             };
             let _ = write!(out, "footnote:[{body}]");
         }

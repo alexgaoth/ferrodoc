@@ -379,11 +379,20 @@ DELIBERATE = {
     # break intact in the other two — less lost, either way.
     #
     #     ./scripts/probe.sh -t markdown -f markdown 'para(emph(linebreak))'
+    #
+    # **AsciiDoc's is a definition term**, where pandoc's ` +` puts the
+    # `::` on a line of its own — and asciidoctor makes a *literal block*
+    # of the two lines, losing the definition list outright. This writes
+    # `+::`, which asciidoctor reads as the term `+` and its definition.
+    # Measured, both spellings, with asciidoctor 3. Every other inline
+    # container here takes pandoc's spelling, which asciidoctor renders
+    # with the break: `_a +\nb_` is `<em>a<br>b</em>`.
     *[(flavour, f"in/{holder}<LineBreak")
       for flavour, holders in (
           ("markdown", ("Emph", "Header", "Term", "Cell")),
           ("commonmark", ("Emph", "Link", "Header", "Quoted", "Term")),
           ("gfm", ("Emph", "Link", "Header", "Quoted", "Term", "Cell")),
+          ("asciidoc", ("Term",)),
       )
       for holder in holders],
     # **A horizontal rule opening a list item, in the two `CommonMark`
@@ -424,7 +433,7 @@ def group_of(name):
 FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
           "latex": 160, "rst": 160, "asciidoc": 160, "plain": 158}
 COMPOSITION = {"markdown": 126, "commonmark": 120, "gfm": 118, "html": 119,
-               "latex": 122, "rst": 114, "asciidoc": 109, "plain": 118}
+               "latex": 122, "rst": 114, "asciidoc": 126, "plain": 118}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"
