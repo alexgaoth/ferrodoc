@@ -87,9 +87,9 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferrodoc"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "757c061275596696cedc842758f97fec339f5b8e939718de4a34ad7d939444a3"
+checksum = "18e50cc4b70b06583fee611708e190f09133f4807f42cfa6a46079508c58d98b"
 dependencies = [
  "ferrodoc-asciidoc",
  "ferrodoc-ast",
@@ -107,18 +107,18 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-asciidoc"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2aba2cc7a25f8aaa88d55f7d087d9d9898739b521d949b165739a6c78845a1cd"
+checksum = "e09c0ee6b63845f4f46cb9ce7b9ea2b7c0918815da2d399b0a18bdc0db59c15d"
 dependencies = [
  "ferrodoc-ast",
 ]
 
 [[package]]
 name = "ferrodoc-ast"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "701572826719e61bc599832e25f3d2f74e4689b631d0615b6f52a5332b14cf75"
+checksum = "a6a102a49f714f221949432ae0cdfbd088282d5361a9aeb73bc05c652148db3b"
 dependencies = [
  "serde",
  "serde_json",
@@ -126,9 +126,9 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-docx"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3db736fb9da275c1c6369875e4ac26a1de6e087a0d2a088a4128242c431c344a"
+checksum = "8640b733d8717877fbf92610082e7d5c7d08621505a3140974d36f12a810cc20"
 dependencies = [
  "ferrodoc-ast",
  "quick-xml",
@@ -137,9 +137,9 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-epub"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f31f49267d178df73390cc12d66a5e0da0ca458e7e344c3c24907ebb40db15ad"
+checksum = "6f9b4dbd1249d3619e5c58e8b246bb05d7e9a449e9e1f8a69d567fbb1be25f90"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-docx",
@@ -149,9 +149,9 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-html"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97105f7a9c8b7ac939c36336b1e038916bca8963db73d7bfadae4537c1483350"
+checksum = "08b75ce491878ef7d6c7e1d6a417b587216a7cb8b34300390431c4fa709997ac"
 dependencies = [
  "ferrodoc-ast",
  "html5ever",
@@ -160,9 +160,9 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-ipynb"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bbac50987c5b1acb3a6faae9f404a9ebcc74b73db626b92fa6c044890e27e29"
+checksum = "6ec30edd459f6faa70d97bf238394c95e5d98735e9b4fa61f8eac2e8ee48852d"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-markdown",
@@ -171,18 +171,19 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-latex"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "755b619d7ec043a6cc4977ea4572d7445866089488da819e91de9ca4ed272b77"
+checksum = "1da56dde0357526067983c1c57bd8ac47ef153623c9295a98c2f9ccfe4826f38"
 dependencies = [
  "ferrodoc-ast",
+ "ferrodoc-html",
 ]
 
 [[package]]
 name = "ferrodoc-markdown"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b462fe3ae385d7dbffc7391436050a0ed638b5083dd8192d35e7c9eb4ef2b9a"
+checksum = "f103c4c976cb8ee2125799f9f63a772c445ce74b2f928975d459cd38033af499"
 dependencies = [
  "comrak",
  "ferrodoc-ast",
@@ -191,9 +192,9 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-odt"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a611b282817891c7fb40e12fe7c8976ee42fa4a2e64bbaa222808998b5b76b91"
+checksum = "a68ab67b4050306e6b42fe8ddbddb8d8c50f7a0bc7e4b87e94ae34ba08de20b8"
 dependencies = [
  "ferrodoc-ast",
  "ferrodoc-docx",
@@ -202,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-python"
-version = "0.8.0"
+version = "1.0.0"
 dependencies = [
  "ferrodoc",
  "pyo3",
@@ -210,18 +211,18 @@ dependencies = [
 
 [[package]]
 name = "ferrodoc-rst"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbdbe1881f0e9a6155bce7221823ffe16bce32ede2ebe84ce1ad5edbedbe3a26"
+checksum = "547602abcc43892b2526cc57ef4080ec2f22e5982fcbb6a91c57f41ca37c4c26"
 dependencies = [
  "ferrodoc-ast",
 ]
 
 [[package]]
 name = "ferrodoc-text"
-version = "0.8.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a36af6e25b18911dbfeafb91b9ac09e65f9fbea9c89a67933963015e2d29e42"
+checksum = "519da4063b14156e3a454744961dfdb8e551e183504361481746c9ed7221d82f"
 dependencies = [
  "ferrodoc-ast",
 ]
