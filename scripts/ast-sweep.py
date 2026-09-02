@@ -430,10 +430,10 @@ DELIBERATE = {
 def group_of(name):
     return "composition" if name.startswith("in/") else "flat"
 
-FLOORS = {"markdown": 159, "commonmark": 158, "gfm": 160, "html": 158,
-          "latex": 160, "rst": 160, "asciidoc": 160, "plain": 158}
-COMPOSITION = {"markdown": 126, "commonmark": 120, "gfm": 118, "html": 119,
-               "latex": 122, "rst": 126, "asciidoc": 126, "plain": 118}
+FLOORS = {"markdown": 160, "commonmark": 160, "gfm": 160, "html": 160,
+          "latex": 160, "rst": 160, "asciidoc": 160, "plain": 160}
+COMPOSITION = {"markdown": 126, "commonmark": 126, "gfm": 126, "html": 126,
+               "latex": 126, "rst": 126, "asciidoc": 126, "plain": 126}
 GROUPS = [("flat", FLOORS), ("composition", COMPOSITION)]
 
 FERRODOC = "./target/release/ferrodoc"

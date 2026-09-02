@@ -126,15 +126,29 @@ struct Ctx {
     /// or not, and shows the number only where it highlights — so the
     /// counter cannot live in the highlighting path.
     blocks: std::cell::Cell<usize>,
+    /// The number each code block takes, in the order this writer renders
+    /// them. Empty for a document with no footnote, where the order is
+    /// the counter's own.
+    order: Vec<usize>,
 }
 
 impl Ctx {
-    fn new(mode: Sections, highlighting: Highlighting) -> Ctx {
-        Ctx { sections: mode, highlighting, blocks: std::cell::Cell::new(0) }
+    fn new(mode: Sections, highlighting: Highlighting, order: Vec<usize>) -> Ctx {
+        Ctx { sections: mode, highlighting, blocks: std::cell::Cell::new(0), order }
     }
 
     /// The next code block's number.
+    ///
+    /// Read from the order worked out before the writing started, where
+    /// there is one: a code block inside a **footnote** takes its number
+    /// where the note is referenced and is written at the end of the
+    /// document, so the two orders are not the same one.
     fn next_block(&self) -> usize {
+        let spent = self.blocks.get();
+        if let Some(number) = self.order.get(spent) {
+            self.blocks.set(spent + 1);
+            return *number;
+        }
         self.blocks.set(self.blocks.get() + 1);
         self.blocks.get()
     }
@@ -197,7 +211,7 @@ fn write_body(
     sections: Sections,
     highlighting: Highlighting,
 ) -> String {
-    let ctx = &Ctx::new(sections, highlighting);
+    let ctx = &Ctx::new(sections, highlighting, code_block_order(&doc.blocks));
     let mut out = String::new();
     let (blocks, notes) = take_notes(&doc.blocks, id_prefix);
     write_blocks(&mut out, &blocks, ctx);
@@ -606,6 +620,124 @@ fn meta_texts(doc: &Pandoc, key: &str) -> Vec<String> {
     }
     out.retain(|text| !text.is_empty());
     out
+}
+
+/// The code blocks a document holds, and the ones each footnote it
+/// references holds, in the order they are **met**.
+#[derive(Default)]
+struct Numbering {
+    numbers: Vec<usize>,
+    notes: Vec<Numbering>,
+}
+
+/// The number each code block takes, in the order this writer renders
+/// them: the document's own first, then each note body in the order
+/// [`take_notes`] collects them.
+///
+/// **Pandoc numbers a code block where the note holding it is
+/// referenced**, and writes the body at the end of the document — so a
+/// footnote holding one, followed by another code block, is `cb1` and
+/// then `cb2` although they are written the other way round. A counter
+/// spent as the writer goes cannot say that, so the numbering is worked
+/// out first and the counter spends it.
+///
+/// The walk is depth-first, entering a note's body where the reference
+/// stands; the spending is breadth-first, which is the order the bodies
+/// are written in.
+fn code_block_order(blocks: &[Block]) -> Vec<usize> {
+    if !has_note(blocks) {
+        return Vec::new();
+    }
+    let mut root = Numbering::default();
+    let mut next = 0;
+    number_code_blocks(blocks, &mut next, &mut root);
+    let mut out = root.numbers;
+    let mut queue: std::collections::VecDeque<Numbering> = root.notes.into();
+    while let Some(note) = queue.pop_front() {
+        out.extend(note.numbers);
+        queue.extend(note.notes);
+    }
+    out
+}
+
+fn number_code_blocks(blocks: &[Block], next: &mut usize, into: &mut Numbering) {
+    for block in blocks {
+        match block {
+            // **A code block that carries its own identifier takes no
+            // number**: `cbN` is the name invented for one that has
+            // none, and pandoc's counter does not move for it either.
+            Block::CodeBlock(attr, _) if attr.identifier.is_empty() => {
+                *next += 1;
+                into.numbers.push(*next);
+            }
+            Block::Plain(list) | Block::Para(list) | Block::Header(_, _, list) => {
+                number_inlines(list, next, into);
+            }
+            Block::LineBlock(lines) => {
+                for line in lines {
+                    number_inlines(line, next, into);
+                }
+            }
+            Block::BlockQuote(inner) | Block::Div(_, inner) => number_code_blocks(inner, next, into),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    number_code_blocks(item, next, into);
+                }
+            }
+            Block::DefinitionList(entries) => {
+                for (term, definitions) in entries {
+                    number_inlines(term, next, into);
+                    for definition in definitions {
+                        number_code_blocks(definition, next, into);
+                    }
+                }
+            }
+            Block::Figure(_, caption, inner) => {
+                number_code_blocks(&caption.blocks, next, into);
+                number_code_blocks(inner, next, into);
+            }
+            Block::Table(table) => {
+                number_code_blocks(&table.caption.blocks, next, into);
+                for row in table
+                    .head
+                    .rows
+                    .iter()
+                    .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+                    .chain(table.foot.rows.iter())
+                {
+                    for cell in &row.cells {
+                        number_code_blocks(&cell.blocks, next, into);
+                    }
+                }
+            }
+            Block::HorizontalRule | Block::RawBlock(..) | Block::CodeBlock(..) => {}
+        }
+    }
+}
+
+fn number_inlines(list: &[Inline], next: &mut usize, into: &mut Numbering) {
+    for inline in list {
+        match inline {
+            Inline::Note(body) => {
+                let mut child = Numbering::default();
+                number_code_blocks(body, next, &mut child);
+                into.notes.push(child);
+            }
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => number_inlines(inner, next, into),
+            _ => {}
+        }
+    }
 }
 
 /// Take the footnotes out of the tree, leaving pandoc's reference where
@@ -1405,6 +1537,33 @@ fn write_code_span(out: &mut String, attr: &Attr, text: &str) {
             out.push_str("</code>");
 }
 
+/// An expression, rendered as pandoc renders it or written as the
+/// source it came in as.
+fn write_math(out: &mut String, math_type: ferrodoc_ast::MathType, text: &str) {
+        use ferrodoc_ast::MathType;
+        // **Dollar delimiters, not `\(`.** Pandoc writes `\(…\)`
+        // only under `--mathjax`, which this has no flag for; its
+        // default keeps the TeX between dollars, and that is what a
+        // reader sees when nothing renders it. **A simple
+        // expression is rendered** rather than written — `x^2` is
+        // `<em>x</em><sup>2</sup>` — and the dollars are the fallback
+        // for what `tex_inlines` will not render, which is pandoc's
+        // own fallback for the same expressions.
+        let (class, open, close) = match math_type {
+            MathType::InlineMath => ("math inline", "$", "$"),
+            MathType::DisplayMath => ("math display", "$$", "$$"),
+        };
+        let _ = write!(out, "<span class=\"{class}\">");
+        if let Some(rendered) = ferrodoc_ast::tex_inlines(text) {
+            write_inlines(out, &rendered);
+        } else {
+            let _ = write!(out, "{open}");
+            escape_text(out, text);
+            let _ = write!(out, "{close}");
+        }
+        out.push_str("</span>");
+}
+
 fn write_inline(out: &mut String, inline: &Inline) {
     match inline {
         Inline::Str(s) => escape_text(out, s),
@@ -1433,24 +1592,7 @@ fn write_inline(out: &mut String, inline: &Inline) {
             out.push(close);
         }
         Inline::Code(attr, text) => write_code_span(out, attr, text),
-        Inline::Math(math_type, text) => {
-            use ferrodoc_ast::MathType;
-            // **Dollar delimiters, not `\(`.** Pandoc writes `\(…\)`
-            // only under `--mathjax`, which this has no flag for; its
-            // default keeps the TeX between dollars, and that is what a
-            // reader sees when nothing renders it. Pandoc *does* render
-            // simple expressions to markup — `x^2` becomes
-            // `<em>x</em><sup>2</sup>` — and falls back to this form for
-            // anything with a fraction, a root or a sum. Only the
-            // fallback is written here; COMPATIBILITY.md records the gap.
-            let (class, open, close) = match math_type {
-                MathType::InlineMath => ("math inline", "$", "$"),
-                MathType::DisplayMath => ("math display", "$$", "$$"),
-            };
-            let _ = write!(out, "<span class=\"{class}\">{open}");
-            escape_text(out, text);
-            let _ = write!(out, "{close}</span>");
-        }
+        Inline::Math(math_type, text) => write_math(out, *math_type, text),
         Inline::RawInline(format, text) => {
             if format.0 == "html" {
                 out.push_str(text);

@@ -876,7 +876,7 @@ impl Writer {
     /// A table with no columns has no pipe-table spelling at all — not
     /// even an empty one — so it degrades like the rest.
     fn table(&mut self, out: &mut String, block: &Block, table: &Table, prefix: &str, at: Position) {
-        if self.gfm() && !table.colspecs.is_empty() {
+        if self.gfm() && !table.colspecs.is_empty() && pipe_cells(table) {
             self.pipe_table(out, table, prefix);
         } else if self.pandoc() && simple_table_applies(table) {
             self.simple_table(out, table, prefix, at);
@@ -2000,6 +2000,29 @@ impl Writer {
             }
             Inline::Code(attr, text) => self.code_span(out, attr, text),
             Inline::Math(kind, text) => {
+                // **`CommonMark` has no math at all**, so pandoc renders
+                // the expression to ordinary inlines there — `$x^2$` is
+                // `*x*<sup>2</sup>` — and writes the source only for what
+                // it cannot render. The dialect and GFM both have a
+                // spelling and keep the TeX.
+                if self.flavour == Flavour::CommonMark {
+                    if let Some(rendered) = ferrodoc_ast::tex_inlines(text) {
+                        out.push_str(&self.inner(&rendered));
+                        return;
+                    }
+                    // **And the fallback is text there**, so it takes the
+                    // escaping text takes: pandoc writes
+                    // `$\sum\_{i=1}^n$` for the expression it gives up
+                    // on, where the two dialects that *have* a math
+                    // spelling write the TeX verbatim.
+                    let fence = match kind {
+                        MathType::InlineMath => "$",
+                        MathType::DisplayMath => "$$",
+                    };
+                    let source = format!("{fence}{text}{fence}");
+                    out.push_str(&self.inner(&[Inline::Str(source)]));
+                    return;
+                }
                 // Verbatim: escaping corrupts the TeX, since `\\` is a
                 // MathJax line break and `\_` a literal underscore. Probed
                 // against pandoc's `ipynb` writer, whose spelling this is.
@@ -2117,6 +2140,28 @@ fn fence_attributes(attr: &ferrodoc_ast::Attr) -> String {
         [class] if attr.identifier.is_empty() && attr.attributes.is_empty() => class.clone(),
         _ => attributes(attr).unwrap_or_else(|| "{}".to_owned()),
     }
+}
+
+/// Whether every cell is one a **pipe** table can hold.
+///
+/// A pipe cell is a line, so a cell holding a list, a code block, a
+/// quote, a heading or two paragraphs has no GFM spelling at all: pandoc
+/// degrades the whole table to raw HTML rather than flattening it, and
+/// this wrote `| ``` bash x ``` |` for a table it had already lost.
+/// Probed on both sides — one `Para` in a cell is still a pipe table,
+/// and so is a column that states its own width.
+fn pipe_cells(table: &Table) -> bool {
+    table
+        .head
+        .rows
+        .iter()
+        .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+        .chain(table.foot.rows.iter())
+        .all(|row| {
+            row.cells
+                .iter()
+                .all(|cell| matches!(cell.blocks.as_slice(), [] | [Block::Plain(_) | Block::Para(_)]))
+        })
 }
 
 fn simple_table_applies(table: &Table) -> bool {
@@ -2829,10 +2874,20 @@ fn escape_text_inner(
             // a run of `=` is only dangerous on a continuation line —
             // `out.is_empty()` is the block's first line, where pandoc
             // does not escape and neither should this. It escaped `===
-            // x` there, which cannot be an underline at all. No
-            // hard-break exemption: a `===` line under one still
-            // underlines the paragraph.
-            '=' if opens_here && !out.is_empty() && next == Some('=') => {
+            // x` there, which cannot be an underline at all.
+            //
+            // **The line after a backslash hard break is exempt**, which
+            // is the dialect's break and not the two spaces the other
+            // two write: `a\`, newline, `=== x` comes back out of
+            // pandoc's own reader as the one paragraph it was, so the
+            // escape had nothing to prevent. Two spaces and a `===` do
+            // make a heading, and that escape stays — recorded, with the
+            // rest of the continuation family.
+            '=' if opens_here
+                && !out.is_empty()
+                && !after_hard_break(out)
+                && next == Some('=') =>
+            {
                 out.push('\\');
                 out.push(ch);
             }
@@ -3610,9 +3665,18 @@ mod tests {
             foot: ferrodoc_ast::TableFoot::default(),
         }));
         let doc = Pandoc::new(vec![table]);
+        // **A pipe cell is a line**, so a cell holding two paragraphs has
+        // no GFM spelling at all: pandoc writes the whole table as raw
+        // HTML rather than running the two together, and these are its
+        // bytes for this document. Flattened to `one two`, the grid
+        // survived and the paragraphs did not.
         assert_eq!(
             write_gfm(&doc),
-            "|      |     |         |\n|------|-----|---------|\n| wide |     | one two |\n\nCap\n"
+            concat!(
+                "<table>\n<caption><p>Cap</p></caption>\n<tbody>\n<tr>\n",
+                "<td colspan=\"2\"><p>wide</p></td>\n",
+                "<td><p>one</p>\n<p>two</p></td>\n</tr>\n</tbody>\n</table>\n",
+            )
         );
         // CommonMark has no table syntax, so the same document degrades to
         // its cell contents there — that is the loss GFM mode exists for.

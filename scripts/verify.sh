@@ -304,6 +304,7 @@ if [ "$want_gates" = 1 ]; then
     # other. Neither axis covers attribute *values* or any reader
     # grammar.
     gate "every AST construct vs pandoc" ./scripts/ast-sweep.sh --floors
+    gate "every TeX expression vs pandoc" ./scripts/math.sh --floors
     # And the binary writers, which have no bytes worth comparing: the
     # judge is what pandoc reads back out of them. `corpus/docx` and
     # friends are **pandoc's own output**, so no gate here could see a

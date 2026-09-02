@@ -57,6 +57,11 @@ security certificate. These limits are deliberate and must stay visible:
   content — 286 cases with a floor for each axis. Neither covers attribute
   *values*, input grammar, or real document style, and the composition axis
   is one fixed cross product rather than every nesting.
+- **The math corpus is hand-picked, not generable.** TeX is not a closed
+  set of constructors the way the AST is, so `scripts/math.sh` asks 81
+  expressions chosen for what they exercise — scripts, spacing classes,
+  fonts, accents, and five that pandoc itself will not render. It says
+  what those cover and nothing about the rest of the language.
 - **EPUB writer read-back currently has a floor of zero.** It runs and reports
   differences, but does not prevent an additional EPUB semantic regression.
   `epubcheck` is the validity check; it is not an equivalence gate.
@@ -86,6 +91,7 @@ The gates, and what each one proves:
 | `diff-ipynb-write` | the notebook writer survives a round trip, from the AST **pandoc** read out of the corpus so the reader cannot flatter the writer; `nbformat.validate` is the judge that is not pandoc |
 | `diff-rst` | the RST writer round-trips the document, with pandoc's score on the same corpus printed beside it |
 | `diff-latex` | **printed, and cannot fail the run.** Pandoc round-trips 1/13 of this corpus — our number exactly — so any floor would be a number chosen after seeing the score. The LaTeX writer is decided by `pdflatex` in CI and by literal-output tests |
+| `math.sh` | every TeX expression this renders is rendered as pandoc renders it — and every one it *gives up on* is one pandoc gives up on too, since the sweep asks about `$x^2$` and nothing else |
 | `bench-rss` | no conversion path exceeds its published multiple of the input |
 
 Some checks are not differential because there is no oracle, and those

@@ -21,12 +21,14 @@
 mod attr;
 mod block;
 mod inline;
+mod math;
 mod meta;
 mod table;
 
 pub use attr::{Attr, Format, Target};
 pub use block::{Block, ListAttributes, ListNumberDelim, ListNumberStyle};
 pub use inline::{Citation, CitationMode, Inline, MathType, QuoteType};
+pub use math::tex_inlines;
 pub use meta::{Meta, MetaValue};
 pub use table::{
     Alignment, Caption, Cell, ColSpec, ColWidth, Row, Table, TableBody, TableFoot, TableHead,

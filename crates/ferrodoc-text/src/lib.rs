@@ -7,9 +7,10 @@
 //! against pandoc 3.8.2.1 and is asserted on literal output, because no
 //! differential gate reads this format — pandoc cannot parse it back.
 //!
-//! Not matched, and stated rather than hidden: pandoc renders `Math` as
-//! Unicode (`$x^2$` becomes `x²`) where this writes the TeX, and it fills
-//! to `--columns` where this never wraps.
+//! Math is rendered as pandoc renders it — `$x^2$` is `x²`, from the
+//! superscript [`ferrodoc_ast::tex_inlines`] makes of it — and the TeX
+//! is written between dollars only for the expressions pandoc writes
+//! that way too. `scripts/math.sh` is the gate that says how many.
 
 use ferrodoc_ast::{Alignment, Block, Inline, ListNumberDelim, Pandoc, Table};
 use std::fmt::Write as _;
@@ -139,6 +140,21 @@ impl Writer {
             self.notes.push(inner.join("\n\n"));
             index += 1;
         }
+    }
+
+    /// A superscript or a subscript: the Unicode characters for it where
+    /// every one of them has one, and `^(…)` where any does not.
+    fn script(&mut self, out: &mut String, inner: &[Inline], mark: char, map: fn(char) -> Option<char>) {
+        let mut text = String::new();
+        self.collect(&mut text, inner);
+        if let Some(raised) = text.chars().map(map).collect::<Option<String>>() {
+            out.push_str(&raised);
+            return;
+        }
+        out.push(mark);
+        out.push('(');
+        out.push_str(&text);
+        out.push(')');
     }
 
     /// Turn the break marks into spaces, or into a fill at the width the
@@ -479,11 +495,16 @@ impl Writer {
         if !table.colspecs.is_empty() && !Self::cells_are_simple(table) {
             return self.grid(table);
         }
+        // A stated width is one reason for the multiline form; **a hard
+        // break in a cell is the other**, and for the same reason: the
+        // cell is two lines and the simple form has room for one. Pandoc
+        // writes the borders for either.
         let sized = table
             .colspecs
             .iter()
-            .any(|spec| spec.width != ferrodoc_ast::ColWidth::ColWidthDefault);
-        let widths = self.column_widths(table, &head, &body, columns, sized);
+            .any(|spec| spec.width != ferrodoc_ast::ColWidth::ColWidthDefault)
+            || Self::cells_break(table);
+        let widths = self.column_widths(table, &head, &body, columns);
         let align = |c: usize| {
             table.colspecs.get(c).map_or(Alignment::AlignDefault, |s| s.alignment)
         };
@@ -492,24 +513,39 @@ impl Writer {
         // front of it**. That is why a row ending in an empty cell keeps
         // its trailing spaces and a header ending in its column's widest
         // word does not.
+        // **The two-space indent is not written on an empty row.** It is
+        // the table's own indentation, and pandoc indents no line it
+        // does not write: a one-column row whose cell is empty is
+        // nothing at all, where a two-column one still carries the
+        // padding between the two.
+        // **A row is as tall as its tallest cell.** A hard break makes a
+        // cell two lines, and the multiline table is the shape that has
+        // room for them: each line of the row takes that line of every
+        // cell, padded to its column as the single-line row is.
         let line = |row: &Vec<String>| {
-            let mut out = String::from("  ");
-            for (c, width) in widths.iter().enumerate() {
-                let cell = row.get(c).map_or("", String::as_str);
-                let slack = width.saturating_sub(cell.chars().count());
-                let (before, after) = match align(c) {
-                    Alignment::AlignRight => (slack, 0),
-                    Alignment::AlignCenter => (slack / 2, slack - slack / 2),
-                    _ => (0, slack),
-                };
-                out.push_str(&" ".repeat(before));
-                out.push_str(cell);
-                if c + 1 < widths.len() {
-                    out.push_str(&" ".repeat(after));
-                    out.push(' ');
+            let height = row.iter().map(|cell| cell.lines().count().max(1)).max().unwrap_or(1);
+            let mut lines: Vec<String> = Vec::new();
+            for index in 0..height {
+                let mut out = String::new();
+                for (c, width) in widths.iter().enumerate() {
+                    let cell = row.get(c).map_or("", String::as_str);
+                    let piece = cell.lines().nth(index).unwrap_or("");
+                    let slack = width.saturating_sub(piece.chars().count());
+                    let (before, after) = match align(c) {
+                        Alignment::AlignRight => (slack, 0),
+                        Alignment::AlignCenter => (slack / 2, slack - slack / 2),
+                        _ => (0, slack),
+                    };
+                    out.push_str(&" ".repeat(before));
+                    out.push_str(piece);
+                    if c + 1 < widths.len() {
+                        out.push_str(&" ".repeat(after));
+                        out.push(' ');
+                    }
                 }
+                lines.push(if out.is_empty() { out } else { format!("  {out}") });
             }
-            out
+            lines.join("\n")
         };
         let rule: Vec<String> = widths.iter().map(|w| "-".repeat(*w)).collect();
         let rule = format!("  {}", rule.join(" "));
@@ -533,7 +569,10 @@ impl Writer {
                 if index > 0 {
                     out.push(String::new());
                 }
-                out.push(line(cells));
+                let text = line(cells);
+                if !text.is_empty() {
+                    out.push(text);
+                }
             }
             if body.len() == 1 {
                 out.push(String::new());
@@ -543,7 +582,9 @@ impl Writer {
         }
         let mut lines: Vec<String> = head.iter().map(line).collect();
         lines.push(rule.clone());
-        lines.extend(body.iter().map(line));
+        // A row that renders to nothing is no line: the two-space indent
+        // belongs to a line the table writes, and pandoc writes none.
+        lines.extend(body.iter().map(line).filter(|text| !text.is_empty()));
         // Without a header the rule goes above *and* below, which is what
         // closes a headerless simple table.
         if head.is_empty() {
@@ -567,13 +608,15 @@ impl Writer {
         head: &[Vec<String>],
         body: &[Vec<String>],
         columns: usize,
-        sized: bool,
     ) -> Vec<usize> {
+        // The widest **line** of a cell, not the length of the whole
+        // text: a cell holding a hard break is two lines, and counting
+        // both together sized the column to their sum.
         let widest = |c: usize| {
             head.iter()
                 .chain(body)
                 .filter_map(|row| row.get(c))
-                .map(|cell| cell.chars().count())
+                .map(|cell| cell.lines().map(|l| l.chars().count()).max().unwrap_or(0))
                 .max()
                 .unwrap_or(0)
         };
@@ -581,9 +624,17 @@ impl Writer {
             self.columns.unwrap_or(COLUMNS).saturating_sub(columns.saturating_sub(1));
         (0..columns)
             .map(|c| {
-                if !sized {
+                // **Asked of the column, not of the table.** A table is
+                // written in the multiline shape for a hard break in a
+                // cell as well as for a stated width, and a column that
+                // states none is sized from its content either way —
+                // read from the table it came out zero wide, and every
+                // rule was empty.
+                let Some(ferrodoc_ast::ColWidth::ColWidth(_)) =
+                    table.colspecs.get(c).map(|spec| spec.width)
+                else {
                     return widest(c) + 2;
-                }
+                };
                 #[expect(
                     clippy::cast_possible_truncation,
                     clippy::cast_sign_loss,
@@ -600,6 +651,25 @@ impl Writer {
                 if self.columns.is_some() { base } else { base.max(widest(c) + 2) }
             })
             .collect()
+    }
+
+    /// Whether any cell holds a hard break, which is what makes it two
+    /// lines.
+    fn cells_break(table: &ferrodoc_ast::Table) -> bool {
+        table
+            .head
+            .rows
+            .iter()
+            .chain(table.bodies.iter().flat_map(|b| b.head.iter().chain(&b.body)))
+            .chain(&table.foot.rows)
+            .flat_map(|row| &row.cells)
+            .flat_map(|cell| &cell.blocks)
+            .any(|block| match block {
+                Block::Plain(list) | Block::Para(list) => {
+                    list.iter().any(|inline| matches!(inline, Inline::LineBreak))
+                }
+                _ => false,
+            })
     }
 
     /// Whether every cell holds at most one `Plain` or `Para` and spans
@@ -758,11 +828,19 @@ impl Writer {
         {
             match inline {
                 Inline::Str(s) | Inline::Code(_, s) => out.push_str(s),
-                // **Math keeps its dollars in plain text.** Stripping
+                // **A simple expression is rendered to Unicode** — `$x^2$`
+                // is `x²`, from the superscript `tex_inlines` makes of it
+                // and the rule below that writes one.
+                //
+                // **What it will not render keeps its dollars.** Stripping
                 // them left `\frac{a}{b}` reading as prose, with nothing
                 // to say it was ever an expression; pandoc keeps the
-                // delimiters for anything it cannot render to Unicode.
+                // delimiters for the same expressions.
                 Inline::Math(kind, s) => {
+                    if let Some(rendered) = ferrodoc_ast::tex_inlines(s) {
+                        self.collect(out, &rendered);
+                        return;
+                    }
                     let fence = match kind {
                         ferrodoc_ast::MathType::InlineMath => "$",
                         ferrodoc_ast::MathType::DisplayMath => "$$",
@@ -794,16 +872,14 @@ impl Writer {
                 // see, small caps are *rendered* by upper-casing, and a
                 // quote keeps the curly characters it stands for. Each
                 // probed against `pandoc -f json -t plain`.
-                Inline::Superscript(i) => {
-                    out.push_str("^(");
-                    self.collect(out, i);
-                    out.push(')');
-                }
-                Inline::Subscript(i) => {
-                    out.push_str("_(");
-                    self.collect(out, i);
-                    out.push(')');
-                }
+                // **Unicode where every character has a form for it**,
+                // and `^(…)` where one does not: pandoc writes `x²` and
+                // `x^(2n)`, and the set it can spell is the digits, the
+                // three signs and the two brackets — no letters at all,
+                // though Unicode has some. Measured character by
+                // character against its `plain` writer.
+                Inline::Superscript(i) => self.script(out, i, '^', superscript),
+                Inline::Subscript(i) => self.script(out, i, '_', subscript),
                 Inline::SmallCaps(i) => {
                     let mut inner = String::new();
                     self.collect(&mut inner, i);
@@ -911,6 +987,31 @@ fn open_line(text: &str, prefix: &str, margin: usize) -> String {
 fn opens_with_border(rendered: &str) -> bool {
     let first = rendered.lines().next().unwrap_or_default();
     !first.trim().is_empty() && first.chars().all(|c| matches!(c, ' ' | '-' | '+'))
+}
+
+/// The superscript form of a character, where pandoc has one: the
+/// digits, `+`, `-` (either dash), `=` and the two brackets.
+fn superscript(ch: char) -> Option<char> {
+    Some(match ch {
+        '0' => '\u{2070}', '1' => '\u{00B9}', '2' => '\u{00B2}', '3' => '\u{00B3}',
+        '4' => '\u{2074}', '5' => '\u{2075}', '6' => '\u{2076}', '7' => '\u{2077}',
+        '8' => '\u{2078}', '9' => '\u{2079}',
+        '+' => '\u{207A}', '-' | '\u{2212}' => '\u{207B}', '=' => '\u{207C}',
+        '(' => '\u{207D}', ')' => '\u{207E}',
+        _ => return None,
+    })
+}
+
+/// The same, below the line.
+fn subscript(ch: char) -> Option<char> {
+    Some(match ch {
+        '0' => '\u{2080}', '1' => '\u{2081}', '2' => '\u{2082}', '3' => '\u{2083}',
+        '4' => '\u{2084}', '5' => '\u{2085}', '6' => '\u{2086}', '7' => '\u{2087}',
+        '8' => '\u{2088}', '9' => '\u{2089}',
+        '+' => '\u{208A}', '-' | '\u{2212}' => '\u{208B}', '=' => '\u{208C}',
+        '(' => '\u{208D}', ')' => '\u{208E}',
+        _ => return None,
+    })
 }
 
 fn indent(text: &str, prefix: &str) -> String {

@@ -533,6 +533,18 @@ fn definition_list_to(
                 // The spaces either side of the tilde are pandoc's.
                 let filler = definitions.first().is_some_and(|d| definition_needs_filler(d));
                 out.push_str(if filler { "] ~ \n" } else { "]\n" });
+                // **A list takes `\hfill` on a line of its own** where a
+                // heading and a code block take `] ~ `. Both fillers stop
+                // `\item` from swallowing what follows it, and pandoc
+                // uses one for the two block kinds and the other for the
+                // two list kinds — measured a first block at a time, and
+                // nothing else needs either.
+                if definitions
+                    .first()
+                    .is_some_and(|d| matches!(d.first(), Some(Block::BulletList(_) | Block::OrderedList(..))))
+                {
+                    out.push_str("\\hfill\n");
+                }
                 // **A blank line between definitions.** Without it two
                 // definitions run into one paragraph.
                 for (index, definition) in definitions.iter().enumerate() {
@@ -543,6 +555,90 @@ fn definition_list_to(
                 }
             }
             out.push_str("\\end{description}\n");
+}
+
+/// The same blocks with every footnote inside them replaced by the mark
+/// LaTeX allows there and nothing else.
+fn marks_for_notes(blocks: &[Block]) -> Vec<Block> {
+    let mut out = blocks.to_vec();
+    mark_blocks(&mut out);
+    out
+}
+
+fn mark_blocks(blocks: &mut [Block]) {
+    for block in blocks {
+        match block {
+            Block::Plain(list) | Block::Para(list) | Block::Header(_, _, list) => {
+                mark_inlines(list);
+            }
+            Block::LineBlock(lines) => {
+                for line in lines {
+                    mark_inlines(line);
+                }
+            }
+            Block::BlockQuote(inner) | Block::Div(_, inner) => mark_blocks(inner),
+            Block::BulletList(items) | Block::OrderedList(_, items) => {
+                for item in items {
+                    mark_blocks(item);
+                }
+            }
+            Block::DefinitionList(entries) => {
+                for (term, definitions) in entries {
+                    mark_inlines(term);
+                    for definition in definitions {
+                        mark_blocks(definition);
+                    }
+                }
+            }
+            Block::Figure(_, caption, inner) => {
+                mark_blocks(&mut caption.blocks);
+                mark_blocks(inner);
+            }
+            Block::Table(table) => {
+                mark_blocks(&mut table.caption.blocks);
+                for row in table
+                    .head
+                    .rows
+                    .iter_mut()
+                    .chain(table.bodies.iter_mut().flat_map(|b| {
+                        b.head.iter_mut().chain(&mut b.body)
+                    }))
+                    .chain(table.foot.rows.iter_mut())
+                {
+                    for cell in &mut row.cells {
+                        mark_blocks(&mut cell.blocks);
+                    }
+                }
+            }
+            Block::HorizontalRule | Block::CodeBlock(..) | Block::RawBlock(..) => {}
+        }
+    }
+}
+
+fn mark_inlines(list: &mut [Inline]) {
+    for inline in list.iter_mut() {
+        match inline {
+            Inline::Note(_) => {
+                *inline = Inline::RawInline(
+                    Box::new(ferrodoc_ast::Format("latex".into())),
+                    "\\footnotemark{}".to_owned(),
+                );
+            }
+            Inline::Emph(inner)
+            | Inline::Strong(inner)
+            | Inline::Strikeout(inner)
+            | Inline::Superscript(inner)
+            | Inline::Subscript(inner)
+            | Inline::SmallCaps(inner)
+            | Inline::Underline(inner)
+            | Inline::Span(_, inner)
+            | Inline::Quoted(_, inner)
+            | Inline::Cite(_, inner)
+            | Inline::Link(_, inner, _)
+            | Inline::Image(_, inner, _) => mark_inlines(inner),
+            _ => {}
+        }
+    }
 }
 
 /// `\protect\phantomsection\label{id}`, the anchor pandoc writes for
@@ -823,6 +919,15 @@ fn table_to(table: &Table, colour: bool, out: &mut String) {
     let blocky = rows_of(table).any(|row| {
         row.cells.iter().any(|cell| {
             !matches!(cell.blocks.as_slice(), [] | [Block::Plain(_) | Block::Para(_)])
+                // **A hard break makes a cell two lines**, which an `l`
+                // column has no room for either: pandoc writes the `p{…}`
+                // spec for one and boxes the lines with `\vtop`.
+                || cell.blocks.iter().any(|block| match block {
+                    Block::Plain(list) | Block::Para(list) => {
+                        list.iter().any(|inline| matches!(inline, Inline::LineBreak))
+                    }
+                    _ => false,
+                })
         })
     });
     let letter = |alignment| match alignment {
@@ -962,6 +1067,37 @@ fn row_to(row: &Row, columns: usize, colour: bool, blocky: bool, out: &mut Strin
     let _ = writeln!(out, "{} \\\\", row.trim_matches(|c: char| c.is_whitespace() || c == BREAK));
 }
 
+/// A cell's paragraph as `\vtop{\hbox{\strut …}…}`, the box pandoc puts
+/// a **multi-line** cell in.
+///
+/// A break at the very end starts no line — `a\\` is one line and is
+/// written as one — and a cell of nothing but a break is nothing at all.
+fn boxed_lines(list: &[Inline], colour: bool) -> Option<String> {
+    if !list.iter().any(|inline| matches!(inline, Inline::LineBreak)) {
+        return None;
+    }
+    let mut segments: Vec<&[Inline]> =
+        list.split(|inline| matches!(inline, Inline::LineBreak)).collect();
+    if segments.last().is_some_and(|last| last.is_empty()) && segments.len() > 1 {
+        segments.pop();
+    }
+    // One line after all — the break was the last thing in the cell —
+    // and the box is for more than one.
+    if segments.len() < 2 {
+        let mut out = String::new();
+        inlines(segments.first().copied().unwrap_or_default(), colour, &mut out);
+        return Some(out);
+    }
+    let mut out = String::from("\\vtop{");
+    for segment in segments {
+        out.push_str("\\hbox{\\strut ");
+        inlines(segment, colour, &mut out);
+        out.push('}');
+    }
+    out.push('}');
+    Some(out)
+}
+
 fn cell_text(cell: &Cell, colour: bool, blocky: bool) -> String {
     // A `p{…}` cell is a document and keeps every line it has — a list
     // stays a list and two paragraphs stay two, with the blank line
@@ -970,7 +1106,23 @@ fn cell_text(cell: &Cell, colour: bool, blocky: bool) -> String {
     // footnote holding a code block already follows.
     if blocky {
         let mut out = String::new();
-        blocks(&cell.blocks, 0, colour, &mut out);
+        // A paragraph with hard breaks is boxed **before** the cell is
+        // written, so everything around it is laid out as it always is.
+        let content: Vec<Block> = cell
+            .blocks
+            .iter()
+            .map(|block| match block {
+                Block::Plain(list) | Block::Para(list) => boxed_lines(list, colour)
+                    .map_or_else(
+                        || block.clone(),
+                        |boxed| {
+                            Block::RawBlock(ferrodoc_ast::Format("latex".into()), boxed)
+                        },
+                    ),
+                other => other.clone(),
+            })
+            .collect();
+        blocks(&content, 0, colour, &mut out);
         let text = out.trim();
         return if ends_literal(text) { format!("{text}\n") } else { text.to_owned() };
     }
@@ -986,6 +1138,13 @@ fn cell_text(cell: &Cell, colour: bool, blocky: bool) -> String {
     // sense. It becomes a break mark rather than a space, because pandoc
     // **does** fill a table row.
     out.replace('\n', &BREAK.to_string()).trim().to_owned()
+}
+
+/// Whether the text ends with a hard break, which is not one without the
+/// line it ends: pandoc writes `\footnote{x\\\\\n}` and not
+/// `\footnote{x\\\\}`, where the `\\\\` would run into the brace.
+fn ends_break(text: &str) -> bool {
+    text.ends_with("\\\\") || text.ends_with("\\hfill\\break")
 }
 
 /// Whether the text ends inside a literal environment's closing line,
@@ -1063,7 +1222,14 @@ fn note_to(blocks_in_note: &[Block], colour: bool, out: &mut String) {
             out.push_str("\\footnote{");
             out.push(IN);
             let mut text = String::new();
-            blocks(blocks_in_note, 0, colour, &mut text);
+            // **A footnote cannot hold a footnote.** Pandoc writes
+            // `\footnotemark{}` for one inside another — the mark, with
+            // no body anywhere — where this wrote a second `\footnote`,
+            // which LaTeX refuses inside the first. The body is walked
+            // before it is written, so the rule holds however deep the
+            // note sits inside it.
+            let body = marks_for_notes(blocks_in_note);
+            blocks(&body, 0, colour, &mut text);
             // Every line but the first is indented two, the way an
             // `\item`'s content is: a footnote of more than one block is
             // laid out as a block, not run together.
@@ -1093,7 +1259,7 @@ fn note_to(blocks_in_note: &[Block], colour: bool, out: &mut String) {
             // line. Asked of the *last* line rather than latched during
             // the loop, which added the newline to a footnote whose code
             // block was followed by a paragraph.
-            if ends_literal(text.trim()) {
+            if ends_literal(text.trim()) || ends_break(text.trim()) {
                 out.push('\n');
             }
             out.push(OUT);

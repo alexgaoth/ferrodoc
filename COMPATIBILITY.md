@@ -1918,8 +1918,9 @@ differential gate exists:
 | image | alt text in `[brackets]`, or it reads as prose the document never had |
 | horizontal rule | dashes to `--columns` |
 
-One thing is **not** matched, stated rather than hidden: pandoc renders
-`Math` as Unicode — `$x^2$` becomes `x²` — where this writes the TeX.
+Math is matched too: `$x^2$` is `x²` here as it is in pandoc, and the
+TeX between dollars is what both write for the expressions neither
+renders. `scripts/math.sh` is the gate that says how many.
 
 **A picture that is not there is warned about, in pandoc's words.**
 The DOCX, ODT and EPUB writers embed their media, so a missing file
@@ -2701,13 +2702,23 @@ blocks into the macro, which AsciiDoctor renders. Pandoc reads neither
 back, so nothing is measurable except what survives to a reader that is
 not pandoc.
 
-**The rest are gaps, not decisions**, and are counted as such: the sweep
-still names 40 divergences that are neither fixed nor listed. **Two
-thirds of them are one feature**: pandoc renders simple TeX to Unicode
-and this writes the `$x^2$` fallback, which is 24 of the 40 across the
-`commonmark`, `html` and `plain` writers. The rest are a GFM table whose
-cell holds a block, which pandoc degrades to raw HTML, and a handful of
-LaTeX and `plain` spellings.
+**Nothing is left over.** The sweep names **no** divergence that is
+neither fixed nor listed above: all eight writers are identical to pandoc
+on every one of the 286 constructs it asks about, flat and composed.
+
+That is a statement about the *alphabet*, not about every value a
+construct can hold, and the largest thing it cannot see is **math**: it
+asks about `$x^2$` and nothing else. `scripts/math.sh` is the gate that
+can, and it asks 81 expressions of all three writers that render math:
+
+    ./scripts/math.sh
+
+**242 of the 243 renderings are identical**, and the one that is not is
+the backslash rule above seen from another side: pandoc writes
+`$x \\ y$` verbatim where the fallback here is text and takes the
+escaping text takes. Where pandoc itself gives up — a fraction, a root,
+an operator carrying limits — this gives up on the same expressions and
+writes the same source between dollars.
 
 ## How to check any of this yourself
 
