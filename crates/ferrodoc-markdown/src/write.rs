@@ -713,6 +713,16 @@ impl Writer {
                 // `CommonMark` and gfm can hold only the HTML one and
                 // drop the rest rather than write it as prose.
                 if format.0 == "html" || self.pandoc() {
+                    // **A blank line inside the block is written as
+                    // itself**, where pandoc writes `&#10;` for it. Its
+                    // spelling keeps a `<div>` whole where a bare blank
+                    // line ends the block at the reader — and costs the
+                    // *content*, which comes back holding the entity as
+                    // text: `diff-md` falls from 652/652 to 651 on
+                    // `CommonMark` example 173 with it. A comment, which
+                    // is where this arises in practice, ends at `-->`
+                    // rather than at a blank line and round-trips whole
+                    // either way. COMPATIBILITY.md records the trade.
                     for line in text.trim_end_matches('\n').split('\n') {
                         push_line(out, prefix, line);
                     }
@@ -1636,8 +1646,14 @@ impl Writer {
     ///
     /// `pipes` says whether a `|` has to be escaped, which is a property
     /// of the **table shape** rather than of the text: a pipe table ends
-    /// a cell at one and a simple table does not, so pandoc writes
-    /// `` `x|y` `` bare in the second and `` `x\|y` `` in the first.
+    /// a cell at one and a simple table does not.
+    ///
+    /// **Pandoc escapes it in neither**, and its own reader then splits
+    /// the row: `` | `x|y` | `` comes back as a cell holding `` `x `` and
+    /// the code span is gone. This escapes it in the pipe table, which is
+    /// the divergence `COMPATIBILITY.md` records under a pipe inside a
+    /// cell — and the reason `corpus/gfm/tables.gfm` is one of the two
+    /// documents the `gfm` row is short of.
     fn cells(&mut self, row: &Row, columns: usize, pipes: bool, breaks: bool) -> Vec<String> {
         let mut out: Vec<String> = Vec::with_capacity(columns);
         for cell in &row.cells {
@@ -1807,6 +1823,14 @@ impl Writer {
                         opening: Opening::No,
                     };
                     self.at.item_start = false;
+                    // **No blank line after a container here**, though
+                    // pandoc writes one: a tight item that holds a blank
+                    // line is a *loose* item to the reader, and the round
+                    // trip is what this writer is measured on —
+                    // `CommonMark` example 321 is `Plain` with the blank
+                    // line and `Para` without, and `diff-md` falls from
+                    // 652/652 to 651. The `plain` writer, which nothing
+                    // reads back, writes pandoc's blank line.
                     self.block(&mut body, block, inner, at);
                     previous = Some(block);
                 }
@@ -2603,14 +2627,20 @@ fn after_hard_break(out: &str) -> bool {
     out.ends_with("\\\n")
 }
 
-/// Whether everything written on the current line is digits, and there is
-/// at least one — the only position where a following `.` or `)` opens an
-/// ordered list. Scans backwards over the digit run only, so prose (whose
-/// last character is rarely a digit) costs nothing.
-fn digits_since_line_start(out: &str) -> bool {
+/// The digits standing alone on the current line and whether that line
+/// opens the block — the only position where a following `.` or `)` opens
+/// an ordered list. Scans backwards over the digit run only, so prose
+/// (whose last character is rarely a digit) costs nothing.
+fn digits_since_line_start(out: &str) -> Option<(&str, bool)> {
     let before = out.trim_end_matches(|c: char| c.is_ascii_digit());
-    before.len() < out.len()
-        && (before.is_empty() || (before.ends_with('\n') && !after_hard_break(before)))
+    if before.len() == out.len() {
+        return None;
+    }
+    let opens_block = before.is_empty();
+    if opens_block || (before.ends_with('\n') && !after_hard_break(before)) {
+        return Some((&out[before.len()..], opens_block));
+    }
+    None
 }
 
 /// Write `$x$` or `$$x$$`, content untouched.
@@ -2779,6 +2809,19 @@ fn escape_text_inner(
             out.push_str("\\-");
             continue;
         }
+        // **Three dots are an ellipsis to the dialect's reader**, so a
+        // literal run of them is escaped — the *first* dot only, which is
+        // the dash rule seen from the other end: `a... b` is `a\... b`
+        // and `....` is `\....`. Two dots are not an ellipsis and stay
+        // bare, and neither is a dot inside a word.
+        if pandoc && ch == '.' && !out.ends_with('.') && next == Some('.') {
+            let mut ahead = chars.clone();
+            ahead.next();
+            if ahead.peek() == Some(&'.') {
+                out.push_str("\\.");
+                continue;
+            }
+        }
         // A heading's text cannot **open** a block: the `## ` in front of
         // it has already decided what the line is, so the escapes that
         // exist to stop a list or a setext rule are dead weight there.
@@ -2892,8 +2935,21 @@ fn escape_text_inner(
                 out.push(ch);
             }
             // `1.` and `1)` open an ordered list, but only where the line
-            // so far is nothing but the number.
-            '.' | ')' if !preceded && digits_since_line_start(out) && opens_block => {
+            // so far is nothing but the number — and, on a line that
+            // **continues** a paragraph, only where that number is `1`
+            // and only in the two `CommonMark` dialects. A list may
+            // interrupt a paragraph there when it starts at one, so
+            // `128.` is text to every reader and pandoc writes it bare;
+            // **pandoc's own dialect lets no list interrupt a paragraph
+            // at all**, and both binaries' output round-trips unescaped.
+            // At the top of a block any number opens a list, in every
+            // dialect, and every one is escaped.
+            '.' | ')'
+                if !preceded
+                    && opens_block
+                    && digits_since_line_start(out)
+                        .is_some_and(|(digits, first)| first || (!pandoc && digits == "1")) =>
+            {
                 out.push('\\');
                 out.push(ch);
             }

@@ -555,7 +555,8 @@ fn hard_broken_para_to(list: &[Inline], out: &mut String, def: &mut Defs) {
 /// `.. raw:: html` is RST's way to carry another format's syntax through,
 /// and a toolchain that emits that format uses it. Dropping the block
 /// deleted every table and comment a converted page had.
-/// Escape the backticks a `:literal:` role cannot hold bare.
+/// Escape what a `:literal:` role cannot hold bare: its backticks, and
+/// every backslash.
 ///
 /// **Only the ones that could open or close RST inline markup**, which
 /// is pandoc's rule and much narrower than escaping them all. RST starts
@@ -581,6 +582,13 @@ fn literal_backticks(code: &str) -> String {
     let chars: Vec<char> = code.chars().collect();
     let mut out = String::with_capacity(code.len());
     for (index, ch) in chars.iter().enumerate() {
+        // **A backslash is escaped here and not in the ``…`` form**: the
+        // role's content is read for escapes where the double-backtick
+        // literal's is not, so `\` in a span that also holds a backtick
+        // comes out `\\`. Both are pandoc's, and the two forms differ.
+        if *ch == '\\' {
+            out.push('\\');
+        }
         if *ch == '`' {
             let before = index.checked_sub(1).map(|i| chars[i]);
             let after = chars.get(index + 1).copied();
@@ -588,9 +596,14 @@ fn literal_backticks(code: &str) -> String {
                 && after.is_some_and(|c| !c.is_whitespace());
             let closes = before.is_some_and(|c| !c.is_whitespace())
                 && after.is_none_or(char::is_whitespace);
-            // A backtick that is the whole content has neither
-            // neighbour, so neither test fires; pandoc escapes it.
-            if opens || closes || (before.is_none() && after.is_none()) {
+            // **The last character is always escaped**, whichever
+            // side of the boundary rule it falls on: there it abuts the
+            // role's own closing backtick, and a bare one leaves `` `` ``
+            // reading as an empty pair. A backtick that *starts* the
+            // content needs no such rule — the opening delimiter is
+            // non-whitespace, so it cannot open markup — and pandoc
+            // writes `:literal:`` a` ` bare and `:literal:`a \`` ` not.
+            if opens || closes || after.is_none() {
                 out.push('\\');
             }
         }

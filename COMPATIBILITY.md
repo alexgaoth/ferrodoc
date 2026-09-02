@@ -1441,9 +1441,9 @@ directly without asking its reader to survive anything.
 | `plain` | **40/42** | 40 |
 | `latex` | 38/42 | 38 |
 | `asciidoc` | **40/42** | 40 |
-| `gfm` | 29/42 | 29 |
-| `commonmark` | 30/42 | 30 |
-| `markdown` | **30/42** | 30 |
+| `gfm` | 30/42 | 30 |
+| `commonmark` | 31/42 | 31 |
+| `markdown` | **31/42** | 31 |
 
 **A fill must not write a document that reads back as another one**, and
 until 2026-08-27 these writers did. Given a paragraph whose greedy fill
@@ -1930,6 +1930,55 @@ examples rather than anything about EPUB. It is gated at 50 as a
 regression check — a *drop* is real even where the level is not a figure
 — and `corpus/epub-spec/generate.sh` says how the books are made. The
 EPUB reader's own figure is `11/12` on `corpus/epub`, above.
+
+**A blank line after a container inside a tight list item.** Pandoc
+writes one between a nested list, a quote or a code block and whatever
+follows it in the same item; this writes none, because **a tight item
+that holds a blank line is a loose item to the reader**:
+
+    printf -- '- a\n  > b\n  ```\n  c\n  ```\n- d\n' > /tmp/i.md
+    pandoc /tmp/i.md -f commonmark -t commonmark -f commonmark -t json
+
+`CommonMark` example 321 comes back `Plain` without the blank line and
+`Para` with it, so writing pandoc's byte takes `diff-md` from **652/652
+to 651** — the round trip this writer is measured on. The `plain`
+writer, which nothing reads back, writes the blank line pandoc writes.
+
+**A blank line inside a raw HTML block.** Pandoc writes it as `&#10;`,
+so that a `<div>` with one inside stays a single block at its reader;
+this writes the blank line itself:
+
+    printf '<div>\na\n\nb\n</div>\n' > /tmp/r.md
+    pandoc /tmp/r.md -f commonmark -t commonmark      # <div>\na\n&#10;b\n</div>
+
+**Neither spelling round-trips.** Pandoc's keeps the block whole and
+changes its *content* — the entity comes back as text — and this one
+keeps the content and lets a non-comment block split. The gate decides:
+writing `&#10;` takes `diff-md` from **652/652 to 651**, on `CommonMark`
+example 173, and that round trip is a published claim. In practice the
+blank line arises inside a **comment**, which ends at `-->` rather than
+at a blank line and survives either way.
+
+**A blank line inside a nested item's indented code block, and the list
+around it.** Pandoc reads the *outer* list as **tight** where CommonMark
+says loose, so the same document gives two different ASTs and every
+writer differs on it:
+
+    printf -- '- a\n  - b\n    text\n\n        code\n\n  c\n- d\n' > /tmp/l.md
+    pandoc   /tmp/l.md -f commonmark -t json   # Plain — tight
+    ferrodoc /tmp/l.md -f commonmark -t json   # Para  — loose
+
+The spec is explicit — a list is loose when any item "directly contain[s]
+two block-level elements with a blank line between them", which the outer
+item does — and **`markdown-it` reads it loose too**, so this reader is
+with the spec and the third implementation. It fires only for an
+*indented* code block inside a *nested* item: a fenced one, a quote or a
+paragraph in the same place agree with pandoc.
+
+It is the whole of what `COMPATIBILITY.md` itself costs the `html`,
+`latex`, `plain` and `rst` rows of `scripts/writers.sh`: give both
+binaries **pandoc's own AST** for that document and all eight writers are
+byte-identical.
 
 **A picture that is not there is warned about, in pandoc's words.**
 The DOCX, ODT and EPUB writers embed their media, so a missing file

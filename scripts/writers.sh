@@ -69,10 +69,10 @@ floor_for() {
         plain)    echo 40 ;;
         latex)    echo 38 ;;
         asciidoc) echo 40 ;;
-        gfm)      echo 29 ;;
+        gfm)      echo 30 ;;
         # The strict-CommonMark row. `markdown` is Pandoc Markdown; callers
         # wanting this dialect must spell `commonmark` explicitly.
-        commonmark) echo 30 ;;
+        commonmark) echo 31 ;;
         # `-t markdown` against `pandoc -t markdown`: the same question
         # asked of both binaries, which is what it always should have
         # been. The **CommonMark** writer scored 6 here while it was the
@@ -83,7 +83,7 @@ floor_for() {
         # accepted spelling of the same `Format`, so it cannot diverge
         # from this row, and two identical numbers in a published table
         # read as two pieces of evidence.
-        markdown) echo 30 ;;
+        markdown) echo 31 ;;
         *)        echo 0 ;;
     esac
 }

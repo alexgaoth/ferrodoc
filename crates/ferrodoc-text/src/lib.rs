@@ -414,11 +414,49 @@ impl Writer {
             // so a list inside a quote fills to less than a list at the
             // top level by exactly the quote's two columns.
             self.reserved += continuation.chars().count() + prefix.chars().count();
+            // **A blank line after a container, even in a tight item.**
+            // A tight item's blocks are otherwise written one line after
+            // another, but pandoc separates the block that follows a
+            // nested list, a quote, a table or a code block — measured a
+            // block kind at a time, and a paragraph after a paragraph
+            // takes none.
+            //
+            // Each block is rendered on its own so that the separator
+            // can be asked about the block *before* it: a **loose**
+            // nested list writes one entry per item, so counting entries
+            // against the item's blocks paired the wrong two.
             let opening = std::mem::replace(&mut self.opening, true);
-            self.blocks(item, &mut inner, "");
+            let mut body = String::new();
+            let mut previous: Option<&Block> = None;
+            for block in item {
+                self.block(block, &mut inner, "");
+                self.opening = false;
+                // A raw block in another format renders to nothing, and
+                // takes its separator with it.
+                if inner.is_empty() {
+                    continue;
+                }
+                if !body.is_empty() {
+                    let after = previous.is_some_and(|before| {
+                        matches!(
+                            before,
+                            Block::BulletList(_)
+                                | Block::OrderedList(..)
+                                | Block::BlockQuote(_)
+                                | Block::CodeBlock(..)
+                                | Block::Table(_)
+                        )
+                    });
+                    body.push_str(if loose || after { "\n\n" } else { "\n" });
+                }
+                // Whatever one block wrote as several is several blocks,
+                // and those take the document's own blank line.
+                body.push_str(&inner.join("\n\n"));
+                inner.clear();
+                previous = Some(block);
+            }
             self.opening = opening;
             self.reserved = reserved;
-            let body = inner.join(if loose { "\n\n" } else { "\n" });
             // **A table and a rule take the marker's line to themselves**,
             // the same rule the RST writer follows and for the same
             // reason: both are laid out in columns of their own, and
