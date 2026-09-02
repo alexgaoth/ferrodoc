@@ -5,7 +5,8 @@ compatibility ledger: [`COMPATIBILITY.md`](COMPATIBILITY.md) says what works
 and what differs today; this file says what should change, in what order, and
 what evidence makes an item done.
 
-**Current planning baseline: 0.7.0.** Dates are intentionally absent. A date
+**Current planning baseline: 1.0.1**, released 2026-09-02. Dates are
+intentionally absent from *plans*. A date
 would be a promise made without users; an exit criterion is a promise the
 repository can verify.
 
@@ -145,11 +146,11 @@ Each version states the claim that becomes true, what has to be built, the
 test that decides it, and what it deliberately excludes. Cards from the
 protocol above are the unit of execution inside each.
 
-**Reading discipline:** 0.3 through 0.7 are release history, retained with
+**Reading discipline:** 0.3 through 1.0 are release history, retained with
 their dated measurements because they explain the gates now in use. The
-active queue begins at **0.7.5**, then 0.8–1.0. A statement of present status
-belongs in the measurement section above or in an explicitly dated update;
-historical numbers are not current claims.
+active queue is **after 1.0**, in the section below the ladder. A statement
+of present status belongs in the measurement section above or in an
+explicitly dated update; historical numbers are not current claims.
 
 ### 0.3 — Reachable
 
@@ -1279,6 +1280,83 @@ a reader can reproduce from a clone:
 templates beyond the stated subset, PDF input, or a promise about pandoc
 releases after the pinned 3.8.2.1.
 
+## After 1.0 — the evidence moved, so the queue moves with it
+
+**Reading discipline for this section:** 1.0's evidence is overwhelmingly
+*writer*-side. The sweep is writers (286/286 on eight), both round-trip
+gates are writers, `flags.sh` is writers, and the drop-in corpus scores
+output bytes. The reader gates are all **collected** corpora — the
+CommonMark spec and twenty documents — which is exactly the shape this
+project's own central lesson says not to rely on. A gate cannot fail on a
+construct its corpus lacks.
+
+**2026-09-02 proved it at a cost.** `tex_inlines` had no depth bound and
+aborted the process on a deeply nested expression, reachable from *every*
+reader that can carry a `Math` node to three of the writers. No reader
+gate held a document that could reach it, and the fuzzer could not
+generate one because no corpus document contains a braced expression. It
+was found by reading the claims, not by running them. The queue below is
+ordered by that: **the remaining risk is on the input side, and it is not
+measured the way the output side is.**
+
+### 1.0.1 — No supported conversion aborts the process — **met 2026-09-02**
+
+**Claim:** every conversion either produces bytes or returns an error.
+
+Bounded the last unguarded recursive-descent parser. Every *structural*
+path was already bounded — markdown and HTML readers at 200, DOCX XML at
+256, the JSON reader at its own limit — so this closed the one leaf, not
+a class. Published to all three registries.
+
+### 1.1 — The input side, measured the way the output side is
+
+**Claim:** the readers have a generated axis and a drift check, not just
+collected documents.
+
+- **Card: the hostile-shape axis.** Generate depth, length and degeneracy
+  for every reader rather than collecting more documents — nesting past
+  every bound, million-character runs, degenerate tables, unbalanced
+  delimiters, and a `Math` node whose TeX is pathological, since that is
+  the shape that got through. *Verify:* `scripts/hostile.sh` under a
+  stack and RSS cap. *Done:* every reader converts or returns `Err`; none
+  aborts, none hangs. *Not this card:* raising any fidelity score.
+- **Card: the threshold drift check.** `verify.sh` is the single source
+  of every threshold, but the *prose explaining* them is hand-copied into
+  `docs/gates.md`, `COMPATIBILITY.md` and `dropin/README.md` — and on
+  2026-09-02 all three still explained a drop-in threshold of 33 that the
+  gate had left behind at 47. The floor was right; three descriptions of
+  it were two moves stale, and nothing could have caught that.
+  *Verify:* a check that extracts each `--fail-under N` from `verify.sh`
+  and fails when a doc names a different number for that gate.
+  *Done:* the check is in `verify.sh` and fails on a planted edit.
+- **Card: give `diff-pandoc-md` a floor, then move it.** At **504/652**
+  it is the largest measured gap in the project, it is a reader, and it
+  has **no floor at all** — so it is free to decay in both directions.
+  The floor comes first and is a separate card from the fix, because a
+  floor is what makes the fix durable. *Not this card:* the fix.
+- **Card: `diff-html-read` 641/661.** Twenty documents, already
+  enumerated.
+
+**Not in 1.1:** the highlighting thermometer's bash row. It is a long
+tail where each failing script differs for several independent reasons,
+so a file only turns green once every cause in it is fixed — a sustained
+grind that moves no headline number per hour spent. It is honest work and
+it is not the next work.
+
+### 1.2 — The scope decision
+
+**Citations are the published exclusion**, named in `README.md` and in
+1.0's own "what this is not". Whether they enter is a product decision
+about what ferrodoc is, not a task that can be scheduled — a citation
+processor is a bibliography database, a style language and a locale set,
+and taking it on doubles the surface this project deliberately kept
+small. **The decision is the deliverable**, written down either way.
+
+**Also open, and dated so it stops being invisible:** the 1.0 exit test's
+install clause was met **on Linux only**. macOS and Windows build and
+test in CI, but no published artefact has been installed from its
+registry on either. Until that is run, the install clause is a
+three-platform claim with one platform's evidence.
 
 ## Continuous obligations
 
