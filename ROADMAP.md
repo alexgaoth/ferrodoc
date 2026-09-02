@@ -1321,18 +1321,25 @@ collected documents.
   for a *stack frame*, sized for the cheapest frame rather than the
   average one after a `\left` chain sailed through the depth a braced
   group died at. 8 s.
-- **Card: bound HTML parse time, not just HTML depth.** The axis above
-  found it immediately: the HTML reader refuses past 200 levels, but only
-  after the tree exists, and building a tree of nested block elements is
-  quadratic — 800 KB of nested `<div>` costs about three CPU minutes to
-  refuse, where the same bytes as siblings cost 0.12 s. Measured in
-  `COMPATIBILITY.md`. *Deliverable:* a decision first. Bounding depth on
-  the byte stream before parsing means a second parser that has to be
-  honest about comments, scripts and CDATA, and a wrong one refuses valid
-  documents — so the alternatives (a cheap tag-depth prescan, a wall-clock
-  budget, or documenting the limit and leaving it to the caller) get
-  written down before any of them is built. *Not this card:* the same
-  question for DOCX or ODT.
+- **Card: bound HTML parse time, not just HTML depth — decided
+  2026-09-02, and the decision is not to build it.** The prescan was the
+  obvious answer and it is wrong: html5ever's tokenizer is public, so a
+  prescan could be exactly right about comments, `<script>` raw text and
+  CDATA — but **depth is not a property of the token stream.** An end tag
+  closes everything it encloses, so `(<div><span><span><span></div>) x
+  2000` has a tag balance of 6,000 and a real depth of 4, while `<div> x
+  2000` has a balance of 2,000 and a depth of 2,000. A balance-based
+  prescan refuses the harmless document and admits the dangerous one;
+  the proxy is inverted, not approximate, and correcting it means
+  tracking implicit closes, which is the tree construction algorithm.
+  A wall-clock budget was rejected for contradicting the
+  deterministic-bytes claim. So the contract is the one 0.8 set for
+  archive size: state the limit, give the caller the bound
+  (`ulimit -t`), and treat the upstream fix as upstream's. Measurement,
+  counterexample and the verified `ulimit` recipe are in
+  `COMPATIBILITY.md`. *Still open:* reporting it to html5ever, which is
+  the owner's to send. *Not this card:* the same question for DOCX or
+  ODT.
 - **Card: the threshold drift check — met 2026-09-02.**
   `scripts/drift.sh` reads the 22 thresholds out of the four scripts that
   enforce them and fails when prose asserts one no gate has. 64 stated

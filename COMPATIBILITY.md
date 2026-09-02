@@ -1882,11 +1882,48 @@ parsing spec requires; ferrodoc's own bound never gets a say, because it
 is consulted while walking a tree that already exists.
 
 So an 800 KB upload is worth about three CPU minutes to anything that
-accepts HTML from strangers. **This is a measurement, not yet a
-contract** — a fix means bounding depth on the byte stream before parsing
-begins, which is a second parser to keep honest about comments, scripts
-and CDATA, and that is a design decision rather than a patch. It is
-carded in `ROADMAP.md` under 1.1.
+accepts HTML from strangers.
+
+**The decision, taken 2026-09-02: this is documented and bounded by the
+caller, not by a prescan.** The obvious fix is to measure nesting on the
+byte stream before parsing and refuse early, and html5ever's tokenizer is
+public, so the prescan could reuse the real tokenizer and be exactly right
+about comments, `<script>` raw text and CDATA. It still does not work,
+because depth is not a property of the token stream: an end tag closes
+every element it encloses, so counting start tags against end tags
+answers a different question. Two legal documents, measured:
+
+| document | tag balance | real depth | time |
+|---|---|---|---|
+| `(<div><span><span><span></div>) x 2000` | 6000 | 4 | 0.02 s |
+| `<div> x 2000` | 2000 | 2000 | 0.01 s |
+
+A balance-based prescan refuses the harmless one and admits the dangerous
+one. **The proxy is inverted on this pair, not merely imprecise**, and
+making it correct means tracking implicit closes — which is the tree
+construction algorithm, i.e. the parser again.
+
+The two alternatives were rejected for named reasons. A **wall-clock
+budget** would make the same input convert on one machine and fail on
+another, which contradicts the deterministic-bytes claim this project
+sells. **Fixing it upstream** is the right repair and is not in this
+repository's gift; the behaviour is html5ever implementing the HTML
+standard's scope algorithm faithfully.
+
+So the contract is the one 0.8 already set for archive size — **state the
+limit and give the caller the bound**:
+
+    # HTML from an untrusted source, held to a second of CPU
+    python3 -c "open('/tmp/big.html','w').write('<div>'*80000 + 'x')"
+    ( ulimit -t 1; ferrodoc -f html -t json /tmp/big.html )
+    # Killed                                        <- exit 137
+    ( ulimit -t 1; echo '<p>hi <em>there</em></p>' | ferrodoc -f html -t json )
+    # ... converts                                  <- exit 0
+
+A service accepting HTML uploads should cap CPU per conversion. Nesting
+is refused correctly at 200 levels either way; what is unbounded is the
+time taken to reach that refusal, and only for deeply nested **block**
+elements.
 
 **What this means in practice.** A 1 MB document needs roughly 75 MB and
 fits anywhere. A 10 MB document needs about 750 MB and does not fit a small
