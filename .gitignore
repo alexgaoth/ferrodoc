@@ -24,3 +24,11 @@ sweep-epub.*
 TODO.md
 CLAUDE.md
 ADOPTION.md
+
+# `.rust-corpus/` is a local reference library: upstream Rust performance,
+# API, memory and agent-instruction guides fetched by its own `fetch.sh`,
+# plus the distilled rules and the evaluation written from them. Upstream
+# copies are for reading here, not for redistribution from this repo, and
+# the folder is a few MB — so it stays out of the tree like the other
+# working notes above.
+.rust-corpus/

@@ -3286,7 +3286,12 @@ fn named_function(after: &str, out: &mut Vec<(Class, String)>) -> usize {
     let named = after[space..]
         .find(|c: char| !c.is_alphanumeric() && !"_-.:".contains(c))
         .map_or(after.len(), |index| space + index);
-    let named = named + usize::from(after[named..].starts_with("()")) * 2;
+    // **The parens belong to the name, and so does the space before
+    // them**: pandoc writes `fu| f ()` for `function f ()` exactly as it
+    // writes `fu| f()` for `function f()`, and `fu| f` for a definition
+    // with no parens at all. Measured all three, and with two spaces.
+    let gap = after[named..].len() - after[named..].trim_start_matches(' ').len();
+    let named = if after[named + gap..].starts_with("()") { named + gap + 2 } else { named };
     push(out, Class::Function, &after[..named]);
     named
 }
@@ -3698,7 +3703,13 @@ fn bash_arith(text: &str, from: usize, closing: Class, out: &mut Vec<(Class, Str
                 .unwrap_or(rest.len())
         };
         if run == 0 {
-            push(out, Class::Operator, &rest[..1]);
+            // **A parenthesis inside arithmetic is not an operator**:
+            // pandoc groups with it and writes it as plain text, so
+            // `$(( (a < b)? a: b ))` has `op|<`, `op|?` and `op|:` and
+            // nothing on either bracket. Merging it into the operator
+            // beside it — `op|)?`, `op|+(` — was the same mistake twice.
+            let class = if rest.starts_with(['(', ')']) { Class::Normal } else { Class::Operator };
+            push(out, class, &rest[..1]);
             at += 1;
             continue;
         }
@@ -3770,7 +3781,38 @@ fn bash_braced(inner: &str, out: &mut Vec<(Class, String)>) {
         usize::from(tail[1..].starts_with(head as char)) + 1
     };
     push(out, Class::Operator, &tail[..op]);
+    // **A bare `:` opens a substring expansion**, `:offset:length`, and
+    // pandoc tokenizes what follows it: a second `:` is an operator and
+    // a run of digits is a number, where a name stays plain —
+    // `${p:i:1}` is `op|:`, `i`, `op|:`, `dv|1`. `${p:-d}` is a default
+    // value, not a substring, and keeps its two-character operator and
+    // its ordinary expansion.
+    if head == b':' && op == 1 {
+        bash_substring(&tail[op..], out);
+        return;
+    }
     bash_expanded(&tail[op..], Class::Normal, out);
+}
+
+/// The `offset:length` of a substring expansion.
+fn bash_substring(text: &str, out: &mut Vec<(Class, String)>) {
+    let mut at = 0;
+    while at < text.len() {
+        let rest = &text[at..];
+        if rest.starts_with(':') {
+            push(out, Class::Operator, ":");
+            at += 1;
+            continue;
+        }
+        let run = rest.find(':').unwrap_or(rest.len());
+        let piece = &rest[..run];
+        if !piece.is_empty() && piece.bytes().all(|b| b.is_ascii_digit()) {
+            push(out, Class::DecVal, piece);
+        } else {
+            bash_expanded(piece, Class::Normal, out);
+        }
+        at += run;
+    }
 }
 
 /// Plain text that still expands variables and honours escapes — the
