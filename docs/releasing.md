@@ -283,17 +283,26 @@ README made the stronger claim while `pip install ferrodoc` 404'd.
   `--no-cache-dir` on both. Query `https://pypi.org/pypi/<name>/json` and
   re-run rather than concluding the publish failed.
 
-## Known state, 2026-08-30 — **0.8.0 is out on all three**
+## Known state, 2026-09-01 — **1.0.0 is out on all three**
 
-- **crates.io** — twelve crates at 0.8.0; `cargo install ferrodoc` gives
-  `ferrodoc 0.8.0` and converts.
-- **PyPI** — four wheels and an sdist; `pip install ferrodoc` gives 0.8.0
-  and converts.
-- **npm** — 0.8.0, published with `--provenance`; `npm install ferrodoc`
+- **crates.io** — twelve crates at 1.0.0; `cargo add ferrodoc` resolves
+  `v1.0.0`.
+- **PyPI** — four wheels and an sdist; `pip install ferrodoc==1.0.0`
+  installs and converts.
+- **npm** — 1.0.0, published with `--provenance`; `npm install ferrodoc`
   converts through the named async `convert`.
+- **The release page** — five CLI binaries and `ferrodoc.wasm`; the Linux
+  musl one reports `ferrodoc 1.0.0` and converts.
 
-All three were checked by installing from the registry and converting a
-document, not by reading a workflow's exit status.
+All four were checked by installing from the registry and converting a
+document — `$x^2$` to `x²`, which is this release's own work — and not by
+reading a workflow's exit status.
+
+**PyPI's index and `pip`'s resolver do not agree for a few minutes.**
+`pip install ferrodoc` gave 0.8.0 while the JSON API already listed
+1.0.0; `pip index versions ferrodoc` showed both, and naming the version
+installed it. Not a failed publish, and worth knowing before re-running
+one.
 
 ## What the first real release taught, 2026-08-23
 
