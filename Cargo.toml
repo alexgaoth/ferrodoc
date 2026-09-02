@@ -26,7 +26,7 @@ members = [
 exclude = ["bindings/python", "bindings/wasm", "bindings/c"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 # The edition needs a recent compiler; state it so `cargo add` can refuse
 # rather than fail to build on someone's machine.
@@ -41,20 +41,20 @@ categories = ["text-processing", "parser-implementations", "command-line-utiliti
 # The version is what a published crate depends on; the path is what this
 # workspace builds against. `cargo publish` refuses a path-only dependency,
 # so without both, every crate above ferrodoc-ast is unpublishable.
-ferrodoc-ast = { path = "crates/ferrodoc-ast", version = "1.0.0" }
-ferrodoc-markdown = { path = "crates/ferrodoc-markdown", version = "1.0.0" }
+ferrodoc-ast = { path = "crates/ferrodoc-ast", version = "1.0.1" }
+ferrodoc-markdown = { path = "crates/ferrodoc-markdown", version = "1.0.1" }
 # `default-features = false` here, so `highlight` is a choice each
 # dependent makes: `ferrodoc` forwards its own feature, and the EPUB
 # writer does not want it. See ROADMAP 0.7.
-ferrodoc-html = { path = "crates/ferrodoc-html", version = "1.0.0", default-features = false }
-ferrodoc-text = { path = "crates/ferrodoc-text", version = "1.0.0" }
-ferrodoc-docx = { path = "crates/ferrodoc-docx", version = "1.0.0" }
-ferrodoc-odt = { path = "crates/ferrodoc-odt", version = "1.0.0" }
-ferrodoc-epub = { path = "crates/ferrodoc-epub", version = "1.0.0" }
-ferrodoc-latex = { path = "crates/ferrodoc-latex", version = "1.0.0" }
-ferrodoc-rst = { path = "crates/ferrodoc-rst", version = "1.0.0" }
-ferrodoc-asciidoc = { path = "crates/ferrodoc-asciidoc", version = "1.0.0" }
-ferrodoc-ipynb = { path = "crates/ferrodoc-ipynb", version = "1.0.0" }
+ferrodoc-html = { path = "crates/ferrodoc-html", version = "1.0.1", default-features = false }
+ferrodoc-text = { path = "crates/ferrodoc-text", version = "1.0.1" }
+ferrodoc-docx = { path = "crates/ferrodoc-docx", version = "1.0.1" }
+ferrodoc-odt = { path = "crates/ferrodoc-odt", version = "1.0.1" }
+ferrodoc-epub = { path = "crates/ferrodoc-epub", version = "1.0.1" }
+ferrodoc-latex = { path = "crates/ferrodoc-latex", version = "1.0.1" }
+ferrodoc-rst = { path = "crates/ferrodoc-rst", version = "1.0.1" }
+ferrodoc-asciidoc = { path = "crates/ferrodoc-asciidoc", version = "1.0.1" }
+ferrodoc-ipynb = { path = "crates/ferrodoc-ipynb", version = "1.0.1" }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip makes parsed doubles bit-identical to their source text,
 # so comparing our AST against pandoc's JSON never reports a phantom

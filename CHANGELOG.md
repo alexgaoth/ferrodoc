@@ -8,7 +8,7 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
-## Unreleased
+## 1.0.1 — 2026-09-02
 
 ### Fixed
 
