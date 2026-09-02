@@ -38,11 +38,11 @@ security certificate. These limits are deliberate and must stay visible:
   Windows, but it does not publish a cross-version or cross-platform pandoc
   equivalence claim.
 - **The real-CLI floor is the score.** The corpus measures 47/48 identical
-  commands and the threshold is 33, so every one of them is the supported
+  commands and the threshold is 47, so every one of them is the supported
   contract and a single row going backwards fails the run. It sat at 11
   while the score climbed 26 -> 33, which had left 22 passing commands free
-  to regress unread. What the floor still does not say is that the other 15
-  are close: 8 are deliberate divergences and 7 are open.
+  to regress unread. The one row that differs, `dropin-006`, is a
+  deliberate divergence.
 - **A sub-100 format floor is not completion.** It prevents a measured
   baseline from falling; it does not turn a 96% reader or a 70% dialect
   reader into general compatibility. Read the current score and each named
@@ -61,7 +61,10 @@ security certificate. These limits are deliberate and must stay visible:
   set of constructors the way the AST is, so `scripts/math.sh` asks 81
   expressions chosen for what they exercise — scripts, spacing classes,
   fonts, accents, and five that pandoc itself will not render. It says
-  what those cover and nothing about the rest of the language.
+  what those cover and nothing about the rest of the language. Depth is
+  the exception: the parser refuses past 200 levels and falls back to the
+  TeX source, which unit tests pin at 20_000 levels on every recursive
+  path rather than the math corpus.
 - **EPUB writer read-back currently has a floor of zero.** It runs and reports
   differences, but does not prevent an additional EPUB semantic regression.
   `epubcheck` is the validity check; it is not an equivalence gate.

@@ -64,7 +64,7 @@ struct Atom {
 /// ```
 #[must_use]
 pub fn tex_inlines(tex: &str) -> Option<Vec<Inline>> {
-    let mut parser = Tex { rest: tex };
+    let mut parser = Tex { rest: tex, depth: 0 };
     let mut atoms = Vec::new();
     while parser.skip_spaces() {
         atoms.push(parser.atom()?);
@@ -106,9 +106,29 @@ fn spaced(atoms: Vec<Atom>) -> Vec<Inline> {
 
 struct Tex<'a> {
     rest: &'a str,
+    depth: usize,
 }
 
+/// The deepest expression rendered. Real mathematics nests a handful of
+/// levels, so this is far beyond anything genuine — but the parser is
+/// recursive descent over hostile input, and a group or a `\left` chain
+/// costs a frame apiece. Past the bound the expression is not rendered at
+/// all, which is the same answer this gives for a fraction: the writer
+/// falls back to the TeX source, so nothing is lost but the rendering.
+const MAX_DEPTH: usize = 200;
+
 impl Tex<'_> {
+    /// Recurse one level, or give up rather than the stack.
+    fn deeper(&mut self, parse: fn(&mut Self) -> Option<Atom>) -> Option<Atom> {
+        if self.depth == MAX_DEPTH {
+            return None;
+        }
+        self.depth += 1;
+        let atom = parse(self);
+        self.depth -= 1;
+        atom
+    }
+
     /// Skip the spaces TeX ignores; `false` at the end of the input.
     fn skip_spaces(&mut self) -> bool {
         self.rest = self.rest.trim_start_matches([' ', '\t', '\n']);
@@ -176,6 +196,10 @@ impl Tex<'_> {
 
     /// One unit: a group, a control sequence, or a single character.
     fn unit(&mut self) -> Option<Atom> {
+        self.deeper(Self::single)
+    }
+
+    fn single(&mut self) -> Option<Atom> {
         match self.peek()? {
             '{' => {
                 self.take();
@@ -206,6 +230,10 @@ impl Tex<'_> {
 
     /// A control sequence: a symbol, a font, or a fallback.
     fn control(&mut self) -> Option<Atom> {
+        self.deeper(Self::sequence)
+    }
+
+    fn sequence(&mut self) -> Option<Atom> {
         self.take();
         let name: String = self.rest.chars().take_while(char::is_ascii_alphabetic).collect();
         if name.is_empty() {
@@ -487,3 +515,38 @@ static SYMBOLS: &[(&str, char, Class)] = &[
     ("rfloor", '⌋', Class::Ordinary), ("lceil", '⌈', Class::Ordinary),
     ("rceil", '⌉', Class::Ordinary),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deep_groups_are_declined_not_survived_by_luck() {
+        let deep = "{".repeat(MAX_DEPTH + 50) + "x" + &"}".repeat(MAX_DEPTH + 50);
+        assert!(tex_inlines(&deep).is_none());
+    }
+
+    #[test]
+    fn every_recursion_path_is_bounded_not_just_groups() {
+        // Each reaches the parser by a different route, and 20_000 frames
+        // overflows the 2 MiB stack a test thread gets many times over —
+        // so a return to unbounded recursion aborts here rather than
+        // passing quietly.
+        for deep in [
+            "{".repeat(20_000) + "x" + &"}".repeat(20_000),
+            // `\left` consumes its own control sequence and recurses.
+            r"\left".repeat(20_000) + "(",
+            // Scripts take a unit apiece, so they nest without braces.
+            "x".to_owned() + &"^{x".repeat(20_000) + &"}".repeat(20_000),
+        ] {
+            assert!(tex_inlines(&deep).is_none(), "{}", &deep[..20]);
+        }
+    }
+
+    #[test]
+    fn real_expressions_are_nowhere_near_the_bound() {
+        // The bound may not cost a genuine expression its rendering.
+        assert!(tex_inlines(r"\alpha^{2}").is_some());
+        assert!(tex_inlines(&("{".repeat(20) + r"\beta" + &"}".repeat(20))).is_some());
+    }
+}

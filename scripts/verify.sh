@@ -258,12 +258,12 @@ if [ "$want_gates" = 1 ]; then
     # **The floor is the score, not a margin under it** — the same rule
     # the writer floors follow. It sat at 11 while this climbed 26 -> 33,
     # which left 22 passing commands free to regress unread: a baseline
-    # guard where the thing wanted was a contract. 33 is what this machine
+    # guard where the thing wanted was a contract. 47 is what this machine
     # and five consecutive CI runs both report, over a corpus with no
     # timing, network or environment input, so there is no variance for
     # headroom to absorb and a point below it is a regression to read
-    # rather than a flake to tolerate. The 15 rows that differ are 8
-    # deliberate and 7 open, each named by the script.
+    # rather than a flake to tolerate. The one row that differs,
+    # `dropin-006`, is deliberate and the script names it.
     # See dropin/README.md.
     gate "real command lines" ./scripts/dropin.sh --fail-under 47
 

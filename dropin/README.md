@@ -13,9 +13,9 @@ question no other gate in this project asks: **if a user swapped the
 binary in their Makefile, would they get the same bytes?**
 
 Today the answer is **47/48**. The remaining 1 is classified by the
-gate: **8 deliberate** divergences and **7 implementation** gaps. This is a
-useful compatibility measurement, not a general claim that ferrodoc can
-replace pandoc.
+gate: a single **deliberate** divergence, `dropin-006`. This is a useful
+compatibility measurement, not a general claim that ferrodoc can replace
+pandoc.
 
 ## Where they came from
 

@@ -2072,6 +2072,24 @@ and not its default, and the plain writer stripped the dollars
 altogether, leaving `\frac{a}{b}` reading as prose with nothing to say
 it had ever been an expression.
 
+**The renderer is bounded by depth as well, and here it diverges on
+purpose.** The TeX parser is recursive descent, so a group, a script and
+a `\left` chain each cost a stack frame; past 200 levels the expression
+is declined and the writer falls back to the source, exactly as it does
+for a fraction. Pandoc renders `${{{ … x … }}}$` nested fifty thousand
+deep as `x`; this writes the TeX. Nothing is lost but the rendering, and
+the alternative was the stack:
+
+    python3 -c "n=50000; print('\$' + '{'*n + 'x' + '}'*n + '\$')" > /tmp/deep.md
+    ferrodoc -f markdown -t html /tmp/deep.md   # was: fatal runtime error: stack overflow
+
+Every *structural* nesting path already refused this way — the markdown
+and HTML readers at 200 levels, DOCX XML at 256 — and this was the one
+leaf parser left unguarded, reachable from any reader that can carry a
+`Math` node to the HTML, plain or CommonMark writer. The fuzzer did not
+find it because no corpus document holds a braced expression: the corpus
+blind spot again, in the one place the AST sweep does not reach.
+
 Three writers spell math three ways and one function served all of
 them: `gfm` takes GitHub's `` $`x`$ `` and a ```` ```math ```` fence,
 `ipynb` takes `$x$`, and RST takes a `.. math::` directive for display

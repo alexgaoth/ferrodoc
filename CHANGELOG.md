@@ -8,6 +8,27 @@ what already happened.
 Every "changed" entry below carries the signature on both sides, because a
 break published without its note is a break twice.
 
+## Unreleased
+
+### Fixed
+
+**A deeply nested TeX expression no longer exhausts the stack.** The TeX
+renderer is recursive descent, and nothing bounded it: `$` + 50,000 `{` +
+`x` + 50,000 `}` + `$` aborted the process with `fatal runtime error:
+stack overflow` on `-t html`, `-t plain` and `-t commonmark` — every
+writer that renders math — from any reader that can carry a `Math` node.
+A second path did it without braces at all: `\left` repeated, which
+`control()` recursed on directly.
+
+Both are bounded at 200 levels now, the same figure the markdown and HTML
+readers already refuse at. Past it the expression is declined and the
+writer falls back to the TeX source, which is what it already did for a
+fraction — so the document is preserved and only the rendering is lost.
+`scripts/math.sh` is unchanged at 242/243.
+
+This was reachable by any caller converting untrusted documents, so a
+service accepting uploads should take this before exposing one.
+
 ## 1.0.0 — 2026-09-01
 
 ### Indistinguishable, on a scope that is written down
