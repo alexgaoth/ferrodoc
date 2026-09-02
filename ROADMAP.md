@@ -1313,13 +1313,26 @@ a class. Published to all three registries.
 **Claim:** the readers have a generated axis and a drift check, not just
 collected documents.
 
-- **Card: the hostile-shape axis.** Generate depth, length and degeneracy
-  for every reader rather than collecting more documents — nesting past
-  every bound, million-character runs, degenerate tables, unbalanced
-  delimiters, and a `Math` node whose TeX is pathological, since that is
-  the shape that got through. *Verify:* `scripts/hostile.sh` under a
-  stack and RSS cap. *Done:* every reader converts or returns `Err`; none
-  aborts, none hangs. *Not this card:* raising any fidelity score.
+- **Card: the hostile-shape axis — met 2026-09-02.** 36 generated shapes
+  across seven readers and seven writers, **252/252**, and it fails on a
+  planted edit: removing the TeX depth bound kills 21 of them. Two
+  constants, because two different things are being outrun — 5,000 for a
+  *documented* bound (every structural reader refuses at 200) and 50,000
+  for a *stack frame*, sized for the cheapest frame rather than the
+  average one after a `\left` chain sailed through the depth a braced
+  group died at. 8 s.
+- **Card: bound HTML parse time, not just HTML depth.** The axis above
+  found it immediately: the HTML reader refuses past 200 levels, but only
+  after the tree exists, and building a tree of nested block elements is
+  quadratic — 800 KB of nested `<div>` costs about three CPU minutes to
+  refuse, where the same bytes as siblings cost 0.12 s. Measured in
+  `COMPATIBILITY.md`. *Deliverable:* a decision first. Bounding depth on
+  the byte stream before parsing means a second parser that has to be
+  honest about comments, scripts and CDATA, and a wrong one refuses valid
+  documents — so the alternatives (a cheap tag-depth prescan, a wall-clock
+  budget, or documenting the limit and leaving it to the caller) get
+  written down before any of them is built. *Not this card:* the same
+  question for DOCX or ODT.
 - **Card: the threshold drift check.** `verify.sh` is the single source
   of every threshold, but the *prose explaining* them is hand-copied into
   `docs/gates.md`, `COMPATIBILITY.md` and `dropin/README.md` — and on

@@ -73,7 +73,17 @@ security certificate. These limits are deliberate and must stay visible:
   a whole-input/output limit or prove resistance to every hostile archive.
 - **Fuzzing is evidence, not a proof.** CI runs corpus mutations for panics
   and hangs; the default local verification does not, and it is not a
-  coverage-complete security audit.
+  coverage-complete security audit. `hostile.sh` is the answer to the half
+  of that gap a corpus cannot reach: mutation can only deepen a shape the
+  corpus already contains, and no corpus document holds a braced TeX
+  expression, so the 2026-09-02 abort was unreachable by fuzzing. The
+  hostile axis is **generated**, which is why it finds that class.
+- **`hostile.sh` proves survival, not correctness.** A refusal counts as a
+  pass, so the gate says a hostile document cannot crash the process — not
+  that its bytes are right, and not that the refusal is *fast*. Refusing
+  deeply nested HTML is quadratic and 800 KB of it costs about three CPU
+  minutes; the gate stays green through that, and `COMPATIBILITY.md`
+  carries the measurement.
 
 The gates, and what each one proves:
 
@@ -95,6 +105,7 @@ The gates, and what each one proves:
 | `diff-rst` | the RST writer round-trips the document, with pandoc's score on the same corpus printed beside it |
 | `diff-latex` | **printed, and cannot fail the run.** Pandoc round-trips 1/13 of this corpus — our number exactly — so any floor would be a number chosen after seeing the score. The LaTeX writer is decided by `pdflatex` in CI and by literal-output tests |
 | `math.sh` | every TeX expression this renders is rendered as pandoc renders it — and every one it *gives up on* is one pandoc gives up on too, since the sweep asks about `$x^2$` and nothing else |
+| `hostile.sh` | **no reader crashes the process** on input written to break it — the one gate here with no pandoc in it, because the contract is that a conversion writes bytes or returns an error, never a signal, a panic or a hang |
 | `bench-rss` | no conversion path exceeds its published multiple of the input |
 
 Some checks are not differential because there is no oracle, and those

@@ -78,6 +78,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-md` | markdown writer round-trips the document | **652/652** (pandoc: 593/652) |
 | `diff-gfm` | GFM reader produces pandoc's AST | **655/656** |
 | `diff-gfm-md` | GFM writer round-trips the document | **656/656** (pandoc: 590/656) |
+| `hostile.sh` | no reader crashes the process on hostile input | **252/252** conversions of 36 generated shapes |
 | `diff-pandoc-md` | pandoc-markdown reader produces pandoc's AST | **3/3** on its own fixtures, **17/20** over every markdown document, **504/652** over the spec |
 | `diff-html-read` | HTML reader produces pandoc's AST | **641/661** |
 
@@ -1837,6 +1838,38 @@ prose (`bash corpus/bench/generate.sh`):
 CI holds the worst path at **80×** on this 10 MB fixture, which is a
 regression bound rather than an aspiration: nothing may quietly get
 hungrier. What that bound covers by size is the paragraph below.
+
+**Time is bounded nowhere near as well as memory, and nested HTML is
+where that shows.** `scripts/hostile.sh` found it on the day it was
+written: the HTML reader refuses past 200 levels, correctly and always —
+but the refusal is reached only *after* the tree is built, and building a
+tree of nested block elements is quadratic.
+
+| nested `<div>` | input | time to refuse |
+|---|---|---|
+| 40,000 | 200 KB | 5.3 s |
+| 80,000 | 400 KB | 26.6 s |
+| 160,000 | 800 KB | 171 s |
+
+Four times the input, thirty-two times the work.
+
+    python3 -c "open('/tmp/n.html','w').write('<div>'*160000 + 'x')"
+    time ferrodoc -f html -t json /tmp/n.html
+    # ferrodoc: invalid html input: html nests deeper than 200 levels
+
+**It is depth of a block element, not size, and not depth as such.** The
+same byte count as siblings — `'<div>x</div>' * 40000` — costs 0.12 s,
+and 40,000 nested `<span>` cost 0.04 s. The cost is the open-elements
+stack being scanned on each block start tag, which is what the HTML
+parsing spec requires; ferrodoc's own bound never gets a say, because it
+is consulted while walking a tree that already exists.
+
+So an 800 KB upload is worth about three CPU minutes to anything that
+accepts HTML from strangers. **This is a measurement, not yet a
+contract** — a fix means bounding depth on the byte stream before parsing
+begins, which is a second parser to keep honest about comments, scripts
+and CDATA, and that is a design decision rather than a patch. It is
+carded in `ROADMAP.md` under 1.1.
 
 **What this means in practice.** A 1 MB document needs roughly 75 MB and
 fits anywhere. A 10 MB document needs about 750 MB and does not fit a small

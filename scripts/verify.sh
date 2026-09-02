@@ -305,6 +305,16 @@ if [ "$want_gates" = 1 ]; then
     # grammar.
     gate "every AST construct vs pandoc" ./scripts/ast-sweep.sh --floors
     gate "every TeX expression vs pandoc" ./scripts/math.sh --floors
+    # **The only gate here that does not compare against pandoc**, because
+    # the contract is not fidelity: hostile input must be refused or
+    # converted, never crash the process. It exists because every reader
+    # gate above scores documents somebody wrote, and on 2026-09-02 that
+    # let a missing depth bound in the TeX renderer abort the process from
+    # every reader that can carry a `Math` node — no corpus document holds
+    # a braced expression, so neither a gate nor the fuzzer could reach
+    # it. Generated, not collected, and it fails on a planted edit:
+    # removing the bound kills 21 of its 252 conversions. 8 s.
+    gate "hostile shapes, every reader" ./scripts/hostile.sh --floors
     # And the binary writers, which have no bytes worth comparing: the
     # judge is what pandoc reads back out of them. `corpus/docx` and
     # friends are **pandoc's own output**, so no gate here could see a
