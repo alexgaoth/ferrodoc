@@ -383,7 +383,7 @@ An EPUB's content documents are XHTML, so this reader's fidelity is the
 HTML reader's fidelity plus the spine. That has a consequence worth stating
 before the numbers: **the two documents it misses are both HTML reader
 divergences** (an unterminated comment, and a line break inside code), not
-EPUB ones. They are in the 26 listed under the HTML reader below.
+EPUB ones. They are in the 20 listed under the HTML reader below.
 
 Three corpora, because they measure three different things:
 
@@ -394,7 +394,7 @@ Three corpora, because they measure three different things:
 
 There was a third row here, `corpus/epub-spec`, and **it has been
 retired.** Each of its 22 files bundles 30 spec examples, so any one of
-the HTML reader's 26 known divergences fails a whole document, and at 30
+the HTML reader's 20 known divergences fails a whole document, and at 30
 examples per file most files contain one. Its number moved when the HTML
 reader moved and at no other time: it was the HTML reader's score under
 another name, and printing it in a table headed *EPUB* invited exactly
@@ -753,13 +753,30 @@ Pandoc's LaTeX writer makes something else of the same AST (`\item[$\boxtimes$]`
 and it leaves ordered lists alone); that is a different writer and ferrodoc's
 LaTeX writer is gated on fidelity, not on matching it.
 
-### HTML reader — 26 of 659
+### HTML reader — 20 of 661
 
 Most are one cause: **ferrodoc parses to the HTML5 spec via `html5ever`,
 pandoc parses with `tagsoup`, which does not.** On malformed markup the two
 build different trees and no mapping reconciles them — a tag with no closing
 `>`, an unclosed `<a>` whose formatting element is reconstructed after the
 paragraph, a `<pre>` or `<div>` opened inside a `<tr>` and never closed.
+
+**That is measured against a third parser, not asserted.** "We follow the
+standard" is the kind of claim a project makes about itself, so it was
+checked against an implementation that is neither of the two:
+
+    python3 -c "
+    from bs4 import BeautifulSoup
+    print(BeautifulSoup('<p>a <em> b</p>', 'lxml').p)"
+    # <p>a <em> b</em></p>
+
+libxml2 closes the unclosed `<em>` around the text that follows it, which
+is what this reader does and what a browser shows. Pandoc drops the
+emphasis *and* splits one paragraph into two `Plain` blocks — it loses the
+markup and the block structure together. The same holds for an unclosed
+`<a>` and an unclosed `<span>`. **Matching pandoc here would mean
+deliberately discarding markup two independent HTML5 parsers agree
+about**, which is why these are not counted as work to do.
 
 Not all of them are that, and assuming so hid real bugs for a review round:
 the `<![CDATA[…]]>` and `<style>` raw-text boundaries are a tokenizer
@@ -2332,6 +2349,28 @@ which moves to the figure. It happens where a paragraph is built, which
 is why a table cell is unaffected and a tight list item is not: the cell
 never goes through a paragraph, and the item's is already a figure by the
 time the list is tightened. All five shapes measured.
+
+**What the remaining 148 are, counted rather than guessed.** The spec
+score is the honest measure of how far pandoc's dialect is from
+CommonMark, and grouping every mismatch by section says that three
+features are more than half of it:
+
+| spec section | examples | what differs |
+|---|---|---|
+| Emphasis and strong emphasis | 40 | pandoc's rules are more permissive than CommonMark's flanking rules — `* a *` is emphasis to pandoc and literal text here |
+| Links | 25 | pandoc allows a space in an unbracketed destination and percent-encodes it; `[link](/my uri)` is a link there and text here |
+| Setext headings | 15 | the dialects disagree about what may precede and constitute an underline |
+| Lists, raw HTML, link reference definitions | 20 | several causes, none dominant |
+| everything else | 48 | fourteen sections, none above 7 |
+
+So this is **one feature, three times over, and not a list of bugs**:
+Pandoc-Markdown's inline grammar where it departs from CommonMark. The
+reader is comrak underneath, which implements CommonMark by
+construction, so closing this means parsing those constructs before
+comrak sees them or after it hands them back — a dialect layer, not a
+patch. It is carded in `ROADMAP.md` rather than attempted piecemeal,
+because a fix that moves emphasis alone would move 40 of 148 and leave
+the number looking arbitrary.
 
 Measured over the CommonMark spec, `445/652` examples now read exactly as
 `pandoc -f markdown` reads them, up from 417 — **twenty-eight gained and

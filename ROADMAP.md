@@ -1353,12 +1353,24 @@ collected documents.
   (96 against a clean 37/37) and the RST writer (18 against 30.8) — and
   in four of the five, losing a document would still have passed. All
   five now sit within one document of their score.
-- **Card: close the reader gaps the floors now hold.** `diff-pandoc-md`
-  at 504/652 over the spec and 17/20 over the corpus is the largest
-  measured gap in the project, and `diff-html-read` is 641/661 — twenty
-  documents, already enumerated. The floors above make a fix durable;
-  they do not make one. *Done:* a score moves and its floor moves with
-  it.
+- **Card: classify the two reader gaps before working either — done
+  2026-09-02, and it changed both.** The card that stood here said "close
+  the gaps", which assumed they were work. One is not.
+  - **`diff-html-read`, 641/661, is not work.** All twenty are the
+    html5ever-versus-tagsoup split already documented, and the dominant
+    shape is an unclosed inline element: pandoc discards it *and* splits
+    the paragraph, losing the markup and the block structure together.
+    Checked against a third parser rather than asserted — libxml2 closes
+    `<p>a <em> b</p>` around the text exactly as this reader does. Matching
+    pandoc would mean deliberately discarding markup two independent HTML5
+    parsers agree about. The floor at 96.9 is the whole obligation.
+  - **`diff-pandoc-md`, 504/652, is one feature three times over.**
+    Grouped by section, emphasis is 40, links 25 and setext 15 — more than
+    half of the 148 — and each is Pandoc-Markdown's inline grammar
+    departing from CommonMark, which comrak implements by construction.
+    That makes it a **dialect layer**, sized in weeks, not a list of bugs.
+    *Not this card:* starting it. A fix that moved emphasis alone would
+    take 40 of 148 and leave the number looking arbitrary.
 
 **Not in 1.1:** the highlighting thermometer's bash row. It is a long
 tail where each failing script differs for several independent reasons,
