@@ -936,6 +936,47 @@ items on one line all give the same result. The remaining divergences —
 language — fail pandoc's own output the same way, which is why the
 harness prints `pandoc round-trips 1/13` beside our score.
 
+### PDF — there is no PDF writer here, and pandoc has none either
+
+`README.md` lists PDF output as not done and names the workaround. This
+is the reasoning behind that row, because "no PDF writer" is easy to read
+as "no PDF", and the two are different.
+
+**Pandoc has no PDF writer either.** Its `pdf` output is a driver: it
+renders LaTeX, HTML or typst and then runs another program.
+
+    $ pandoc --list-input-formats | grep -i pdf     # nothing: pandoc cannot read PDF
+    $ pandoc doc.md -o doc.pdf
+    pdflatex not found. Please select a different --pdf-engine or install pdflatex
+
+So the supported route is the same one pandoc takes, minus the driver:
+
+    ferrodoc doc.md -t latex -s -o doc.tex && pdflatex doc.tex
+
+**That path is gated, not merely possible.** The `the LaTeX output
+compiles` job in CI runs it over *every* `corpus/*.md` on every push,
+retries on `lualatex` where a character needs a Unicode engine, and fails
+the build if a document compiles on neither. A LaTeX writer whose output
+TeX refuses would have missed its own point.
+
+**What is gated is that it compiles, not that the PDF matches pandoc's.**
+No gate compares the two PDFs, and none could usefully: `pdflatex` embeds
+timestamps and resolves fonts from the machine it runs on, so the bytes
+are not a function of the input.
+
+**Why there is no `--pdf-engine` here.** It would be a day's work and it
+would spend the reason this library exists. Ferrodoc's claim is that it
+converts *inside your process* — that is why it is linkable, why it runs
+in a browser and on an edge worker, and why it has no external toolchain.
+A PDF driver spawns a TeX distribution, cannot exist on wasm at all, and
+retires the deterministic-bytes property. Rendering PDF natively in Rust
+is a different project: font subsetting, shaping, line and page breaking,
+and — decisively for this repository — **no oracle**, since every quality
+claim here is bytes diffed against pandoc and there would be nothing to
+diff against. **PDF input is not planned either**, and there the reason is
+pandoc's: a PDF is page description, not document structure, so recovering
+headings is heuristic and no differential gate can judge a heuristic.
+
 ### `--reference-doc` — the styles, and only the styles
 
 The single most common reason a team cannot switch converters: the house
