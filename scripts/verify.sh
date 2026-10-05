@@ -195,7 +195,7 @@ if [ "$want_gates" = 1 ]; then
     gate "toc and numbering"    ./scripts/compare-toc.sh
     gate "DOCX reader"          $HARNESS diff-docx       corpus/docx --fail-under 100
     gate "DOCX reader (LO)"     $HARNESS diff-docx       corpus/docx-libreoffice --fail-under 87
-    gate "DOCX writer"          $HARNESS diff-write      corpus --fail-under 90
+    gate "DOCX writer"          $HARNESS diff-write      corpus --fail-under 100
     gate "ODT reader"           $HARNESS diff-odt        corpus/odt --fail-under 94
     gate "ODT reader (LO)"      $HARNESS diff-odt        corpus/odt-libreoffice --fail-under 100
     gate "ODT writer"           $HARNESS diff-odt-write  corpus --fail-under 100

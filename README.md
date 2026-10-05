@@ -168,7 +168,7 @@ cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx-libreoffice --fail-under 87
-cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
+cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt   corpus/odt --fail-under 94
 cargo run -p ferrodoc-harness -- diff-odt   corpus/odt-libreoffice --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100

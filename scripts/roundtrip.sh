@@ -97,7 +97,7 @@ docs=(corpus/*.md README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README
 floor_for() {
     case "$1" in
         odt)   echo 16 ;;
-        docx)  echo 14 ;;
+        docx)  echo 15 ;;
         ipynb) echo 11 ;;
         # Every book differs on `dc:title`, which this writes always and
         # pandoc omits — `epubcheck` rejects pandoc's book for exactly
