@@ -49,7 +49,7 @@ while IFS=$'\t' read -r language file; do
         cat "$file"
         printf '```\n'
     } > "$work/in.md"
-    ( ulimit -v 6000000 2>/dev/null; pandoc "$work/in.md" -f commonmark -t html --wrap=none ) \
+    ( ulimit -v 6000000 2>/dev/null || true; pandoc "$work/in.md" -f commonmark -t html --wrap=none ) \
         > "$work/p" 2>/dev/null
     "$FERRODOC" "$work/in.md" -f commonmark -t html --wrap=none > "$work/f" 2>/dev/null
     if diff -q "$work/p" "$work/f" > /dev/null; then
