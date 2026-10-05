@@ -1400,6 +1400,20 @@ test in CI, but no published artefact has been installed from its
 registry on either. Until that is run, the install clause is a
 three-platform claim with one platform's evidence.
 
+**2026-10-05: macOS met, Windows still open.** On macOS 26.6 (arm64),
+each published 1.0.1 artefact resolved from its registry into an empty
+project and converted one document — nothing built from this tree:
+
+| Registry | Command | What resolved | Converted |
+|---|---|---|---|
+| PyPI | `pip install ferrodoc` (Python 3.9.6, fresh venv) | `ferrodoc-1.0.1`, wheel `cp39-abi3-macosx_11_0_arm64` | `convert(md, "markdown", "html")` |
+| npm | `npm install ferrodoc` (Node 26.10, npm 11.19) | `ferrodoc@1.0.1` | markdown → html → docx (3,257 bytes) → gfm, which round-tripped to the input |
+| crates.io | `cargo add ferrodoc` (cargo 1.98.1) | `ferrodoc = "1.0.1"` | `convert(&md, Format::Markdown, Format::Html)` |
+| crates.io | `cargo install ferrodoc` | the `ferrodoc 1.0.1` CLI | `ferrodoc doc.md -t html` |
+
+The install clause is now a three-platform claim with two platforms'
+evidence. Windows is the remaining row.
+
 ## Continuous obligations
 
 These are not milestones; they apply to every release.
