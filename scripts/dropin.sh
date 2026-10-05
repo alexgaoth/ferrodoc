@@ -229,7 +229,7 @@ attribute_miss() {
         local pp=${try_p//$p_out/$dir\/p}
         # stderr too: the main comparison includes it, so leaving it out
         # here made every file list differ and every row "remains".
-        eval "( ulimit -v 6000000; pandoc $pp )" \
+        eval "( ulimit -v 6000000 2>/dev/null; pandoc $pp )" \
             < /dev/null > "$dir/p/stdout" 2> "$dir/p/stderr" || continue
         if diff -rq "$dir/p" "$mine" >/dev/null 2>&1; then
             printf 'identical once pandoc drops: %s' "$combination"
@@ -266,8 +266,8 @@ same_trees() {
                     difference="$rel differs"; return 1 ;;
         esac
         cmp -s "$p/$rel" "$f/$rel" && continue
-        ( ulimit -v 6000000; pandoc -f "$format" -t json "$p/$rel" ) > "$work/p.json" 2>/dev/null
-        ( ulimit -v 6000000; pandoc -f "$format" -t json "$f/$rel" ) > "$work/f.json" 2>/dev/null
+        ( ulimit -v 6000000 2>/dev/null; pandoc -f "$format" -t json "$p/$rel" ) > "$work/p.json" 2>/dev/null
+        ( ulimit -v 6000000 2>/dev/null; pandoc -f "$format" -t json "$f/$rel" ) > "$work/f.json" 2>/dev/null
         if ! diff -q "$work/p.json" "$work/f.json" >/dev/null 2>&1; then
             difference="$rel differs in what pandoc reads back"
             return 1
@@ -301,8 +301,11 @@ while IFS=$'\t' read -r id source input args changed verbatim; do
     # stdin — and stdin here is the corpus file this loop is reading.
     # Without it the first such row ate the rest of the corpus and the
     # run reported 0/5.
+    # `2>/dev/null` on the cap, because macOS refuses `ulimit -v` and says
+    # so on stderr — which is compared below, so every row on a Mac was
+    # "fixable" and the run reported 0/48. The cap is Linux's to keep.
     p_status=0
-    eval "( ulimit -v 6000000; pandoc $p_args )" \
+    eval "( ulimit -v 6000000 2>/dev/null; pandoc $p_args )" \
         < /dev/null > "$p_out/stdout" 2> "$p_out/stderr" || p_status=$?
     f_status=0
     eval "$FERRODOC $f_args" \
