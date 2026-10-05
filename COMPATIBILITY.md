@@ -2662,7 +2662,9 @@ the line after it is not blank, and a later line is exactly `---` or
 **What the dialect costs is measured, and it is most of the drop-in
 number.** `scripts/dropin.sh --attribute` retries every miss with one of
 pandoc's own features neutralised at a time and names the smallest set
-that makes the two agree. On the 38 misses in 48 real command lines:
+that makes the two agree. On the 38 misses in 48 real command lines, as
+measured when this section was written (today there is one miss, the
+`dropin-006` row below):
 
 | what one change would fix the row | rows |
 |---|---|
