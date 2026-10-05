@@ -190,7 +190,9 @@ closing section.
 - `spec-13`, `spec-14`, `spec-15`: `<p><em>foo </em>bar**</p>` — pandoc
   hoists the trailing space out of the emphasis, ferrodoc drops it (G3).
 - `spec-11`: `<code></code>` — pandoc drops an empty code span and the
-  space beside it, ferrodoc emits `Code ""`.
+  space beside it, ferrodoc emitted `Code ""`. **Fixed 2026-10-05**: an
+  empty `code`/`tt`/`samp`/`var` is now nothing, as in pandoc, and the
+  chunk's first divergence moved on to G2.
 
 The same is true of the EPUB gate proper: `COMPATIBILITY.md` says its two
 misses "are in the 26 listed under the HTML reader". Neither is.
@@ -222,8 +224,8 @@ half, one does not.
   the book cannot satisfy (G5).
 
 So **the 26** cost one gate and one document, not three gates. The HTML
-reader at large costs more — `spec-11` and `spec-13`/`14`/`15` are HTML
-reader divergences too — but they are not among the 26, which is what
+reader at large costs more — `spec-13`/`14`/`15` are HTML reader
+divergences too, as `spec-11` was until 2026-10-05 — but they are not among the 26, which is what
 the roadmap claim was about.
 
 ---
@@ -308,7 +310,7 @@ divergence the gate reports, and what the same chunk's XHTML does under
 | `spec-05.epub` | `/blocks/1/c/1/1/c/0` | G2 | attribute *order* in a malformed start tag: pandoc sorts the deduplicated `<div` last, ferrodoc keeps source order (G4 family) |
 | `spec-06.epub` | `/blocks/1/c/1/6/c/0` | G2 (`<!-- foo -->`) | G1 unclosed `<a href="bar">` |
 | `spec-10.epub` | `/blocks/1/c/1/8/c/0` | G2 (`<!-- -->`) | **none — G2 is the whole failure** |
-| `spec-11.epub` | `/blocks/1/c/1/4/c` (3 vs 1) | empty `<code></code>`: pandoc drops it and the space beside it, ferrodoc emits `Code ""` | same |
+| `spec-11.epub` | `/blocks/1/c/1/14/c/0` | G2 (pandoc `RawInline`) | none since 2026-10-05 — the empty `<code></code>` that diverged first here is now dropped, as pandoc drops it |
 | `spec-13.epub` | `/blocks/1/c/1/19/c/1/c` | G3 `<em>foo </em>bar**` | same |
 | `spec-14.epub` | `/blocks/1/c/1/7/c/1/c` | G3 `<strong>foo </strong>bar baz**` | same |
 | `spec-15.epub` | `/blocks/1/c/1/21/c/1/c` | G3 | same |
