@@ -95,15 +95,22 @@ gate_claims() {
 "real command lines	ours	dropin/README.md	Today the answer is"
 }
 
+# The score lines recorded under one label. `verify.sh` writes the label,
+# a tab, then the gate's own output; the label is compared as a string,
+# because labels carry `'` and `.` and a pattern would read them. This was
+# `grep -P "^\Q...\E\t"`, which BSD grep does not have — on a Mac every
+# claim came back MISSING.
+scored() { awk -F'\t' -v label="$2" '$1 == label' "$1"; }
+
 # The figure in one recorded score line: `N/M` from ours, or the `N/M`
 # that follows "round-trips" for pandoc's.
 figure_from() {
     local scores="$1" label="$2" which="$3" line
     if [ "$which" = pandoc ]; then
-        line=$(grep -P "^\Q$label\E\t.*round-trips" "$scores" || true)
+        line=$(scored "$scores" "$label" | grep round-trips || true)
         printf '%s' "$line" | grep -oE 'round-trips [0-9]+/[0-9]+' | awk '{print $2}'
     else
-        line=$(grep -P "^\Q$label\E\t" "$scores" | grep -v round-trips || true)
+        line=$(scored "$scores" "$label" | grep -v round-trips || true)
         printf '%s' "$line" | grep -oE '[0-9]+/[0-9]+' | head -n1
     fi
 }
@@ -130,7 +137,7 @@ check_gates() {
     # table row of its own. Nothing checked them until 2026-08-23, and the
     # LaTeX row had said 0/8 for as long as it had a row.
     local writers score
-    writers=$(grep -P "^\Qtext writers vs pandoc's\E\t" "$scores" || true)
+    writers=$(scored "$scores" "text writers vs pandoc's" || true)
     for writer in html latex plain gfm rst asciidoc markdown commonmark; do
         score=$(printf '%s' "$writers" | grep -oE "\b$writer [0-9]+/[0-9]+" | awk '{print $2}')
         if [ -z "$score" ]; then
@@ -179,14 +186,15 @@ check_slow() {
 # bound rather than an equality: 5% is far tighter than the 33x and 60%
 # claims they support, and loose enough not to fail on a rustc release.
 # The *ratios* are the actual claim and are held to a point.
+
+# `wc -c <`, not `stat -c%s`: the flag is GNU's, and BSD `stat` spells it
+# `-f%z`. `tr`, because BSD `wc` pads the count with spaces.
+bytes() { wc -c < "$1" | tr -d ' '; }
+
 # Plain `gzip -c`, the same level `bindings/wasm/build.sh` reports with:
 # `-9` is 0.4% smaller and would make the two disagree about the same
 # module.
-gzipped() { gzip -c "$1" | wc -c; }
-
-# 6499664 -> 6,499,664, which is how README writes it. `printf "%'d"`
-# would depend on the locale, and CI runs in C.
-commas() { printf '%s' "$1" | sed -e ':a' -e 's/\B[0-9]\{3\}\>/,&/;ta'; }
+gzipped() { gzip -c "$1" | wc -c | tr -d ' '; }
 
 # A percentage README publishes, against the one just derived. One point
 # of slack, which is the rounding, and no more.
@@ -251,12 +259,12 @@ check_sizes() {
     cargo build --quiet --release -p ferrodoc --no-default-features \
         --features markdown,html --target-dir target/trimmed
     local cli trimmed_cli
-    cli=$(stat -c%s target/release/ferrodoc)
-    trimmed_cli=$(stat -c%s target/trimmed/release/ferrodoc)
+    cli=$(bytes target/release/ferrodoc)
+    trimmed_cli=$(bytes target/trimmed/release/ferrodoc)
 
     ./bindings/wasm/build.sh >/dev/null 2>&1
     local wasm wasm_gz
-    wasm=$(stat -c%s bindings/wasm/js/ferrodoc.wasm)
+    wasm=$(bytes bindings/wasm/js/ferrodoc.wasm)
     wasm_gz=$(gzipped bindings/wasm/js/ferrodoc.wasm)
     # A trimmed build deliberately stays in `target/` and never reaches
     # `js/` — that is what stops a measurement replacing what npm ships,
@@ -265,7 +273,7 @@ check_sizes() {
         --features ferrodoc/markdown,ferrodoc/html >/dev/null 2>&1
     local trimmed=bindings/wasm/target/wasm32-unknown-unknown/release/ferrodoc_wasm.wasm
     local trimmed_wasm trimmed_wasm_gz
-    trimmed_wasm=$(stat -c%s "$trimmed")
+    trimmed_wasm=$(bytes "$trimmed")
     trimmed_wasm_gz=$(gzipped "$trimmed")
 
     within "CLI, every format"        "$cli"             7487680 5
