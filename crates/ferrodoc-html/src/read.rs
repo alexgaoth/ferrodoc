@@ -2050,10 +2050,10 @@ mod tests {
     /// by `diff-html-read`, which walks eight `corpus/*.html`.
     #[test]
     fn an_epub_titlepage_is_dropped_whole() {
-        assert!(blocks(r#"<section epub:type="titlepage"><p>x</p></section>"#).is_empty());
+        assert_eq!(blocks(r#"<section epub:type="titlepage"><p>x</p></section>"#), Vec::<Block>::new());
         // The value decides, not the element, and `epub:type` is a list.
-        assert!(blocks(r#"<div epub:type="titlepage"><p>x</p></div>"#).is_empty());
-        assert!(blocks(r#"<p epub:type="cover titlepage">x</p>"#).is_empty());
+        assert_eq!(blocks(r#"<div epub:type="titlepage"><p>x</p></div>"#), Vec::<Block>::new());
+        assert_eq!(blocks(r#"<p epub:type="cover titlepage">x</p>"#), Vec::<Block>::new());
         // The value keeps its case, and nothing else is a title page.
         assert_eq!(blocks(r#"<p epub:type="Titlepage">x</p>"#).len(), 1);
         assert_eq!(blocks(r#"<p epub:type="cover">x</p>"#).len(), 1);
