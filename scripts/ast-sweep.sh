@@ -37,4 +37,4 @@ fi
 
 # The cap is for pandoc, which this spawns once per writer; python fits
 # inside it comfortably.
-( ulimit -v 6000000; python3 scripts/ast-sweep.py "$@" )
+( ulimit -v 6000000 2>/dev/null; python3 scripts/ast-sweep.py "$@" )

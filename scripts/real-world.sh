@@ -58,7 +58,7 @@ score() {
     [ -f "$file" ] || continue
     total=$((total + 1))
     { printf '```%s\n' "$language"; cat "$file"; printf '```\n'; } > "$work/in.md" 2>/dev/null
-    ( ulimit -v 6000000; pandoc "$work/in.md" -f commonmark -t html --wrap=none ) \
+    ( ulimit -v 6000000 2>/dev/null; pandoc "$work/in.md" -f commonmark -t html --wrap=none ) \
       > "$work/pandoc.html" 2>/dev/null
     "$FERRODOC" "$work/in.md" -f commonmark -t html --wrap=none > "$work/ours.html" 2>/dev/null
     cmp -s "$work/pandoc.html" "$work/ours.html" && same=$((same + 1))

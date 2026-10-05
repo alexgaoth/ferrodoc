@@ -51,7 +51,7 @@ while IFS= read -r flags; do
     for doc in corpus/*.md; do
         total=$((total + 1))
         # shellcheck disable=SC2086
-        ( ulimit -v 6000000; pandoc "$doc" -t html $HANDED $flags ) > "$work/p" 2>/dev/null
+        ( ulimit -v 6000000 2>/dev/null; pandoc "$doc" -t html $HANDED $flags ) > "$work/p" 2>/dev/null
         # shellcheck disable=SC2086
         "$FERRODOC" "$doc" -t html -f commonmark $MUTED $flags > "$work/f" 2>/dev/null
         if diff -q "$work/p" "$work/f" >/dev/null; then

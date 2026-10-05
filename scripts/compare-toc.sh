@@ -34,9 +34,9 @@ while IFS= read -r doc; do
     total=$((total + 1))
 
     ours_toc=$("$FERRODOC" -f gfm -t html -s --toc --wrap=none "$doc" | nav)
-    theirs_toc=$( ( ulimit -v 6000000; pandoc -f gfm -t html -s --toc --wrap=none "$doc" ) | nav)
+    theirs_toc=$( ( ulimit -v 6000000 2>/dev/null; pandoc -f gfm -t html -s --toc --wrap=none "$doc" ) | nav)
     ours_num=$("$FERRODOC" -f gfm -t html --number-sections --wrap=none "$doc" | headings)
-    theirs_num=$( ( ulimit -v 6000000; pandoc -f gfm -t html --number-sections --wrap=none \
+    theirs_num=$( ( ulimit -v 6000000 2>/dev/null; pandoc -f gfm -t html --number-sections --wrap=none \
         --syntax-highlighting=none "$doc" ) | headings)
 
     if [ "$ours_toc" = "$theirs_toc" ] && [ "$ours_num" = "$theirs_num" ]; then

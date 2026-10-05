@@ -21,7 +21,7 @@ verbose=0
 
 # Capped, because the oracle is the danger here: pandoc exhausts memory on
 # a self-referential footnote, and an EPUB is exactly where one lives.
-ulimit -v 6000000
+ulimit -v 6000000 2>/dev/null
 
 work=$(mktemp -d -p . sweep-epub.XXXXXX)
 trap 'rm -rf "$work"' EXIT INT TERM

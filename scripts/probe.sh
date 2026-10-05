@@ -31,4 +31,4 @@ fi
 [ -x ./target/release/ferrodoc ] || {
     echo "build it first: cargo build --release -p ferrodoc" >&2; exit 2; }
 
-( ulimit -v 6000000; python3 scripts/probe.py "$@" )
+( ulimit -v 6000000 2>/dev/null; python3 scripts/probe.py "$@" )
