@@ -137,7 +137,7 @@ for format in html commonmark markdown gfm latex rst asciidoc plain; do
             read -r from pattern <<<"$source"
             for doc in $pattern; do
                 total=$((total + 1))
-                ( ulimit -v 6000000 2>/dev/null
+                ( ulimit -v 6000000 2>/dev/null || true
                   pandoc "$doc" -f "$from" -t "$theirs" --wrap="$mode" --columns=72 \
                       --syntax-highlighting=none ) > "$work/p" 2>/dev/null
                 "$FERRODOC" "$doc" -f "$from" -t "$mine" --wrap="$mode" --columns=72 \
