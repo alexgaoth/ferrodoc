@@ -228,8 +228,8 @@ half, one does not.
 
 So **the 26** cost one gate and one document, not three gates. The HTML
 reader at large cost more — `spec-13`/`14`/`15` were HTML reader
-divergences too until 2026-08-19, and `spec-11` until 2026-10-05 — but they are not among the 26, which is what
-the roadmap claim was about.
+divergences too until 2026-08-19, and `spec-11` until 2026-10-05 — but
+they are not among the 26, which is what the roadmap claim was about.
 
 ---
 
