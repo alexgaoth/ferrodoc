@@ -68,7 +68,7 @@ $H diff-epub-write corpus > epubwrite.txt
 |---|---|---:|---|
 | **G1** | An element still open when its container closes (`<a>` never closed) is reconstructed here and dropped by pandoc | **13** | all **declared deliberate**: the three `<a … />` rows left on 2026-08-25, where the slash *does* close it |
 | **G2** | Pandoc's **EPUB** reader runs its HTML reader with `raw_html` **on**; ferrodoc's does not, so raw HTML pandoc keeps verbatim is normalised away | **11** | actionable, undeclared |
-| **G3** | Trailing whitespace *inside* `<em>`/`<strong>` — pandoc hoists it out as `Space`, ferrodoc drops it | **3** | actionable, undeclared |
+| ~~**G3**~~ | Trailing whitespace *inside* `<em>`/`<strong>` — pandoc hoists it out as `Space`, ferrodoc dropped it | **0** | **fixed 2026-08-19** (2d71825) — three documents; the census was not updated until 2026-10-05 |
 | **G4** | A start tag with no closing `>` — pandoc's tagsoup still builds a `Div` from the junk, ferrodoc emits nothing | **3** | actionable, declared as a family |
 | **G5** | EPUB writer will not emit a reference the book cannot satisfy | **3** | **declared deliberate** |
 | ~~**G6**~~ | `<![CDATA[…]]>` boundaries, and `<? … ?>` beside them | **0** | **fixed 2026-08-25** — three documents |
@@ -188,7 +188,9 @@ closing section.
 *expected* HTML, which never contains the constructs involved:
 
 - `spec-13`, `spec-14`, `spec-15`: `<p><em>foo </em>bar**</p>` — pandoc
-  hoists the trailing space out of the emphasis, ferrodoc drops it (G3).
+  hoists the trailing space out of the emphasis, ferrodoc dropped it (G3).
+  **Fixed 2026-08-19**: `spec-13` and `spec-14` pass, and `spec-15` now
+  first differs at G2.
 - `spec-11`: `<code></code>` — pandoc drops an empty code span and the
   space beside it, ferrodoc emitted `Code ""`. **Fixed 2026-10-05**: an
   empty `code`/`tt`/`samp`/`var` is now nothing, as in pandoc, and the
@@ -197,7 +199,7 @@ closing section.
 The same is true of the EPUB gate proper: `COMPATIBILITY.md` says its two
 misses "are in the 26 listed under the HTML reader". Neither is.
 `corpus-truncation-cases.epub` is G2 (no HTML-level divergence exists),
-and `corpus-code-and-raw.epub` is a space before `<br />` that pandoc
+and `corpus-code-and-raw.epub` was a space before `<br />` that pandoc
 trims and ferrodoc keeps — a 27th HTML reader divergence, invisible to
 `diff-html-read` for the same reason.
 
@@ -212,7 +214,8 @@ because every one of those seven also needs G2 first.
 half, one does not.
 
 - `diff-epub`'s two misses: **one** is an HTML reader divergence — the
-  space before `<br />` in `corpus-code-and-raw.epub`, though not one of
+  space before `<br />` in `corpus-code-and-raw.epub` (fixed 2026-08-19,
+  after which the document fails on G2 alone), though not one of
   the 26. The other, `corpus-truncation-cases.epub`, is **not**: its
   XHTML produces the same `blocks` under both readers, so nothing the
   HTML reader does is wrong there. G2 is a missing extension in the EPUB
@@ -224,9 +227,9 @@ half, one does not.
   the book cannot satisfy (G5).
 
 So **the 26** cost one gate and one document, not three gates. The HTML
-reader at large costs more — `spec-13`/`14`/`15` are HTML reader
-divergences too, as `spec-11` was until 2026-10-05 — but they are not among the 26, which is what
-the roadmap claim was about.
+reader at large cost more — `spec-13`/`14`/`15` were HTML reader
+divergences too until 2026-08-19, and `spec-11` until 2026-10-05 — but
+they are not among the 26, which is what the roadmap claim was about.
 
 ---
 
@@ -296,7 +299,10 @@ printf '<p>foo <![CDATA[>&<]]></p>\n' | pandoc -f html -t json   # Str ">&<" —
 printf '<a href="x" />\n<p>t</p>\n' | pandoc -f html -t json   # two Paras — matched since 2026-08-25
 ```
 
-### EPUB reader, spec chunks — `diff-epub corpus/epub-spec`, 12 of 22
+### EPUB reader, spec chunks — `diff-epub corpus/epub-spec`, 11 of 22
+
+**Re-measured 2026-10-05: every one of the eleven failing chunks now
+first differs at G2.** The HTML-level column is what remains behind it.
 
 Two causes per row, because these compound: the *epub-level* first
 divergence the gate reports, and what the same chunk's XHTML does under
@@ -311,9 +317,7 @@ divergence the gate reports, and what the same chunk's XHTML does under
 | `spec-06.epub` | `/blocks/1/c/1/6/c/0` | G2 (`<!-- foo -->`) | G1 unclosed `<a href="bar">` |
 | `spec-10.epub` | `/blocks/1/c/1/8/c/0` | G2 (`<!-- -->`) | **none — G2 is the whole failure** |
 | `spec-11.epub` | `/blocks/1/c/1/14/c/0` | G2 (pandoc `RawInline`) | none since 2026-10-05 — the empty `<code></code>` that diverged first here is now dropped, as pandoc drops it |
-| `spec-13.epub` | `/blocks/1/c/1/19/c/1/c` | G3 `<em>foo </em>bar**` | same |
-| `spec-14.epub` | `/blocks/1/c/1/7/c/1/c` | G3 `<strong>foo </strong>bar baz**` | same |
-| `spec-15.epub` | `/blocks/1/c/1/21/c/1/c` | G3 | same |
+| `spec-15.epub` | `/blocks/1/c/1/26/c/0` | G2 | none since 2026-08-19, when G3 was fixed — and with it `spec-13` and `spec-14`, which pass |
 | `spec-16.epub` | `/blocks/1/c/1/14/c/0` | G2 | G1 on `<b>` (spec example 494) |
 | `spec-17.epub` | `/blocks/1/c/1/14/c` (1 vs 3) | G2 (`<bar attr="](baz)">`) | **none — G2 is the whole failure** |
 | `spec-20.epub` | `/blocks/1/c/1/1/c/0/c` | G2 (`<5001 foo>`) | G1 duplicate trailing `Plain[Span]` |
@@ -345,12 +349,14 @@ worth counting, and reading the first as the second is how the two extra
 divergences in the closing section went unnoticed for a round. What they
 diverge on is audited there.
 
-### EPUB reader — `diff-epub corpus/epub`, 10 of 12
+### EPUB reader — `diff-epub corpus/epub`, 11 of 12
 
 | document | first diverging path | cause |
 |---|---|---|
-| `corpus/epub/corpus-code-and-raw.epub` | `/blocks/1/c/1/8/c/19/t` | a space before `<br />` — pandoc trims it, ferrodoc keeps `Space, LineBreak`. Not one of the 26. Probe: `printf '<p>a <br /> b</p>\n' \| pandoc -f html -t json` |
-| `corpus/epub/corpus-truncation-cases.epub` | `/blocks/1/c/1/9/c/0/c` | G2 — an HTML comment pandoc keeps as `RawInline`; its XHTML produces the same `blocks` under both readers, so this is not an HTML reader divergence |
+| `corpus/epub/corpus-code-and-raw.epub` | `/blocks/1/c/1/9/c/0` | G2 — pandoc keeps `<![CDATA[` as `RawInline "html"`. Until 2026-08-19 it first differed earlier, on a space before `<br />` that pandoc trims; that is fixed. Probe: `printf '<p>a <br /> b</p>\n' \| pandoc -f html -t json` |
+
+`corpus/epub/corpus-truncation-cases.epub`, the G2 row that stood here,
+passes as of the 2026-10-05 re-measure.
 
 ### EPUB writer — `diff-epub-write corpus`, 3 of 13
 
@@ -411,10 +417,13 @@ Stated as findings, not as a plan — ranking belongs in the roadmap.
   the chunk table above, which diverge in the **passing** chunks
   (`spec-02`, `spec-03`) as well as the failing ones — so no gate can
   reach them however the scores move:
-  - trailing space inside `<em>`/`<strong>` (G3), pandoc hoists it out;
-  - a space before `<br />`, pandoc trims it and ferrodoc keeps it;
-  - **`<head>` metadata**: pandoc's HTML reader populates `meta` from
-    `<title>` and the `<meta>` elements, and ferrodoc emits `{}`. The
+  - trailing space inside `<em>`/`<strong>` (G3), pandoc hoists it out —
+    fixed 2026-08-19;
+  - a space before `<br />`, pandoc trims it and ferrodoc kept it — fixed
+    2026-08-19;
+  - **`<head>` metadata** — fixed 2026-08-19, and identical to pandoc on
+    the probe below as of 2026-10-05: pandoc's HTML reader populates `meta`
+    from `<title>` and the `<meta>` elements, and ferrodoc emitted `{}`. The
     spec's expected HTML is fragments with no `<head>`, so no case in
     the corpus reaches it — although
     `crates/ferrodoc-harness/src/main.rs:434` does compare the whole
@@ -424,7 +433,7 @@ Stated as findings, not as a plan — ranking belongs in the roadmap.
     ```sh
     printf '<html><head><title>T</title></head><body><p>x</p></body></html>' > /tmp/h.html
     pandoc -f html -t json /tmp/h.html   # "meta":{"title":{"t":"MetaInlines",…}}
-    ./target/release/ferrodoc -f html -t json /tmp/h.html   # "meta":{}
+    ./target/release/ferrodoc -f html -t json /tmp/h.html   # was "meta":{}; now the same
     ```
 
   - **An `id` on `<li>` is dropped** — pandoc wraps the item's content in
