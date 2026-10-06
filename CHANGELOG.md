@@ -21,6 +21,16 @@ enclosing list's level plus one, as pandoc's writer does, while a list in
 a table cell or a footnote still starts at 0, as pandoc's does too.
 `diff-write` goes 12/13 → 13/13 and the DOCX read-back 15/17 → 16/17.
 
+**An empty `<code></code>` no longer reaches markdown as two backticks.**
+The HTML reader turned an empty `code`, `tt`, `samp` or `var` into
+`Code ""`, and every markdown writer — pandoc's too — spells that as
+` `` `, so `<p>x <code></code> y</p>` became ``x `` y`` on `-t gfm`.
+Pandoc's reader drops the element, attributes and all, and this one now
+does the same: the text either side merges as it does around a comment,
+so `x<code></code>y` is the word `xy` and a paragraph holding only the
+element is no paragraph. A `<code>` holding a space is still code. No
+gate score moves; `corpus/epub-spec/spec-11` now first differs at G2.
+
 ## 1.0.1 — 2026-09-02
 
 ### Fixed

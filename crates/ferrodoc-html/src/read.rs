@@ -510,7 +510,15 @@ impl Reader {
                 }
                 // Inline code is still inline: a run of whitespace in the
                 // source is one space, as everywhere else in HTML.
-                out.push(Inline::Code(Box::new(attr), collapse_spaces(&text)));
+                let text = collapse_spaces(&text);
+                // An empty one is nothing, attributes or not, which is what
+                // pandoc reads — and `Code ""` is not harmless downstream:
+                // every markdown writer spells it as two literal backticks.
+                // The text either side then merges as it would around a
+                // comment, so `x<code></code>y` is the word `xy`.
+                if !text.is_empty() {
+                    out.push(Inline::Code(Box::new(attr), text));
+                }
             }
             "br" => out.push(Inline::LineBreak),
             // `role="doc-noteref"` alone is the trigger — `epub:type` is
@@ -2048,6 +2056,41 @@ mod tests {
     /// rather than reading the title twice. 34 of the 128 XHTML files in
     /// the corpus EPUBs are exactly this page — none of them reachable
     /// by `diff-html-read`, which walks eight `corpus/*.html`.
+    /// `<code></code>` is how a template leaves a slot it did not fill.
+    /// Pandoc reads nothing there; kept, it reached markdown as two
+    /// backticks in the middle of the sentence.
+    #[test]
+    fn empty_inline_code_is_nothing() {
+        let para = |html: &str| match blocks(html).as_slice() {
+            [Block::Para(inlines)] => inlines.clone(),
+            other => panic!("expected one paragraph, got {other:?}"),
+        };
+        let words = |s: &[&str]| {
+            let mut out = Vec::new();
+            for (i, w) in s.iter().enumerate() {
+                if i > 0 {
+                    out.push(Inline::Space);
+                }
+                out.push(Inline::Str((*w).to_owned()));
+            }
+            out
+        };
+        for tag in ["code", "tt", "samp", "var"] {
+            assert_eq!(para(&format!("<p>x <{tag}></{tag}> y</p>")), words(&["x", "y"]), "{tag}");
+        }
+        // Attributes do not make it something.
+        assert_eq!(para(r#"<p>x <code id="a" class="c"></code> y</p>"#), words(&["x", "y"]));
+        // With no space either side, the two halves are one word.
+        assert_eq!(para("<p>x<code></code>y</p>"), words(&["xy"]));
+        // A paragraph that held only that is no paragraph.
+        assert_eq!(blocks("<p><code></code></p>"), Vec::<Block>::new());
+        // Whitespace is not empty: one space of code stays code.
+        assert!(matches!(
+            para("<p>x <code> </code> y</p>").as_slice(),
+            [_, _, Inline::Code(_, text), _, _] if text == " "
+        ));
+    }
+
     #[test]
     fn an_epub_titlepage_is_dropped_whole() {
         assert_eq!(blocks(r#"<section epub:type="titlepage"><p>x</p></section>"#), Vec::<Block>::new());
