@@ -43,7 +43,7 @@ That leaves **40 documents** across nine gates, re-counted 2026-08-25:
 | GFM reader, spec (`diff-gfm`) | 651/652 | 1 |
 | DOCX reader (`diff-docx`) | 37/37 | 0 |
 | DOCX reader, LibreOffice (`diff-docx`) | 7/8 | 1 |
-| DOCX writer (`diff-write`) | 12/13 | 1 |
+| DOCX writer (`diff-write`) | 13/13 | 0 — was 1 until 2026-10-05 |
 
 Every path below is the harness's own `MISMATCH … at <path>` line. Repro
 for the whole set:
@@ -381,7 +381,7 @@ cannot be made to hang is the worse trade.
 |---|---|---|---|
 | GFM reader (spec) | example 98 (Setext headings) | `/blocks` (2 vs 0) | `---\n---\n` is an empty YAML metadata block to pandoc's `gfm` and two `HorizontalRule`s here; YAML metadata is a pandoc extension the GFM specification does not define — *deliberate*, `COMPATIBILITY.md` "GFM" |
 | DOCX reader (LO) | `corpus/docx-libreoffice/minutes.docx` | `/blocks/7/c` (one side only) | LibreOffice writes a horizontal rule as a paragraph with nothing but a bottom border; ferrodoc reads `HorizontalRule`, pandoc reads nothing — *deliberate* |
-| DOCX writer | `corpus/nested-structures.md` | `/blocks/1/c/0` (1 vs 3) | a quotation nested in a way the DOCX round trip does not preserve |
+| DOCX writer | `corpus/nested-structures.md` | `/blocks/1/c/0` (1 vs 3) | **fixed 2026-10-05** — a list inside a quote inside a list item was written at `w:ilvl` 0 and read back as a separate list; pandoc writes 1 |
 
 ---
 
