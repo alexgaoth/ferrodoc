@@ -43,7 +43,7 @@ cargo run -p ferrodoc-harness -- diff-spec      corpus/commonmark-spec-0.31.2.js
 cargo run -p ferrodoc-harness -- diff-ast       corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html      corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx      corpus/docx --fail-under 100
-cargo run -p ferrodoc-harness -- diff-write     corpus --fail-under 90
+cargo run -p ferrodoc-harness -- diff-write     corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt --fail-under 94
 cargo run -p ferrodoc-harness -- diff-odt       corpus/odt-libreoffice --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100
@@ -64,7 +64,7 @@ cargo run -p ferrodoc-harness -- diff-html-read corpus/commonmark-spec-0.31.2.js
 | `diff-html` | HTML writer produces pandoc's HTML | **652/652** |
 | `diff-docx` | DOCX reader produces pandoc's AST | **37/37** |
 | `diff-docx` (LibreOffice) | ...on documents *another* writer produced | **7/8** |
-| `diff-write` | DOCX writer survives a round trip through pandoc | **12/13** |
+| `diff-write` | DOCX writer survives a round trip through pandoc | **13/13** |
 | `diff-odt` | ODT reader produces pandoc's AST | **32/34** |
 | `diff-odt` (LibreOffice) | ...on documents *another* writer produced | **8/8** |
 | `diff-odt-write` | ODT writer survives a round trip through pandoc | **13/13** |
@@ -231,10 +231,14 @@ ferrodoc reads it as `HorizontalRule` where pandoc reads nothing at all.
 The rule is narrow — the paragraph must have no content beyond that single
 border — so a paragraph merely styled with an underline is not affected.
 
-### DOCX writer — 1 corpus document, and two categories
+### DOCX writer — every corpus document, and two categories
 
-- `corpus/nested-structures.md`: a quotation nested in a way the round trip
-  does not preserve.
+`corpus/nested-structures.md` was the one miss until 2026-10-05: a list
+inside a quote inside a list item was written at `w:ilvl` 0, back at the
+margin, and read back as a list of its own. It is one level deeper now,
+as pandoc writes it; a list in a table cell or a footnote still starts at
+0, as pandoc's does.
+
 - **Raw blocks** are dropped: OOXML has no equivalent.
 - **Images** embed as PNG, JPEG, GIF, WebP, TIFF, SVG, EMF and WMF. A
   format not in that list — BMP among them — falls back to alt text rather
@@ -2662,7 +2666,9 @@ the line after it is not blank, and a later line is exactly `---` or
 **What the dialect costs is measured, and it is most of the drop-in
 number.** `scripts/dropin.sh --attribute` retries every miss with one of
 pandoc's own features neutralised at a time and names the smallest set
-that makes the two agree. On the 38 misses in 48 real command lines:
+that makes the two agree. On the 38 misses in 48 real command lines, as
+measured when this section was written (today there is one miss, the
+`dropin-006` row below):
 
 | what one change would fix the row | rows |
 |---|---|

@@ -19,14 +19,14 @@ Any other language with an FFI links the C ABI in
 > `./scripts/dropin.sh` runs 48 real pandoc command lines — collected
 > from public Makefiles and CI files — through both binaries and compares
 > every byte: **47/48 identical**, with 0 refused for a missing flag. The
-> remaining 15 rows are classified by the gate: **8 are deliberate and 7
-> are implementation work**. Seven of the eight are one thing — a
-> standalone page's highlighting stylesheet, which pandoc takes from
-> skylighting's style set and this cannot use — and the gate *computes*
-> that classification per run rather than reading a list of row numbers,
-> so a row that starts differing for a second reason is counted as work
-> again. The bet here is the *library*, not a claim of general
-> command-line replacement.
+> remaining row, `dropin-006`, is **deliberate**: the LaTeX writer sets an
+> ordered list's counter before its label, because pandoc's order loses a
+> list's start value when pandoc reads its own output back
+> ([`COMPATIBILITY.md`](COMPATIBILITY.md) has the measurement). Every
+> other miss the gate finds is counted as work, and the one classification
+> it *computes* rather than lists — a difference confined to a page's
+> `<style>` — has matched nothing since 2026-08-31. The bet here is the
+> *library*, not a claim of general command-line replacement.
 
 ## Why you would switch
 
@@ -168,7 +168,7 @@ cargo run -p ferrodoc-harness -- diff-ast   corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-html  corpus/commonmark-spec-0.31.2.json --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx --fail-under 100
 cargo run -p ferrodoc-harness -- diff-docx  corpus/docx-libreoffice --fail-under 87
-cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 90
+cargo run -p ferrodoc-harness -- diff-write corpus --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt   corpus/odt --fail-under 94
 cargo run -p ferrodoc-harness -- diff-odt   corpus/odt-libreoffice --fail-under 100
 cargo run -p ferrodoc-harness -- diff-odt-write corpus --fail-under 100

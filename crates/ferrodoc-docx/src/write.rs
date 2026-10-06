@@ -271,6 +271,12 @@ struct Writer<'a> {
     /// After one paragraph takes it, it becomes the blank continuation
     /// marker, so later paragraphs of the same item stay in that item.
     numbering: Option<(usize, usize)>,
+    /// The level of the list being rendered, if any. A list met anywhere
+    /// inside one of its items — in a quote, a div, a quote in a quote —
+    /// sits one level deeper, not back at the margin: `w:ilvl` is the only
+    /// thing in the file that says it is nested, and pandoc counts it that
+    /// way.
+    list_level: Option<usize>,
     /// Justification forced on paragraphs (table cells carry the column's).
     justification: Option<&'static str>,
 }
@@ -284,6 +290,7 @@ impl Default for Writer<'_> {
             footnotes: Vec::new(),
             style_override: None,
             numbering: None,
+            list_level: None,
             justification: None,
         }
     }
@@ -363,8 +370,10 @@ impl Writer<'_> {
                 }
                 self.emit_paragraph(Some("SourceCode"), "", &runs)
             }
-            Block::BulletList(items) => self.list_blocks(items, None, 0),
-            Block::OrderedList(attrs, items) => self.list_blocks(items, Some(attrs), 0),
+            Block::BulletList(items) => self.list_blocks(items, None, self.nested_level()),
+            Block::OrderedList(attrs, items) => {
+                self.list_blocks(items, Some(attrs), self.nested_level())
+            }
             Block::DefinitionList(items) => {
                 let mut out = String::new();
                 for (term, definitions) in items {
@@ -381,7 +390,7 @@ impl Writer<'_> {
                 "<w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr>",
                 "",
             ),
-            Block::Table(table) => self.without_numbering(|w| w.table(table)),
+            Block::Table(table) => self.at_margin(|w| w.table(table)),
             Block::Figure(_, caption, blocks) => {
                 // The figure's own paragraphs carry `CaptionedFigure`, not
                 // the ordinary body style. Pandoc's reader keys the pair on
@@ -481,6 +490,17 @@ impl Writer<'_> {
         out
     }
 
+    /// Render somewhere that starts its own margin — a table cell, a
+    /// footnote — outside any enclosing list: no marker to take, and a
+    /// list inside starts at level 0, which is where pandoc puts it even
+    /// when the table or the note reference sits in a list item.
+    fn at_margin(&mut self, body: impl FnOnce(&mut Self) -> String) -> String {
+        let outer_level = self.list_level.take();
+        let out = self.without_numbering(body);
+        self.list_level = outer_level;
+        out
+    }
+
     fn caption_paragraphs(&mut self, caption: &Caption, style: &str) -> String {
         caption
             .blocks
@@ -529,6 +549,7 @@ impl Writer<'_> {
         };
         let num_id = self.list(definition);
         let outer = self.numbering;
+        let outer_level = self.list_level.replace(level);
         let mut out = String::new();
         for item in items {
             // The item's first paragraph takes the marker; `paragraph`
@@ -550,7 +571,14 @@ impl Writer<'_> {
             }
         }
         self.numbering = outer;
+        self.list_level = outer_level;
         out
+    }
+
+    /// The level a list starts at here: the margin, or one deeper than the
+    /// list whose item this is.
+    fn nested_level(&self) -> usize {
+        self.list_level.map_or(0, |level| level + 1)
     }
 
     // --- tables ---
@@ -762,8 +790,7 @@ impl Writer<'_> {
                     .unwrap_or_else(|| nested(self, alt, style))
             }
             Inline::Note(blocks) => {
-                let body = self
-                    .without_numbering(|w| w.with_style("FootnoteText", |w| w.blocks(blocks)));
+                let body = self.at_margin(|w| w.with_style("FootnoteText", |w| w.blocks(blocks)));
                 self.footnotes.push(body);
                 let id = FOOTNOTE_BASE + self.footnotes.len() - 1;
                 format!(
@@ -1763,6 +1790,50 @@ mod tests {
         let doc = Pandoc { blocks: vec![image(Vec::new())], ..Pandoc::default() };
         let back = read_docx(&write_docx(&doc).expect("writes")).expect("reads back");
         assert_eq!(back.blocks, vec![Block::Para(vec![Inline::Str("alt".to_owned())])]);
+    }
+
+    /// `w:ilvl` of every numbered paragraph in one part, in order.
+    fn list_levels(bytes: &[u8], part: &str) -> String {
+        use std::io::Read as _;
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("a zip");
+        let mut xml = String::new();
+        archive.by_name(part).expect("the part").read_to_string(&mut xml).expect("utf-8");
+        xml.split("<w:ilvl w:val=\"")
+            .skip(1)
+            .filter_map(|rest| rest.chars().next())
+            .collect()
+    }
+
+    /// A list inside a quote inside a list item is nested, and `w:ilvl`
+    /// is the only thing in the file that says so. It was written at 0 —
+    /// back at the margin, beside the outer item rather than under it —
+    /// because only a list *directly* in an item counted as one level
+    /// deeper. Pandoc writes 1, and reads 0 back as a separate list, which
+    /// is the `corpus/nested-structures.md` miss `diff-write` carried.
+    #[test]
+    fn a_list_inside_a_quote_inside_a_list_item_is_nested() {
+        let words = |s: &str| vec![Inline::Str(s.to_owned())];
+        let quoted = Block::BlockQuote(vec![
+            Block::Para(words("quote")),
+            Block::BulletList(vec![vec![Block::Plain(words("a"))], vec![Block::Plain(words("b"))]]),
+        ]);
+        let doc = Pandoc::new(vec![Block::BulletList(vec![vec![Block::Para(words("item")), quoted]])]);
+        let bytes = write_docx(&doc).expect("writes");
+        // item, quote (the item's continuation), then a and b one deeper.
+        assert_eq!(list_levels(&bytes, "word/document.xml"), "0011");
+    }
+
+    /// A footnote starts its own margin, as pandoc's does: a list in the
+    /// note is at level 0 though the reference sits in a list item.
+    #[test]
+    fn a_list_in_a_footnote_starts_at_the_margin() {
+        let words = |s: &str| vec![Inline::Str(s.to_owned())];
+        let note = Inline::Note(vec![Block::BulletList(vec![vec![Block::Plain(words("in note"))]])]);
+        let item = vec![Block::Para(vec![Inline::Str("item".to_owned()), note])];
+        let doc = Pandoc::new(vec![Block::BulletList(vec![item])]);
+        let bytes = write_docx(&doc).expect("writes");
+        assert_eq!(list_levels(&bytes, "word/document.xml"), "0");
+        assert_eq!(list_levels(&bytes, "word/footnotes.xml"), "0");
     }
 
     #[test]

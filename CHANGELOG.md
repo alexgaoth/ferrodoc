@@ -12,6 +12,15 @@ break published without its note is a break twice.
 
 ### Fixed
 
+**A list inside a quote inside a list item is nested in DOCX.** The DOCX
+writer counted a list one level deeper only when it sat *directly* in an
+item; met anywhere else inside one — a quote, a div, a quote in a quote —
+it went back to `w:ilvl` 0, so Word showed it at the margin beside the
+outer item, and pandoc read it back as a separate list. It now takes the
+enclosing list's level plus one, as pandoc's writer does, while a list in
+a table cell or a footnote still starts at 0, as pandoc's does too.
+`diff-write` goes 12/13 → 13/13 and the DOCX read-back 15/17 → 16/17.
+
 **An empty `<code></code>` no longer reaches markdown as two backticks.**
 The HTML reader turned an empty `code`, `tt`, `samp` or `var` into
 `Code ""`, and every markdown writer — pandoc's too — spells that as
