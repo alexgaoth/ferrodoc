@@ -97,7 +97,7 @@ docs=(corpus/*.md README.md COMPATIBILITY.md ROADMAP.md docs/*.md samples/README
 floor_for() {
     case "$1" in
         odt)   echo 16 ;;
-        docx)  echo 14 ;;
+        docx)  echo 15 ;;
         ipynb) echo 11 ;;
         # Every book differs on `dc:title`, which this writes always and
         # pandoc omits — `epubcheck` rejects pandoc's book for exactly
@@ -143,7 +143,7 @@ for format in docx odt epub ipynb; do
         # Without saying so, every document with a picture measured that
         # difference instead of the writer: pandoc found none of
         # `corpus/images.md`'s and wrote a book with no frames in it.
-        ( ulimit -v 6000000 2>/dev/null
+        ( ulimit -v 6000000 2>/dev/null || true
           pandoc "$doc" -f commonmark --resource-path="$(dirname "$doc")" \
               -o "$work/p.$format" ) 2>/dev/null
         # **`-f commonmark`, spelled out.** pandoc above is given
@@ -162,7 +162,7 @@ for format in docx odt epub ipynb; do
             continue
         fi
         for side in p f; do
-            ( ulimit -v 6000000 2>/dev/null; pandoc "$work/$side.$format" -t json ) 2>/dev/null \
+            ( ulimit -v 6000000 2>/dev/null || true; pandoc "$work/$side.$format" -t json ) 2>/dev/null \
                 | python3 "$work/norm.py" > "$work/$side.json" 2>/dev/null
         done
         if [ -s "$work/p.json" ] && diff -q "$work/p.json" "$work/f.json" >/dev/null 2>&1; then

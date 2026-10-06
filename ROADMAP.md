@@ -116,8 +116,11 @@ this user notice". `scripts/dropin.sh` does, and **its number today is
 - one published number, `N/M command lines identical`, with every miss
   classified as *fixable*, *deliberate*, or *out of surface*.
 
-The current 15 misses are eight deliberate divergences and seven implementation
-gaps.
+The current miss is one deliberate divergence, `dropin-006`, and there are
+no implementation gaps (re-measured 2026-10-05). The "15 misses — eight
+deliberate, seven gaps" that stood here was the count before the vendored
+highlighting stylesheet (2026-08-31) and the fixes after it, and had
+outlived them.
 That means ferrodoc is ready to be described as compatible with the named,
 passing commands, but **not** as a general pandoc replacement.
 
